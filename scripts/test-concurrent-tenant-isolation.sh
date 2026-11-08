@@ -90,6 +90,7 @@ run_worker() {
         echo "FAIL: $tenant worker $i expected '$expected' but received '$actual'" >&2
         exit 1
       fi
+      touch "$WORK_DIR/${tenant}_${i}.pass"
       echo "$tenant worker $i PASS"
     ) &
   done
@@ -102,8 +103,10 @@ run_worker tenant_b "$token_b" tenant-b-password
 wait
 count_a="$(find "$WORK_DIR" -maxdepth 1 -name 'tenant_a_*.out' | wc -l | tr -d ' ')"
 count_b="$(find "$WORK_DIR" -maxdepth 1 -name 'tenant_b_*.out' | wc -l | tr -d ' ')"
+pass_count="$(find "$WORK_DIR" -maxdepth 1 -name '*.pass' | wc -l | tr -d ' ')"
 test "$count_a" -eq 10
 test "$count_b" -eq 10
+test "$pass_count" -eq 20
 
 echo "PASS: all 20 concurrent client sessions returned the correct tenant-specific PostgreSQL role and only that tenant's row."
 echo "Concurrency tested: 10 simultaneous Tenant A clients + 10 simultaneous Tenant B clients."
