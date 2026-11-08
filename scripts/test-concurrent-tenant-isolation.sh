@@ -82,7 +82,7 @@ run_worker() {
       PGPASSWORD="$password" PGOPTIONS="-c proxima_tenant_token=$token" \
         psql -X -A -t -v ON_ERROR_STOP=1 \
           "host=127.0.0.1 port=6432 dbname=appdb user=proxima sslmode=disable" \
-          -c "WITH pause AS (SELECT pg_sleep(0.25)) SELECT current_user || '|' || string_agg(secret, ',' ORDER BY secret) FROM concurrency_tenant_test.records, pause" \
+          -c "WITH pause AS (SELECT pg_sleep(0.25)) SELECT current_user || '|' || string_agg(secret, ',' ORDER BY secret) FROM concurrency_tenant_test.records, pause GROUP BY current_user" \
           >"$WORK_DIR/${tenant}_${i}.out" 2>"$WORK_DIR/${tenant}_${i}.err"
       actual="$(tr -d '\r\n' <"$WORK_DIR/${tenant}_${i}.out")"
       expected="${expected_role}|${expected_secret}"
