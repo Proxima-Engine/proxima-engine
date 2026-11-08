@@ -39,28 +39,28 @@ wait_for_engine
 
 # Create the least-privilege tenant role used by this test.
 "${COMPOSE[@]}" exec -T postgres psql -v ON_ERROR_STOP=1 -U proxima -d appdb <<'SQL'
-DROP ROLE IF EXISTS proxima_tenant_tenant_auth;
-CREATE ROLE proxima_tenant_tenant_auth LOGIN PASSWORD 'tenant-auth-password'
+DROP ROLE IF EXISTS proxima_tenant_tenant_a;
+CREATE ROLE proxima_tenant_tenant_a LOGIN PASSWORD 'tenant-a-password'
   NOSUPERUSER NOBYPASSRLS;
 SQL
 
 run_with_token() {
   local token="$1"
-  PGPASSWORD='tenant-auth-password' PGOPTIONS="-c proxima_tenant_token=$token" \
+  PGPASSWORD='tenant-a-password' PGOPTIONS="-c proxima_tenant_token=$token" \
     psql -X -A -t -v ON_ERROR_STOP=1 \
       "host=127.0.0.1 port=6432 dbname=appdb user=proxima sslmode=disable" \
       -c "SELECT current_user"
 }
 
 run_without_token() {
-  PGPASSWORD='tenant-auth-password' PGOPTIONS='' \
+  PGPASSWORD='tenant-a-password' PGOPTIONS='' \
     psql -X -A -t -v ON_ERROR_STOP=1 \
       "host=127.0.0.1 port=6432 dbname=appdb user=proxima sslmode=disable" \
       -c "SELECT 1"
 }
 
-valid_token="$(python3 scripts/agata.py token --tenant tenant_auth --ttl 600)"
-expected_role="proxima_tenant_tenant_auth"
+valid_token="$(python3 scripts/agata.py token --tenant tenant_a --ttl 600)"
+expected_role="proxima_tenant_tenant_a"
 
 # 1. Valid signed token must authenticate and map to the expected role.
 actual_role="$(run_with_token "$valid_token")"
@@ -98,7 +98,7 @@ echo "PASS: tampered tenant-token signature was rejected."
 
 # 5. A validly signed token with a one-second lifetime must be rejected
 # after its expiry time has passed.
-expired_token="$(python3 scripts/agata.py token --tenant tenant_auth --ttl 1)"
+expired_token="$(python3 scripts/agata.py token --tenant tenant_a --ttl 1)"
 sleep 2
 if run_with_token "$expired_token" >/dev/null 2>&1; then
   echo "FAIL: expired tenant token was accepted." >&2
