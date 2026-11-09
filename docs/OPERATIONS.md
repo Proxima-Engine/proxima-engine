@@ -51,6 +51,19 @@ For a native process, inspect the startup terminal for configuration errors, ups
 | Status endpoint returns 404 | Wrong path or listener | Use the routes in [API reference](API.md) |
 | No attestation records | Attestation settings or signing credential are incomplete | Check the signing key, `PROXIMA_ATTESTATION_P99_OVERHEAD_MS`, and ledger path |
 
+## Hosted Cloud signup: email or organization already exists
+
+This section applies to signup for the hosted Agata Proxima Cloud account. It does not describe a Proxima Engine connection or tenant-token failure.
+
+First identify which signup field the error names. An account email address and an organization/workspace identifier are separate records with separate uniqueness rules:
+
+- **Email address already exists:** The address is already registered to an account. Use **Sign in** with that email address, or use the password-reset flow if the password is unavailable. Creating another account with a different display name will not make the registered email available again.
+- **Organization or workspace already exists:** The organization/workspace identifier is already in use. Signup is attempting to create a new organization; it is not automatically adding the account to the existing one. Sign in with an account that already belongs to that organization, or ask its owner/admin to invite your email address through the team or invitation settings.
+- **Personal display name:** A display name is not the organization identifier and does not need to be unique. Changing the display name will not resolve an email or organization-identifier conflict.
+- **Creating a separate organization:** Choose a distinct organization/workspace identifier (slug). The organization name shown to people and the unique identifier used by the system are not interchangeable.
+
+A successful verification email confirms the email-verification step; it does not grant membership in an existing organization or make an already-used organization identifier available. Avoid repeatedly retrying with random email addresses. If the message does not identify the conflicting field, record the exact error text and time, plus any request ID shown by the application. Remove personal data, tokens, and other secrets before sharing diagnostic details with support.
+
 ## Persistence and restart
 
 The Engine stores attestation records, node identity, and emergency-token replay markers on disk. In containers, mount a persistent restricted volume at `/var/lib/proxima`. Preserve that volume during ordinary restarts.
