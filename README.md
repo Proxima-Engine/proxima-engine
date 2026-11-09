@@ -19,6 +19,18 @@
 
 **Technical guides:** [Architecture](docs/ARCHITECTURE.md) · [Tenant isolation](docs/TENANT_ISOLATION.md) · [Driver integrations](docs/INTEGRATIONS.md) · [API and metrics](docs/API.md) · [Security](docs/SECURITY.md) · [Deployment](docs/DEPLOYMENT.md) · [Verification](docs/VERIFICATION.md)
 
+
+
+## Watch: Zero-Trust Tenant Isolation in Action
+
+**Proxima Engine enforces tenant identity at the PostgreSQL proxy boundary.** This recorded engineering demonstration shows the Engine under real database and connection-pooling conditions—not a product mock-up.
+
+The walkthrough covers PgBouncer transaction pooling, deliberately misconfigured Row-Level Security scenarios, 1,000 distinct tenant identities with up to 50 concurrent clients, signed-token validation, and Engine recovery.
+
+**Watch the full demonstration:**
+
+https://github.com/user-attachments/assets/bca488eb-829c-4672-bbe9-b25878e5401c
+
 ---
 
 ## What is Agata Proxima?
