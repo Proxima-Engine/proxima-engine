@@ -79,7 +79,31 @@ The test uses an isolated Compose project and removes its own containers and vol
 
 The recorded [PgBouncer evidence](../evidence/pgbouncer-transaction-pooling.txt) contains the earlier local execution environment and observed backend PID values.
 
-## 4. Verify local HTTP surfaces
+## 4. Engineering validation: pooling, tenant scale, authentication, and recovery
+
+The completed [engineering case study](ENGINEERING_CASE_STUDY.md) records the observed results and the [published validation evidence](../evidence/engineering-validation-2026-11-09.md) contains the run summaries.
+
+Run the repeatable suites from the repository root:
+
+```bash
+bash scripts/test-pgbouncer-pooling.sh
+bash scripts/test-concurrent-tenant-isolation.sh
+bash scripts/test-auth-recovery.sh
+```
+
+The completed runs verified:
+
+- PgBouncer transaction pooling reused each tenant role's backend, maintained separate tenant-role pools, denied cross-tenant reads and writes, and rejected missing or invalid tenant context.
+- 100 of 100 tenant checks passed with at most 25 concurrent client processes.
+- 1,000 of 1,000 tenant checks passed with at most 50 concurrent client processes; every tenant resolved to its expected PostgreSQL role and exactly its own protected row.
+- Valid signed tenant context authenticated; missing, malformed, tampered, and expired tokens were rejected.
+- After Engine restart, a still-valid token authenticated and an expired token remained rejected.
+
+The RLS policy and role-attribute scenarios in the case study were executed against an isolated disposable database. Removing the tenant policy failed closed; a deliberately permissive policy and a mapped role with `BYPASSRLS` reproduced cross-tenant exposure; restoring the strict policy and `NOBYPASSRLS` restored the tenant row boundary.
+
+The authentication/recovery test connected directly to the Engine endpoint. The PgBouncer path is verified separately by the pooling suite.
+
+## 5. Verify local HTTP surfaces
 
 With the [Quickstart](QUICKSTART.md) stack running:
 
@@ -91,7 +115,7 @@ curl -fsS http://127.0.0.1:9090/metrics
 
 Then run a SQL query through port 6432. Health confirms that the HTTP handler responds; the SQL query exercises the PostgreSQL protocol path.
 
-## 5. Verify an attestation ledger
+## 6. Verify an attestation ledger
 
 The verifier checks the local hash-linked ledger and validates its signatures. Supply the same signing key, organization ID, and node ID used when records were created. The CLI reads the configured ledger path; it does not automatically extract credentials from the Engine identity JSON file.
 
@@ -109,7 +133,7 @@ cargo run -p proxima-engine --bin proxima-attest-verify
 
 Configure the signing credential and required attestation settings before expecting records. See [Configuration](CONFIGURATION.md).
 
-## 6. Generate an emergency token
+## 7. Generate an emergency token
 
 The command-line tool issues a short-lived signed break-glass token for a tenant:
 
@@ -120,7 +144,7 @@ cargo run -p proxima-engine --bin proxima-break-glass-token -- tenant_a 300
 
 The maximum lifetime is 900 seconds (15 minutes). The Engine records used nonces in its replay directory and rejects token reuse. Keep generated tokens private and out of logs.
 
-## 7. CI workflow
+## 8. CI workflow
 
 The [Rust CI workflow](https://github.com/Agata-Proxima/proxima-engine/actions/workflows/ci.yml) runs on pushes to `main` and pull requests targeting `main`. It provisions PostgreSQL 17, runs the Python CLI tests, executes `cargo test -p proxima-engine`, builds the release binary, runs the two-tenant acceptance script, builds the Docker image, and runs the PgBouncer tenant-pool integration test.
 

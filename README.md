@@ -31,6 +31,8 @@ The walkthrough covers PgBouncer transaction pooling, deliberately misconfigured
 
 https://github.com/user-attachments/assets/bca488eb-829c-4672-bbe9-b25878e5401c
 
+**Read the engineering case study:** [Tenant isolation, PgBouncer pooling, 1,000-identity validation, RLS scenarios, and Engine recovery](docs/ENGINEERING_CASE_STUDY.md) · [Recorded validation evidence](evidence/engineering-validation-2026-11-09.md)
+
 ---
 
 ## What is Agata Proxima?
@@ -129,6 +131,7 @@ See [Tenant isolation](docs/TENANT_ISOLATION.md), [Verification](docs/VERIFICATI
 | [Node enrollment](docs/NODE_ENROLLMENT.md) | Engine-side node identity and enrollment contract |
 | [Deployment](docs/DEPLOYMENT.md) | Container build, TLS, networking, persistence, and deployment configuration |
 | [Operations](docs/OPERATIONS.md) | Health checks, logs, monitoring, recovery, and troubleshooting |
+| [Engineering case study](docs/ENGINEERING_CASE_STUDY.md) | Executed tenant-isolation, RLS, PgBouncer, concurrency, authentication, and recovery results |
 | [Verification](docs/VERIFICATION.md) | Rust tests, PostgreSQL integration tests, CI, and evidence verification |
 | [Security model](docs/SECURITY.md) | Implemented controls and the configuration required to operate them |
 | [Developer security walkthrough](docs/DEVELOPER_SECURITY_DEMO.md) | Reproduce positive and negative tenant-access scenarios |
