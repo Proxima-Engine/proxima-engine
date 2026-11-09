@@ -7,6 +7,7 @@ This is the complete technical guide to the public Rust data plane. Choose a tas
 - **[Quickstart](QUICKSTART.md)** — launch PostgreSQL and Proxima Engine, run a real SQL query, and inspect health and metrics.
 - **[Architecture](ARCHITECTURE.md)** — understand the request lifecycle, tenant identity, role routing, and system boundaries.
 - **[Tenant isolation](TENANT_ISOLATION.md)** — configure tenant roles and RLS, issue signed context, and run positive and negative access tests.
+- **[Engineering case study](ENGINEERING_CASE_STUDY.md)** — review executed PgBouncer, RLS, 1,000-identity, signed-token, and recovery validation.
 - **[Developer security walkthrough](DEVELOPER_SECURITY_DEMO.md)** — reproduce the tenant-access scenarios and review the recorded PgBouncer evidence.
 - **[Local developer mode](LOCAL_DEVELOPMENT.md)** — generate a local node identity and signed test tokens without a hosted account.
 - **[Engine CLI](CLI.md)** — use the bootstrap, token, diagnostic, and status commands.
@@ -20,6 +21,7 @@ This is the complete technical guide to the public Rust data plane. Choose a tas
 - [Container deployment](DEPLOYMENT.md) — image build, networking, TLS, persistence, and deployment checklist.
 - [Operations and troubleshooting](OPERATIONS.md) — health checks, logs, monitoring, restart, and recovery.
 - [Verification and test guide](VERIFICATION.md) — automated tests, PostgreSQL integration, CI, and signed evidence.
+- [Engineering validation evidence](../evidence/engineering-validation-2026-11-09.md) — recorded outputs from the completed local validation runs.
 
 ## Security and hosted product
 
