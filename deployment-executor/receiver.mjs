@@ -344,4 +344,4 @@ const server = createServer((req, res) => {
 
 server.requestTimeout = 360_000;
 server.headersTimeout = 365_000;
-server.listen(port, () => console.log(`Agata Proxima deployment executor listening on port ${port}`));
+server.listen(port, "127.0.0.1", () => console.log(`Agata Proxima deployment executor listening on 127.0.0.1:${port}`));
