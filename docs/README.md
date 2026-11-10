@@ -52,3 +52,11 @@ This is the complete technical guide to the public Rust data plane. Choose a tas
 ## Product boundary
 
 Proxima Engine is independently buildable and testable. A compatible control plane can issue node-enrollment credentials and receive optional signed evidence. The hosted Agata Proxima Cloud application is a separate product; its private management source and hosted account workflows are not part of this repository.
+
+## Customer installation packages
+
+- [Registered-node installation guide](NODE_ENROLLMENT.md) — Windows PowerShell and Linux Bash installer steps, required downloads, enrollment credentials, Docker networking, health verification, and lifecycle operations.
+- [Customer deployment executor](CUSTOMER_DEPLOYMENT_EXECUTOR.md) — signed deployment webhooks, executor credentials, approved releases, rollback, and customer-managed deployment operations.
+- [Windows customer installer](../install-customer.ps1) — PowerShell installer for Windows hosts running Docker Desktop/Linux containers.
+- [Linux customer installer](../install-customer.sh) — Bash installer for Linux hosts running Docker Engine and Compose v2.
+- [Customer Compose definition](../compose.customer.yaml) — the container deployment and mounted secret contract.
