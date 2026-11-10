@@ -165,7 +165,7 @@ Use [GitHub Issues](https://github.com/Agata-Proxima/proxima-engine/issues) for 
 
 ## Install a registered Engine node on Windows or Linux
 
-The customer-node installer supports Windows 10/11 and Windows Server hosts that run Docker Desktop or Docker Engine with **Linux containers** and Docker Compose v2. Windows users have a dedicated PowerShell installer; Linux users have a Bash installer. Both install the same Proxima Engine container and use the same signed enrollment and heartbeat protocol.
+The customer-node installer supports Windows 10/11 hosts running Docker Desktop with the WSL 2 backend, Linux containers, and Docker Compose v2. Windows users have a dedicated PowerShell installer; Linux users have a Bash installer. Both install the same Proxima Engine container and use the same signed enrollment and heartbeat protocol.
 
 ### Windows downloads
 
@@ -179,8 +179,7 @@ The customer-node installer supports Windows 10/11 and Windows Server hosts that
 
 ### Windows prerequisites
 
-- Windows 10/11 or Windows Server with a supported Docker installation.
-- Docker Desktop configured to use the WSL 2 backend and Linux containers, or Docker Engine with Compose v2 on the Windows host.
+- Windows 10/11 with Docker Desktop configured to use the WSL 2 backend and Linux containers.
 - Docker daemon running before installation.
 - The node-specific `.env` and both secret files from Node Management.
 - Network access from the Engine container to the configured PostgreSQL upstream and Agata Proxima HTTPS enrollment/heartbeat endpoints.
