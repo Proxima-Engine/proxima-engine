@@ -168,7 +168,7 @@ fn sign_node_heartbeat(
     runtime_status: &str,
 ) -> Result<String, hmac::digest::InvalidLength> {
     let canonical = format!(
-        "proxima-node-heartbeat-v1\\n{}\\n{}\\n{}\\n{}\\n{}",
+        "proxima-node-heartbeat-v1\n{}\n{}\n{}\n{}\n{}",
         node_id, organization_id, timestamp, version, runtime_status
     );
     let mut mac = hmac::Hmac::<Sha256>::new_from_slice(key)?;
