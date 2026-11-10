@@ -1167,8 +1167,8 @@ mod node_heartbeat_signature_tests {
     #[test]
     fn heartbeat_signature_is_deterministic_for_the_same_payload() {
         let key = [7u8; 32];
-        let first = sign_node_heartbeat(&key, "node-a", "org-a", 1_800_000_000, "0.1.0", "running").unwrap();
-        let second = sign_node_heartbeat(&key, "node-a", "org-a", 1_800_000_000, "0.1.0", "running").unwrap();
+        let first = sign_node_heartbeat(\n            &key, "node-a", "org-a", 1_800_000_000, "0.1.0", "running",\n        )\n        .unwrap();
+        let second = sign_node_heartbeat(\n            &key, "node-a", "org-a", 1_800_000_000, "0.1.0", "running",\n        )\n        .unwrap();
         assert_eq!(first, second);
         assert_eq!(first.len(), 64);
     }
@@ -1176,15 +1176,15 @@ mod node_heartbeat_signature_tests {
     #[test]
     fn heartbeat_signature_changes_when_signed_fields_change() {
         let key = [7u8; 32];
-        let baseline = sign_node_heartbeat(&key, "node-a", "org-a", 1_800_000_000, "0.1.0", "running").unwrap();
-        let other_node = sign_node_heartbeat(&key, "node-b", "org-a", 1_800_000_000, "0.1.0", "running").unwrap();
-        let other_time = sign_node_heartbeat(&key, "node-a", "org-a", 1_800_000_001, "0.1.0", "running").unwrap();
+        let baseline = sign_node_heartbeat(\n            &key, "node-a", "org-a", 1_800_000_000, "0.1.0", "running",\n        )\n        .unwrap();
+        let other_node = sign_node_heartbeat(\n            &key, "node-b", "org-a", 1_800_000_000, "0.1.0", "running",\n        )\n        .unwrap();
+        let other_time = sign_node_heartbeat(\n            &key, "node-a", "org-a", 1_800_000_001, "0.1.0", "running",\n        )\n        .unwrap();
         assert_ne!(baseline, other_node);
         assert_ne!(baseline, other_time);
     }
 
     #[test]
     fn heartbeat_signature_rejects_non_32_byte_key() {
-        assert!(sign_node_heartbeat(&[1u8; 31], "node-a", "org-a", 1, "0.1.0", "running").is_err());
+        assert!(sign_node_heartbeat(\n            &[1u8; 31], "node-a", "org-a", 1, "0.1.0", "running",\n        )\n        .is_err());
     }
 }
