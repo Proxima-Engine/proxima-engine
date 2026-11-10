@@ -15,7 +15,7 @@ for (const key of required) {
   if (!process.env[key]?.trim()) throw new Error(`Missing required environment variable: ${key}`);
 }
 
-const apiBase = process.env.AGATA_API_BASE_URL.replace(/\\/+$/, "");
+const apiBase = process.env.AGATA_API_BASE_URL.replace(/\/+$/, "");
 const apiKey = process.env.AGATA_API_KEY;
 const webhookSecret = process.env.AGATA_WEBHOOK_SIGNING_SECRET;
 const executorId = process.env.PROXIMA_DEPLOYMENT_EXECUTOR_ID;
@@ -219,7 +219,7 @@ async function executeDeployment(event, deliveryId) {
         version,
         evidence: { ...baseEvidence, health_check: true, check: desiredState === "running" ? "engine-healthz" : "container-stopped" },
       });
-      await saveState({
+      await saveState(stateFile, {
         ...state,
         last_known_good_version: version,
         completed: {
@@ -242,7 +242,7 @@ async function executeDeployment(event, deliveryId) {
               evidence: { ...baseEvidence, rollback_version: previousVersion, rollback_health_check: true, health_check: true },
               message: "The requested release failed its health check; the previous known-good release was restored.",
             });
-            await saveState({
+            await saveState(stateFile, {
               ...state,
               last_known_good_version: previousVersion,
               completed: {
@@ -263,7 +263,7 @@ async function executeDeployment(event, deliveryId) {
         message: String(rolloutError.message || rolloutError).slice(0, 900),
         evidence: { ...baseEvidence, health_check: false, rollback_attempted: Boolean(previousVersion) },
       });
-      await saveState({
+      await saveState(stateFile, {
         ...state,
         completed: {
           ...(state.completed || {}),
