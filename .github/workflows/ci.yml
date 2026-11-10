@@ -65,3 +65,24 @@ jobs:
         run: docker build -t proxima-engine:ci .
       - name: Verify PgBouncer tenant-pool isolation
         run: bash scripts/test-pgbouncer-pooling.sh
+
+
+  windows-installer:
+    name: Windows customer installer
+    runs-on: windows-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Parse Windows installer
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path "install-customer.ps1"), [ref]$tokens, [ref]$errors) > $null
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_ }
+            exit 1
+          }
+      - name: Execute Windows installer smoke test with Docker host simulation
+        shell: pwsh
+        run: ./tests/windows-installer-smoke.ps1
