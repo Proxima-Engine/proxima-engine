@@ -8,8 +8,8 @@ This reference executor connects Agata Proxima's signed deployment event to a cu
 2. Verifies the exact raw-body HMAC-SHA256 signature and five-minute timestamp window.
 3. Rejects events for a different node or a release version outside the customer's explicit allowlist.
 4. Sends the applying callback with a stable executor and execution ID.
-5. Pulls the requested versioned Engine image and applies the requested running or stopped state using fixed Docker Compose arguments. It never executes command text from a webhook.
-6. Checks the real container state. A running Engine must pass its local /healthz endpoint.
+5. Pulls the requested versioned Engine image and applies the requested state using fixed Docker Compose arguments. For `running`, it starts the Engine; for `stopped`, it stops and recreates the container without starting it, so the applied version matches the image configured for the next start. It never executes command text from a webhook.
+6. Checks the real container state. A running Engine must pass its local /healthz endpoint, and a stopped Engine must not appear among running services.
 7. Sends healthy only after the check passes. If a running rollout fails and a prior known-good release is recorded, it restores that release and reports rolled_back.
 8. Persists completed deployment IDs locally. It can recover from a lost local completion marker by inspecting the authoritative Control Plane deployment result before retrying side effects.
 
