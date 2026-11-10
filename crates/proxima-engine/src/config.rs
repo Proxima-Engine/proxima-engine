@@ -84,7 +84,7 @@ impl Config {
         };
         let tenant_signing_key = match tenant_signing_key_value {
             Some(value) if value.trim().is_empty() => None,
-            Some(value) if value.as_bytes().len() < 32 => {
+            Some(value) if value.len() < 32 => {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
                     "PROXIMA_TENANT_SIGNING_KEY or its secret file must contain at least 32 bytes",
