@@ -123,6 +123,8 @@ Set `PROXIMA_NODE_IDENTITY_PATH` to choose another path. The identity file conta
 
 The Engine reuses a valid saved identity on later starts, so the one-time enrollment token is needed only for the initial bootstrap. Use a separate identity path for each node.
 
+When the Engine has a registered node identity and a compatible heartbeat endpoint, it sends an HMAC-SHA256 signed liveness report every 30 seconds. The heartbeat uses the enrolled node signing key, is independent of the hourly attestation ledger, and does not assert tenant isolation. Fleet marks a node degraded after 90 seconds without a heartbeat and offline after five minutes. The control plane rejects stale, replayed, incorrectly signed, or revoked-node heartbeats.
+
 ## 6. Credential reference
 
 | Variable or file | Purpose | Handling |
