@@ -4,6 +4,7 @@ use bytes::{Buf, BytesMut};
 use std::io;
 use std::sync::Arc;
 
+use hmac::Mac;
 use proxima_engine::{
     attestation::{AttestationConfig, AttestationLedger, SecurityState, TelemetrySummary},
     break_glass,
@@ -394,6 +395,89 @@ async fn main() -> io::Result<()> {
             }
         });
     }
+    // Report signed liveness independently of the slower hourly attestation ledger.
+    // This updates Fleet health without turning enrollment into a health assertion.
+    let heartbeat_url = std::env::var("PROXIMA_NODE_HEARTBEAT_URL")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| {
+            std::env::var("PROXIMA_NODE_ENROLLMENT_URL")
+                .ok()
+                .map(|value| value.replace("/api/v1/nodes/enroll", "/api/v1/nodes/heartbeat"))
+        })
+        .or_else(|| {
+            std::env::var("PROXIMA_ATTESTATION_INGEST_URL")
+                .ok()
+                .map(|value| value.replace("/api/v1/attestations", "/api/v1/nodes/heartbeat"))
+        })
+        .filter(|url| attestation_ingest_url_allowed(url, allow_insecure_attestation_http));
+    let heartbeat_identity = (
+        std::env::var("PROXIMA_NODE_ID").ok(),
+        std::env::var("PROXIMA_ORGANIZATION_ID").ok(),
+        std::env::var("PROXIMA_NODE_SIGNING_KEY_HEX").ok(),
+    );
+    if let (Some(url), (Some(node_id), Some(organization_id), Some(key_hex))) =
+        (heartbeat_url, heartbeat_identity)
+    {
+        let signing_key = hex::decode(&key_hex).ok().filter(|key| key.len() == 32);
+        if let Some(signing_key) = signing_key {
+            let client = reqwest::Client::builder()
+                .redirect(reqwest::redirect::Policy::none())
+                .timeout(std::time::Duration::from_secs(8))
+                .build();
+            if let Ok(client) = client {
+                tokio::spawn(async move {
+                    let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
+                    loop {
+                        interval.tick().await;
+                        let timestamp = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|value| value.as_secs() as i64)
+                            .unwrap_or_default();
+                        let version = env!("CARGO_PKG_VERSION").to_string();
+                        let runtime_status = "running";
+                        let canonical = format!(
+                            "proxima-node-heartbeat-v1\n{}\n{}\n{}\n{}\n{}",
+                            node_id, organization_id, timestamp, version, runtime_status
+                        );
+                        let mut mac = match hmac::Hmac::<Sha256>::new_from_slice(&signing_key) {
+                            Ok(mac) => mac,
+                            Err(_) => {
+                                error!("could not initialize node heartbeat signature");
+                                continue;
+                            }
+                        };
+                        mac.update(canonical.as_bytes());
+                        let signature = hex::encode(mac.finalize().into_bytes());
+                        let payload = serde_json::json!({
+                            "node_id": node_id,
+                            "timestamp": timestamp,
+                            "version": version,
+                            "runtime_status": runtime_status,
+                            "signature": signature
+                        });
+                        match client.post(&url).json(&payload).send().await {
+                            Ok(response) if response.status().is_success() => {
+                                info!(node_id = %node_id, "signed node heartbeat accepted");
+                            }
+                            Ok(response) => {
+                                error!(node_id = %node_id, status = %response.status(), "node heartbeat rejected; retrying on next interval");
+                            }
+                            Err(error) => {
+                                error!(node_id = %node_id, %error, "node heartbeat delivery failed; retrying on next interval");
+                            }
+                        }
+                    }
+                });
+                info!("signed node heartbeat enabled; interval=30s");
+            }
+        } else {
+            error!("node heartbeat disabled because the enrolled signing key is invalid");
+        }
+    } else if std::env::var("PROXIMA_NODE_ID").is_ok() {
+        error!("node heartbeat is not configured: verify node identity and PROXIMA_NODE_HEARTBEAT_URL or enrollment URL");
+    }
+
     let attestation_config = AttestationConfig::from_env();
     let attestation_signing_ready = attestation_config.signing_key.is_some();
     let attestation_p99 = std::env::var("PROXIMA_ATTESTATION_P99_OVERHEAD_MS")
