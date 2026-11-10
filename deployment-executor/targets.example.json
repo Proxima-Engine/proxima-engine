@@ -1,0 +1,14 @@
+{
+  "00000000-0000-4000-8000-000000000001": {
+    "project_dir": "/opt/proxima/node-a",
+    "compose_file": "compose.customer.yaml",
+    "state_dir": "/var/lib/agata-deployment-executor/node-a",
+    "allowed_versions": ["0.1.0", "0.1.1"]
+  },
+  "00000000-0000-4000-8000-000000000002": {
+    "project_dir": "/opt/proxima/node-b",
+    "compose_file": "compose.customer.yaml",
+    "state_dir": "/var/lib/agata-deployment-executor/node-b",
+    "allowed_versions": ["0.1.0"]
+  }
+}
