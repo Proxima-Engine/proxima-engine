@@ -8,7 +8,8 @@ The Engine reads settings from its process environment. Defaults and validation 
 | --- | --- | --- |
 | `PROXIMA_LISTEN_ADDR` | `127.0.0.1:6432` | PostgreSQL client listener |
 | `PROXIMA_UPSTREAM_ADDR` | `127.0.0.1:5432` | PostgreSQL server address reachable by the Engine |
-| `PROXIMA_TENANT_SIGNING_KEY` | Unset | HMAC key for tenant tokens; at least 32 bytes. If absent, tenant-token enforcement is not enabled |
+| `PROXIMA_TENANT_SIGNING_KEY` | Unset | HMAC key for tenant tokens; at least 32 bytes. Prefer a secret file for customer deployments |
+| `PROXIMA_TENANT_SIGNING_KEY_FILE` | Unset | Path to a mounted secret file containing the tenant HMAC key; takes precedence over the direct environment variable |
 | `PROXIMA_TENANT_ROLE_PREFIX` | `proxima_tenant_` | Prefix for tenant PostgreSQL roles; ASCII letters, digits, and underscores only |
 | `PROXIMA_UPSTREAM_CONNECT_TIMEOUT_MS` | `10000` | Upstream connect timeout; must be positive |
 | `PROXIMA_MAX_CONNECTIONS` | `1024` | Maximum simultaneous client connections; must be positive |
