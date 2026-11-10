@@ -52,7 +52,7 @@ Set PROXIMA_DEPLOYMENT_TARGETS_FILE to this file in the executor environment. Ea
 
 ## Install
 
-Download this repository's ZIP and extract it on the same customer host that runs the Engine Compose project. Create a protected environment file for the executor. Do not commit it:
+Download this repository's ZIP and extract it to /opt/proxima on the same customer host that runs the Engine Compose project. This is the default path used by the customer Node setup and supplied systemd unit; if you choose another directory, update PROXIMA_DEPLOYMENT_PROJECT_DIR and the systemd WorkingDirectory/ExecStart paths accordingly. Create a protected environment file for the executor. Do not commit it:
 
 ```dotenv
 AGATA_API_BASE_URL=https://api.agataproxima.com
@@ -103,7 +103,7 @@ sudo useradd --system --create-home --shell /usr/sbin/nologin agata-deployer
 sudo usermod -aG docker agata-deployer
 sudo install -d -o root -g root -m 0700 /etc/agata
 sudo install -o root -g root -m 0600 deployment-executor.env /etc/agata/deployment-executor.env
-sudo install -o root -g root -m 0644 deployment-executor/agata-deployment-executor.service /etc/systemd/system/agata-deployment-executor.service
+sudo install -o root -g root -m 0644 /opt/proxima/deployment-executor/agata-deployment-executor.service /etc/systemd/system/agata-deployment-executor.service
 sudo systemctl daemon-reload
 sudo systemctl enable --now agata-deployment-executor
 sudo systemctl status agata-deployment-executor
