@@ -28,7 +28,7 @@ The Engine image is published by the tagged-release workflow. For a tag such as 
 
 One executor webhook is configured per organization. The reference executor can manage multiple registered Engine nodes when their Compose projects are on the same Docker host: configure a target map file and give each node its own project directory, Compose file, state directory and approved version list. For nodes on separate Docker hosts or clusters, use a customer-owned orchestrator/custom executor; this reference implementation does not manage remote Docker contexts.
 
-Example target map (save as targets.json):
+Copy [the multi-node target map template](../deployment-executor/targets.example.json) and replace its example UUIDs, paths and release allowlists with the customer's actual values. Each node must use a separate project directory so its Compose project name and persistent node identity volume remain isolated. Example target map (save as targets.json):
 
 ```json
 {
