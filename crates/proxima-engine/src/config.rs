@@ -78,16 +78,20 @@ impl Config {
             ));
         }
 
-        let tenant_signing_key = match env::var("PROXIMA_TENANT_SIGNING_KEY") {
-            Ok(value) if value.trim().is_empty() => None,
-            Ok(value) if value.len() < 32 => {
+        let tenant_signing_key_value = match env::var("PROXIMA_TENANT_SIGNING_KEY_FILE") {
+            Ok(path) => Some(std::fs::read_to_string(path)?.trim().to_owned()),
+            Err(_) => env::var("PROXIMA_TENANT_SIGNING_KEY").ok(),
+        };
+        let tenant_signing_key = match tenant_signing_key_value {
+            Some(value) if value.trim().is_empty() => None,
+            Some(value) if value.as_bytes().len() < 32 => {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
-                    "PROXIMA_TENANT_SIGNING_KEY must be at least 32 bytes",
+                    "PROXIMA_TENANT_SIGNING_KEY or its secret file must contain at least 32 bytes",
                 ))
             }
-            Ok(value) => Some(value),
-            Err(_) => None,
+            Some(value) => Some(value),
+            None => None,
         };
 
         let upstream_connect_timeout_ms = env::var("PROXIMA_UPSTREAM_CONNECT_TIMEOUT_MS")
@@ -241,6 +245,7 @@ mod tests {
             "PROXIMA_LISTEN_ADDR",
             "PROXIMA_UPSTREAM_ADDR",
             "PROXIMA_TENANT_SIGNING_KEY",
+            "PROXIMA_TENANT_SIGNING_KEY_FILE",
             "PROXIMA_UPSTREAM_CONNECT_TIMEOUT_MS",
             "PROXIMA_MAX_CONNECTIONS",
             "PROXIMA_TLS_CERT_FILE",
