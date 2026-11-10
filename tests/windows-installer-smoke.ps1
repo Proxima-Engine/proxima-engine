@@ -10,10 +10,10 @@ Set-Content -LiteralPath (Join-Path $tempRoot ".env") -Value ("PROXIMA_NODE_ID=0
 Set-Content -LiteralPath (Join-Path $tempRoot "secrets/node_enrollment_token") -Value "test-one-time-token" -NoNewline
 Set-Content -LiteralPath (Join-Path $tempRoot "secrets/tenant_signing_key") -Value "0123456789abcdef0123456789abcdef" -NoNewline
 
-$script:dockerCalls = [System.Collections.Generic.List[string]]::new()
-function docker {
+$global:dockerCalls = [System.Collections.Generic.List[string]]::new()
+function global:docker {
   $call = ($args | ForEach-Object { [string]$_ }) -join " "
-  $script:dockerCalls.Add($call)
+  $global:dockerCalls.Add($call)
   $global:LASTEXITCODE = 0
 
   if ($call -eq "info --format {{.OSType}}") { return "linux" }
@@ -38,7 +38,7 @@ try {
     "inspect --format {{.State.Health.Status}} test-engine-container"
   )
   foreach ($requiredCall in $requiredCalls) {
-    if (-not $script:dockerCalls.Contains($requiredCall)) {
+    if (-not $global:dockerCalls.Contains($requiredCall)) {
       throw "Windows installer did not perform required Docker operation: $requiredCall"
     }
   }
