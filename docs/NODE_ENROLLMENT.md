@@ -39,7 +39,43 @@ Keep the token in a protected terminal or secret store. Do not paste it into Git
 
 Use HTTPS for remote control-plane hosts. Loopback HTTP is reserved for local development.
 
-## 2. Configure the Engine — PowerShell
+## 2. One-command Docker installation (hosted Cloud)
+
+The hosted customer path uses the published Engine container. Docker and Docker Compose are required on the customer-managed host. The customer keeps PostgreSQL and its tenant signing key under their own control; Agata Proxima does not create or take ownership of the customer's database.
+
+1. Register a node in Agata Proxima Cloud and copy its one-time enrollment token.
+2. Download `compose.customer.yaml` from this repository and save it as `compose.yaml` in a protected directory.
+3. Create a `.env` file beside it with the values below. Do not commit this file.
+
+```dotenv
+PROXIMA_NODE_ID=<node-uuid>
+PROXIMA_NODE_ENROLLMENT_URL=https://api.agataproxima.com/api/v1/nodes/enroll
+PROXIMA_NODE_ENROLLMENT_TOKEN=<one-time-token>
+PROXIMA_UPSTREAM_ADDR=<customer-postgres-host>:5432
+PROXIMA_TENANT_SIGNING_KEY=<customer-generated-32-byte-or-longer-secret>
+PROXIMA_LISTEN_ADDR=0.0.0.0:6432
+```
+
+Generate a tenant signing key locally (never reuse the node enrollment token as this key):
+
+```bash
+openssl rand -hex 32
+```
+
+4. Start the Engine:
+
+```bash
+docker compose -f compose.yaml up -d
+docker compose -f compose.yaml logs -f engine
+```
+
+5. Confirm the container is healthy and the node appears as healthy in Fleet. The Engine redeems the one-time token, persists its node identity in the named Docker volume, and sends signed heartbeats every 30 seconds. No heartbeat cron job, custom webhook receiver, or customer-written enrollment code is required.
+
+For PowerShell, create the same `.env` file with a text editor and run the same Docker Compose commands. Protect the directory and volume because the persisted identity contains the node signing credential.
+
+The container listens on port 6432. Keep that port private to the application network or restrict it with the customer's firewall. Configure the application to connect to the Engine, not directly to PostgreSQL. The upstream address must be reachable from inside the container; `localhost` means the container itself, not the customer's host.
+
+## 3. Configure the Engine — PowerShell
 
 Replace the placeholders with the values issued for the node:
 
@@ -62,7 +98,7 @@ Remove the bootstrap token after enrollment:
 Remove-Item Env:PROXIMA_NODE_ENROLLMENT_TOKEN -ErrorAction SilentlyContinue
 ```
 
-## 3. Configure the Engine — Bash
+## 4. Configure the Engine — Bash
 
 ```bash
 export PROXIMA_NODE_ID="<node-uuid>"
@@ -76,7 +112,7 @@ unset PROXIMA_NODE_ENROLLMENT_TOKEN
 
 Set the values in the same process environment that starts the Engine. The Engine reads process environment variables; it does not automatically load a plain `.env` file.
 
-## 4. Persist and protect the identity
+## 5. Persist and protect the identity
 
 Default identity paths:
 
@@ -87,7 +123,7 @@ Set `PROXIMA_NODE_IDENTITY_PATH` to choose another path. The identity file conta
 
 The Engine reuses a valid saved identity on later starts, so the one-time enrollment token is needed only for the initial bootstrap. Use a separate identity path for each node.
 
-## 5. Credential reference
+## 6. Credential reference
 
 | Variable or file | Purpose | Handling |
 |---|---|---|
