@@ -246,7 +246,13 @@ async fn bootstrap_node_identity() -> Result<(), Box<dyn std::error::Error + Sen
     }
 
     let url = env::var("PROXIMA_NODE_ENROLLMENT_URL").ok();
-    let token = env::var("PROXIMA_NODE_ENROLLMENT_TOKEN").ok();
+    let enrollment_token_file = env::var_os("PROXIMA_NODE_ENROLLMENT_TOKEN_FILE")
+        .map(PathBuf::from);
+    let token = if let Some(path) = enrollment_token_file.as_ref() {
+        Some(fs::read_to_string(path)?.trim().to_owned())
+    } else {
+        env::var("PROXIMA_NODE_ENROLLMENT_TOKEN").ok()
+    };
     let node_id = env::var("PROXIMA_NODE_ID").ok();
 
     if url.is_none() && token.is_none() && node_id.is_none() {
@@ -291,7 +297,9 @@ async fn bootstrap_node_identity() -> Result<(), Box<dyn std::error::Error + Sen
     fs::rename(&temporary_path, &identity_path)?;
 
     apply_identity(&identity)?;
-    env::remove_var("PROXIMA_NODE_ENROLLMENT_TOKEN");
+    if enrollment_token_file.is_none() {
+        env::remove_var("PROXIMA_NODE_ENROLLMENT_TOKEN");
+    }
 
     eprintln!("Engine node identity loaded successfully.");
     Ok(())
