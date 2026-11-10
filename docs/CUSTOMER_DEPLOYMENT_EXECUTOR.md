@@ -106,7 +106,7 @@ The reverse proxy must preserve the raw request body and forward X-Agata-Signatu
 
 ## Configure Agata Proxima
 
-The recommended path is the guided setup in Deployments → Set up deployment executor. Select a healthy Engine node, enter the public HTTPS endpoint, executor identity, approved Engine versions and customer host paths. Agata Proxima creates the dedicated organization API key and signed deployment.created webhook, then returns a one-time deployment-executor.env file. Download it before leaving the result screen. If webhook creation fails after the API key is created, the wizard attempts to revoke the key.
+The recommended path is the guided setup in Deployments → Set up deployment executor. Select a healthy Engine node, enter the public HTTPS endpoint, executor identity, approved Engine versions and customer host paths. Agata Proxima creates a dedicated organization-scoped operator API key and signed deployment.created webhook, then returns a one-time deployment-executor.env file. The current API-key model grants operator-level organization access rather than deployment-only scopes; keep this key dedicated to the executor, store it as a protected secret, and revoke it when the executor is retired. Download it before leaving the result screen. If webhook creation fails after the API key is created, the wizard attempts to revoke the key.
 
 Manual setup is also available:
 1. Open Developer → API keys and create a dedicated write-capable key for the executor.
@@ -129,7 +129,7 @@ A failed running rollout attempts to restore the previous version only when that
 
 - This process can control Docker and therefore has high privilege on its host. Run it as a dedicated OS identity and restrict access to its environment file.
 - Access to the Docker socket or Docker group is effectively host-administrator access. Do not expose the Docker socket over TCP.
-- Keep the API key, webhook secret, and node identity separate. Rotate the API key and webhook secret independently.
+- Keep the API key, webhook secret, and node identity separate. The executor API key is an organization-scoped operator credential, so protect it accordingly. Rotate the API key and webhook secret independently.
 - Keep the executor state directory persistent and protected. It stores deployment IDs and release metadata, not API keys or webhook secrets.
 - The webhook receiver returns 503 when execution or callback delivery cannot be completed, allowing the Control Plane delivery queue to retry.
 - Test invalid signatures, duplicate delivery, image pull failure, health-check failure, rollback success and rollback failure in staging before production use.
