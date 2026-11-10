@@ -9,32 +9,51 @@ const required = [
   "AGATA_API_BASE_URL",
   "AGATA_API_KEY",
   "AGATA_WEBHOOK_SIGNING_SECRET",
-  "PROXIMA_NODE_ID",
   "PROXIMA_DEPLOYMENT_EXECUTOR_ID",
-  "PROXIMA_ENGINE_ALLOWLIST",
 ];
 for (const key of required) {
   if (!process.env[key]?.trim()) throw new Error(`Missing required environment variable: ${key}`);
 }
 
-const apiBase = process.env.AGATA_API_BASE_URL.replace(/\/+$/, "");
+const apiBase = process.env.AGATA_API_BASE_URL.replace(/\\/+$/, "");
 const apiKey = process.env.AGATA_API_KEY;
 const webhookSecret = process.env.AGATA_WEBHOOK_SIGNING_SECRET;
-const nodeId = process.env.PROXIMA_NODE_ID;
 const executorId = process.env.PROXIMA_DEPLOYMENT_EXECUTOR_ID;
-const allowedVersions = new Set(process.env.PROXIMA_ENGINE_ALLOWLIST.split(",").map((v) => v.trim()).filter(Boolean));
-const projectDir = path.resolve(process.env.PROXIMA_DEPLOYMENT_PROJECT_DIR || process.cwd());
-const composeFile = path.resolve(projectDir, process.env.PROXIMA_DEPLOYMENT_COMPOSE_FILE || "compose.customer.yaml");
-const stateDir = path.resolve(process.env.PROXIMA_DEPLOYMENT_STATE_DIR || path.join(projectDir, ".agata-deployments"));
-const stateFile = path.join(stateDir, "completed.json");
 const port = Number(process.env.PORT || 8789);
 const maxBody = 1024 * 1024;
 const inFlight = new Set();
+const defaultStateDir = path.resolve(process.env.PROXIMA_DEPLOYMENT_STATE_DIR || path.join(process.cwd(), ".agata-deployments"));
+const targets = new Map();
 
-if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("PORT must be a valid TCP port.");
-if (allowedVersions.size === 0 || [...allowedVersions].some((v) => !/^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$/.test(v))) {
-  throw new Error("PROXIMA_ENGINE_ALLOWLIST must contain explicit, valid Engine release tags.");
+if (process.env.PROXIMA_DEPLOYMENT_TARGETS_FILE?.trim()) {
+  const targetFile = path.resolve(process.env.PROXIMA_DEPLOYMENT_TARGETS_FILE);
+  const config = JSON.parse(await readFile(targetFile, "utf8"));
+  for (const [nodeId, value] of Object.entries(config)) {
+    if (!/^[0-9a-f-]{36}$/i.test(nodeId)) throw new Error(`Invalid node UUID in deployment target file: ${nodeId}`);
+    const projectDir = path.resolve(String(value.project_dir || ""));
+    const composePath = path.resolve(projectDir, String(value.compose_file || "compose.customer.yaml"));
+    const stateDir = path.resolve(String(value.state_dir || path.join(defaultStateDir, nodeId)));
+    const allowedVersions = new Set(Array.isArray(value.allowed_versions) ? value.allowed_versions.map(v => String(v).trim()).filter(Boolean) : []);
+    if (!value.project_dir || allowedVersions.size === 0 || [...allowedVersions].some(v => !/^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$/.test(v))) {
+      throw new Error(`Target ${nodeId} requires project_dir and an explicit allowed_versions array.`);
+    }
+    targets.set(nodeId, { projectDir, composeFile: composePath, stateDir, stateFile: path.join(stateDir, "completed.json"), allowedVersions });
+  }
+} else {
+  const nodeId = process.env.PROXIMA_NODE_ID;
+  const versions = (process.env.PROXIMA_ENGINE_ALLOWLIST || "").split(",").map(v => v.trim()).filter(Boolean);
+  if (!nodeId || !/^[0-9a-f-]{36}$/i.test(nodeId) || !versions.length) {
+    throw new Error("Set PROXIMA_DEPLOYMENT_TARGETS_FILE or configure PROXIMA_NODE_ID and PROXIMA_ENGINE_ALLOWLIST for a single-node executor.");
+  }
+  const projectDir = path.resolve(process.env.PROXIMA_DEPLOYMENT_PROJECT_DIR || process.cwd());
+  const composeFile = path.resolve(projectDir, process.env.PROXIMA_DEPLOYMENT_COMPOSE_FILE || "compose.customer.yaml");
+  const stateDir = path.resolve(process.env.PROXIMA_DEPLOYMENT_STATE_DIR || path.join(projectDir, ".agata-deployments"));
+  const allowedVersions = new Set(versions);
+  if ([...allowedVersions].some(v => !/^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$/.test(v))) throw new Error("PROXIMA_ENGINE_ALLOWLIST contains an invalid Engine release version.");
+  targets.set(nodeId, { projectDir, composeFile, stateDir, stateFile: path.join(stateDir, "completed.json"), allowedVersions });
 }
+if (targets.size === 0) throw new Error("At least one deployment target must be configured.");
+if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("PORT must be a valid TCP port.");
 if (new URL(apiBase).protocol !== "https:" && !["localhost", "127.0.0.1"].includes(new URL(apiBase).hostname)) {
   throw new Error("AGATA_API_BASE_URL must use HTTPS outside local development.");
 }
@@ -53,21 +72,21 @@ function verifySignature(rawBody, header) {
   return actual.length === expected.length && timingSafeEqual(actual, expected);
 }
 
-async function readState() {
+async function readState(stateFile) {
   try { return JSON.parse(await readFile(stateFile, "utf8")); }
   catch (error) { if (error.code === "ENOENT") return { completed: {} }; throw error; }
 }
 
-async function saveState(state) {
-  await mkdir(stateDir, { recursive: true, mode: 0o700 });
+async function saveState(stateFile, state) {
+  await mkdir(path.dirname(stateFile), { recursive: true, mode: 0o700 });
   const temporary = `${stateFile}.tmp`;
   await writeFile(temporary, JSON.stringify(state, null, 2), { mode: 0o600 });
   await rename(temporary, stateFile);
 }
 
-function docker(args, version) {
-  const result = spawnSync("docker", ["compose", "-f", composeFile, ...args], {
-    cwd: projectDir,
+function docker(target, args, version) {
+  const result = spawnSync("docker", ["compose", "-f", target.composeFile, ...args], {
+    cwd: target.projectDir,
     env: { ...process.env, PROXIMA_ENGINE_VERSION: version },
     encoding: "utf8",
     timeout: 120_000,
@@ -84,10 +103,10 @@ function docker(args, version) {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function waitForEngineHealth(version) {
+async function waitForEngineHealth(target, version) {
   for (let attempt = 0; attempt < 12; attempt += 1) {
     try {
-      docker(["exec", "-T", "engine", "curl", "-fsS", "http://127.0.0.1:9090/healthz"], version);
+      docker(target, ["exec", "-T", "engine", "curl", "-fsS", "http://127.0.0.1:9090/healthz"], version);
       return true;
     } catch {
       await sleep(5000);
@@ -133,11 +152,13 @@ async function executeDeployment(event, deliveryId) {
   const desiredState = String(data.desired_state || "");
 
   if (!/^[0-9a-f-]{36}$/i.test(deploymentId)) throw new Error("Deployment event has an invalid resource ID.");
-  if (targetNode !== nodeId) throw new Error("Deployment event targets a different Engine node.");
-  if (!allowedVersions.has(version)) throw new Error("Requested Engine version is not in PROXIMA_ENGINE_ALLOWLIST.");
+  const target = targets.get(targetNode);
+  if (!target) throw new Error("No customer deployment target is configured for this node ID.");
+  if (!target.allowedVersions.has(version)) throw new Error("Requested Engine version is not in this node target allowlist.");
   if (!["running", "stopped"].includes(desiredState)) throw new Error("This reference executor supports running and stopped states; draining requires a configured drain controller.");
 
-  const state = await readState();
+  const stateFile = target.stateFile;
+  const state = await readState(stateFile);
   if (state.completed[deploymentId]) return { accepted: true, duplicate: true };
   if (inFlight.has(deploymentId)) throw new Error("This deployment is already executing; retry the webhook delivery.");
   inFlight.add(deploymentId);
@@ -153,7 +174,7 @@ async function executeDeployment(event, deliveryId) {
       if (evidence.executor !== executorId || evidence.execution_id !== executionId) {
         throw new Error("Deployment already has a terminal result from a different executor.");
       }
-      await saveState({
+      await saveState(stateFile, {
         ...state,
         last_known_good_version: remote.applied_version || state.last_known_good_version,
         completed: {
@@ -175,19 +196,19 @@ async function executeDeployment(event, deliveryId) {
       evidence: baseEvidence,
     });
 
-    const previousVersion = state.last_known_good_version && allowedVersions.has(state.last_known_good_version)
+    const previousVersion = state.last_known_good_version && target.allowedVersions.has(state.last_known_good_version)
       ? state.last_known_good_version
       : null;
 
     try {
-      docker(["pull", "engine"], version);
+      docker(target, ["pull", "engine"], version);
       if (desiredState === "running") {
-        docker(["up", "-d", "engine"], version);
-        const healthy = await waitForEngineHealth(version);
+        docker(target, ["up", "-d", "engine"], version);
+        const healthy = await waitForEngineHealth(target, version);
         if (!healthy) throw new Error("Engine did not pass its local /healthz check after rollout.");
       } else {
-        docker(["stop", "engine"], version);
-        const runningServices = docker(["ps", "--status", "running", "--services"], version)
+        docker(target, ["stop", "engine"], version);
+        const runningServices = docker(target, ["ps", "--status", "running", "--services"], version)
           .split(/\r?\n/).filter(Boolean);
         if (runningServices.includes("engine")) throw new Error("Engine container is still running after the stop request.");
       }
@@ -210,9 +231,9 @@ async function executeDeployment(event, deliveryId) {
     } catch (rolloutError) {
       if (previousVersion && desiredState === "running") {
         try {
-          docker(["pull", "engine"], previousVersion);
-          docker(["up", "-d", "engine"], previousVersion);
-          const restored = await waitForEngineHealth(previousVersion);
+          docker(target, ["pull", "engine"], previousVersion);
+          docker(target, ["up", "-d", "engine"], previousVersion);
+          const restored = await waitForEngineHealth(target, previousVersion);
           if (restored) {
             await reportResult(deploymentId, {
               status: "rolled_back",
