@@ -58,7 +58,23 @@ The Compose file mounts the enrollment token and tenant signing key as read-only
 
 When Fleet shows the node as healthy, replace the contents of secrets/node_enrollment_token with the harmless text enrollment-complete. The persisted node identity is used on subsequent starts, so the consumed one-time token is no longer needed. Keep secrets/tenant_signing_key protected and persistent.
 
-For PowerShell, use the same files and Docker Compose commands. The host directory containing .env and secrets must be accessible only to the customer operators who manage the Engine.
+For Windows, use the PowerShell installer included in the repository ZIP. Open PowerShell in the extracted repository folder and run:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\\install-customer.ps1
+```
+
+The installer checks that Docker Desktop is running in Linux-container mode, verifies Compose v2 and the supplied files, validates the Compose configuration, starts the Engine, and waits for the actual Docker health state. It prints the container status and recent logs if the health check fails. This is the supported Windows host installation path; the Engine itself runs as a Linux container through Docker Desktop's WSL 2 backend. It is a PowerShell installer script, not an MSI or native Windows service binary.
+
+For Linux, run the included Bash installer:
+
+```bash
+chmod +x ./install-customer.sh
+./install-customer.sh
+```
+
+The host directory containing .env and secrets must be accessible only to the customer operators who manage the Engine. Do not commit either file or the secrets directory.
 
 The Engine listens on port 6432. By default, the host port is bound to 127.0.0.1. If the application runs in another container, attach it to the shared proxima-engine-network and connect to engine:6432. Do not expose port 6432 publicly without a customer-controlled firewall rule. The upstream PostgreSQL address must be reachable from inside the Engine container; localhost means the container itself, not the host.
 
