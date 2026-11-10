@@ -174,7 +174,7 @@ async function executeDeployment(event, deliveryId) {
       }
       await saveState(stateFile, {
         ...state,
-        last_known_good_version: remote.applied_version || state.last_known_good_version,
+        last_known_good_version: remote.observed_state === "running" ? remote.applied_version || state.last_known_good_version : state.last_known_good_version,
         completed: {
           ...(state.completed || {}),
           [deploymentId]: {
@@ -242,7 +242,7 @@ async function executeDeployment(event, deliveryId) {
       });
       await saveState(stateFile, {
         ...state,
-        last_known_good_version: version,
+        last_known_good_version: desiredState === "running" ? version : state.last_known_good_version,
         completed: {
           ...(state.completed || {}),
           [deploymentId]: { version, desired_state: desiredState, status: "healthy", completed_at: new Date().toISOString() },
