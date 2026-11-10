@@ -159,6 +159,23 @@ async fn deliver_pending_attestations(
         }
     }
 }
+fn sign_node_heartbeat(
+    key: &[u8],
+    node_id: &str,
+    organization_id: &str,
+    timestamp: i64,
+    version: &str,
+    runtime_status: &str,
+) -> Result<String, hmac::digest::InvalidLength> {
+    let canonical = format!(
+        "proxima-node-heartbeat-v1\\n{}\\n{}\\n{}\\n{}\\n{}",
+        node_id, organization_id, timestamp, version, runtime_status
+    );
+    let mut mac = hmac::Hmac::<Sha256>::new_from_slice(key)?;
+    mac.update(canonical.as_bytes());
+    Ok(hex::encode(mac.finalize().into_bytes()))
+}
+
 fn attestation_ingest_url_allowed(url: &str, allow_insecure_http: bool) -> bool {
     let Ok(parsed) = reqwest::Url::parse(url) else {
         return false;
@@ -436,19 +453,20 @@ async fn main() -> io::Result<()> {
                             .unwrap_or_default();
                         let version = env!("CARGO_PKG_VERSION").to_string();
                         let runtime_status = "running";
-                        let canonical = format!(
-                            "proxima-node-heartbeat-v1\n{}\n{}\n{}\n{}\n{}",
-                            node_id, organization_id, timestamp, version, runtime_status
-                        );
-                        let mut mac = match hmac::Hmac::<Sha256>::new_from_slice(&signing_key) {
-                            Ok(mac) => mac,
+                        let signature = match sign_node_heartbeat(
+                            &signing_key,
+                            &node_id,
+                            &organization_id,
+                            timestamp,
+                            &version,
+                            runtime_status,
+                        ) {
+                            Ok(signature) => signature,
                             Err(_) => {
                                 error!("could not initialize node heartbeat signature");
                                 continue;
                             }
                         };
-                        mac.update(canonical.as_bytes());
-                        let signature = hex::encode(mac.finalize().into_bytes());
                         let payload = serde_json::json!({
                             "node_id": node_id,
                             "timestamp": timestamp,
@@ -1140,5 +1158,33 @@ mod attestation_ingest_url_tests {
             true
         ));
         assert!(!attestation_ingest_url_allowed("not-a-url", true));
+    }
+}
+#[cfg(test)]
+mod node_heartbeat_signature_tests {
+    use super::sign_node_heartbeat;
+
+    #[test]
+    fn heartbeat_signature_is_deterministic_for_the_same_payload() {
+        let key = [7u8; 32];
+        let first = sign_node_heartbeat(&key, "node-a", "org-a", 1_800_000_000, "0.1.0", "running").unwrap();
+        let second = sign_node_heartbeat(&key, "node-a", "org-a", 1_800_000_000, "0.1.0", "running").unwrap();
+        assert_eq!(first, second);
+        assert_eq!(first.len(), 64);
+    }
+
+    #[test]
+    fn heartbeat_signature_changes_when_signed_fields_change() {
+        let key = [7u8; 32];
+        let baseline = sign_node_heartbeat(&key, "node-a", "org-a", 1_800_000_000, "0.1.0", "running").unwrap();
+        let other_node = sign_node_heartbeat(&key, "node-b", "org-a", 1_800_000_000, "0.1.0", "running").unwrap();
+        let other_time = sign_node_heartbeat(&key, "node-a", "org-a", 1_800_000_001, "0.1.0", "running").unwrap();
+        assert_ne!(baseline, other_node);
+        assert_ne!(baseline, other_time);
+    }
+
+    #[test]
+    fn heartbeat_signature_rejects_non_32_byte_key() {
+        assert!(sign_node_heartbeat(&[1u8; 31], "node-a", "org-a", 1, "0.1.0", "running").is_err());
     }
 }
