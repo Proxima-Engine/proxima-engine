@@ -99,9 +99,15 @@ node ./deployment-executor/receiver.mjs
 The repository includes a systemd unit template at deployment-executor/agata-deployment-executor.service. After the smoke test succeeds, install the protected environment file and unit:
 
 ```bash
-sudo useradd --system --create-home --shell /usr/sbin/nologin agata-deployer
+getent passwd 10001 || sudo useradd --system --uid 10001 --create-home --shell /usr/sbin/nologin agata-deployer
 sudo usermod -aG docker agata-deployer
 sudo install -d -o root -g root -m 0700 /etc/agata
+sudo install -d -o agata-deployer -g docker -m 0700 /var/lib/agata-deployment-executor
+sudo chown agata-deployer:docker /opt/proxima/.env
+sudo chmod 0640 /opt/proxima/.env
+sudo chown -R agata-deployer:agata-deployer /opt/proxima/secrets
+sudo chmod 0700 /opt/proxima/secrets
+sudo chmod 0400 /opt/proxima/secrets/*
 sudo install -o root -g root -m 0600 deployment-executor.env /etc/agata/deployment-executor.env
 sudo install -o root -g root -m 0644 /opt/proxima/deployment-executor/agata-deployment-executor.service /etc/systemd/system/agata-deployment-executor.service
 sudo systemctl daemon-reload
@@ -110,7 +116,7 @@ sudo systemctl status agata-deployment-executor
 sudo journalctl -u agata-deployment-executor -f
 ```
 
-The service user must be able to read each configured Compose project, .env file and secret file, and write to each configured executor state directory. The supplied unit allows writes to /var/lib/agata-deployment-executor; if your target map uses another state directory, add it to ReadWritePaths before starting the service. Membership in the docker group grants host-administrator-equivalent control; review that privilege and restrict the host accordingly.
+The service user is assigned UID 10001 to match the non-root Engine container, so it can read the mounted secret files without making them world-readable. Confirm UID 10001 is available before creating the account. The service user must be able to read each configured Compose project and .env file, and write to each configured executor state directory. The supplied unit allows writes to /var/lib/agata-deployment-executor; if your target map uses another state directory, add it to ReadWritePaths and create it with agata-deployer ownership before starting the service. Membership in the docker group grants host-administrator-equivalent control; review that privilege and restrict the host accordingly.
 
 The reverse proxy must preserve the raw request body and forward X-Agata-Signature, X-Agata-Delivery-Id, X-Agata-Event, and X-Agata-Event-Id. Keep its upstream request timeout at or above six minutes: Agata Proxima allows deployment.created delivery up to six minutes for image pulls, Engine restarts and runtime health checks. The executor returns only after the Control Plane has accepted the execution result.
 
