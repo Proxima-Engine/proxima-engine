@@ -119,6 +119,12 @@ set +a
 node ./deployment-executor/receiver.mjs
 ```
 
+### Windows executor host
+
+The Engine customer-node installer supports Windows. The reference deployment-executor service installer in this repository is Linux/systemd-specific. On Windows, the Node.js receiver can be run interactively for development or staging with Node.js 22+, Docker Desktop in Linux-container mode, the downloaded `deployment-executor.env`, and a customer-managed HTTPS reverse proxy. It is not installed as a Windows service by `install-deployment-executor.sh`. For production automation on Windows, use a customer-managed Windows service wrapper and service account that securely injects the executor environment, or use a customer-owned orchestrator/custom executor. Do not run a production webhook receiver in an ordinary logged-in terminal and assume it will survive sign-out or reboot.
+
+The Engine itself is installed on Windows with [install-customer.ps1](../install-customer.ps1). That PowerShell installer is independent of the deployment-executor service installer.
+
 ### Run as a Linux service
 
 For the standard single-host installation, place the downloaded `deployment-executor.env` in `/opt/proxima` and run the supplied installer:
