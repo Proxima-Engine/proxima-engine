@@ -54,7 +54,7 @@ docker compose -f compose.customer.yaml up --build -d
 docker compose -f compose.customer.yaml logs -f engine
 ```
 
-The Compose file mounts the enrollment token and tenant signing key as read-only secret files. Neither secret is passed as a container environment variable. The Engine reads the enrollment token file only during first enrollment, persists its node identity in the named Docker volume, and sends signed heartbeats every 30 seconds. No heartbeat cron job, custom webhook receiver, or customer-written enrollment code is required.
+The Compose file mounts the enrollment token and tenant signing key as read-only secret files. Neither secret is passed as a container environment variable. The Engine runs as UID 10001. On Linux, make the secret directory and files readable by that UID while keeping them private from other host users (for example, chown the directory and files to 10001:10001, chmod the directory 0700 and the files 0400). On Docker Desktop, confirm the mounted files are readable inside the Linux container; do not make the host secrets directory broadly readable just to work around a permission issue. The Engine reads the enrollment token file only during first enrollment, persists its node identity in the named Docker volume, and sends signed heartbeats every 30 seconds. No heartbeat cron job, custom webhook receiver, or customer-written enrollment code is required.
 
 When Fleet shows the node as healthy, replace the contents of secrets/node_enrollment_token with the harmless text enrollment-complete. The persisted node identity is used on subsequent starts, so the consumed one-time token is no longer needed. Keep secrets/tenant_signing_key protected and persistent.
 
