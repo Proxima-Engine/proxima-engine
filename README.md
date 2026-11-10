@@ -213,10 +213,11 @@ A successful installation prints **Proxima Engine is healthy**. Then open Agata 
 ```powershell
 docker compose -f compose.customer.yaml ps
 docker compose -f compose.customer.yaml logs --tail 100 engine
-Invoke-RestMethod http://127.0.0.1:6432
+$containerId = docker compose -f compose.customer.yaml ps -q engine
+docker inspect --format '{{.State.Health.Status}}' $containerId
 ```
 
-The last command is not a PostgreSQL query test; use a PostgreSQL driver or `psql` configured for `127.0.0.1:6432` to verify SQL connectivity. For the complete disposable local SQL walkthrough, follow [Quickstart](QUICKSTART.md).
+The final command prints the container health state. To verify SQL connectivity, connect your application or a PostgreSQL client to `127.0.0.1:6432` using the database credentials configured for your upstream PostgreSQL service.
 
 Restart and stop the registered node:
 
