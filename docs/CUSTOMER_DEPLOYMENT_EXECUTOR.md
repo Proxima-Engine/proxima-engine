@@ -50,6 +50,31 @@ Copy [the multi-node target map template](../deployment-executor/targets.example
 Set PROXIMA_DEPLOYMENT_TARGETS_FILE to this file in the executor environment. Each project directory must contain its own Compose file and .env configuration. If this variable is not set, the executor supports the simpler single-node PROXIMA_NODE_ID and PROXIMA_ENGINE_ALLOWLIST settings.
 
 
+## Install the Engine (customer node)
+
+The dashboard gives the customer a node-specific `.env`, a one-time enrollment-token file and a tenant-signing-key file. The customer does not need to hand-write Docker Compose configuration or paste secrets into shell commands.
+
+1. Install Docker Desktop (Windows) or Docker Engine with the Compose v2 plugin (Linux).
+2. Download the Engine ZIP from the node setup screen and extract it.
+3. In the extracted folder, create a `secrets` directory.
+4. Place the downloaded `.env` in the repository root. Place the one-time token at `secrets/node_enrollment_token` and the tenant signing key at `secrets/tenant_signing_key`.
+5. Run the supplied installer from that folder:
+
+   **Windows PowerShell**
+   ```powershell
+   .\\install-customer.ps1
+   ```
+
+   **Linux**
+   ```bash
+   chmod +x ./install-customer.sh
+   ./install-customer.sh
+   ```
+
+The installer validates the required files and Docker Compose configuration, builds the Engine image locally, starts the container, and waits for its real Docker health check. It prints the container logs if startup fails. The Engine consumes the one-time enrollment token from the mounted secret, persists its node identity in a Docker volume, and begins signed heartbeats. The token is not needed again after successful enrollment. Keep the `.env` and `secrets` directory private; never commit or email them.
+
+The Engine listens on port 6432 and binds to loopback by default. Keep that binding when the application runs on the same host. If the application is on another host or container network, deliberately configure a private reachable bind address/network and firewall policy; do not expose PostgreSQL proxy traffic to the public internet.
+
 ## Install
 
 Download this repository's ZIP and extract it to /opt/proxima on the same customer host that runs the Engine Compose project. This is the default path used by the customer Node setup and supplied systemd unit; if you choose another directory, update PROXIMA_DEPLOYMENT_PROJECT_DIR and the systemd WorkingDirectory/ExecStart paths accordingly. Create a protected environment file for the executor. Do not commit it:
