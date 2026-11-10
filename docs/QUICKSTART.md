@@ -147,7 +147,7 @@ Connect your PostgreSQL client to port 6432. The Engine reads configuration from
 
 This section installs a registered Engine node connected to Agata Proxima Cloud. It is different from the disposable local development stack above.
 
-### Windows 10/11 and Windows Server
+### Windows 10/11
 
 **Downloads required**
 
