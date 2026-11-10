@@ -89,7 +89,7 @@ function docker(target, args, version) {
     cwd: target.projectDir,
     env: { ...process.env, PROXIMA_ENGINE_VERSION: version },
     encoding: "utf8",
-    timeout: 120_000,
+    timeout: 240_000,
     maxBuffer: 1024 * 1024,
     shell: false,
   });
