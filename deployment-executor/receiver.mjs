@@ -229,6 +229,9 @@ async function executeDeployment(event, deliveryId) {
         if (!healthy) throw new Error("Engine did not pass its local /healthz check after rollout.");
       } else {
         docker(target, ["stop", "engine"], version);
+        // Recreate the stopped container from the newly pulled image so the reported
+        // applied version matches the container that will start on the next boot.
+        docker(target, ["create", "--no-deps", "--force-recreate", "engine"], version);
         const runningServices = docker(target, ["ps", "--status", "running", "--services"], version)
           .split(/\r?\n/).filter(Boolean);
         if (runningServices.includes("engine")) throw new Error("Engine container is still running after the stop request.");
