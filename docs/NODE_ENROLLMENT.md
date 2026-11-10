@@ -145,4 +145,4 @@ These credentials serve different trust boundaries. Keep each in its designated 
 - **Identity file error:** check the path, JSON format, and read/write permissions.
 - **Engine exits before listening:** inspect the startup error and verify all supplied enrollment values.
 
-See [Configuration](CONFIGURATION.md), [Operations](OPERATIONS.md), and [Cloud control-plane boundary](CLOUD_CONTROL_PLANE.md).
+See [Configuration](CONFIGURATION.md), [Operations](OPERATIONS.md), [Customer deployment executor](CUSTOMER_DEPLOYMENT_EXECUTOR.md), and [Cloud control-plane boundary](CLOUD_CONTROL_PLANE.md).
