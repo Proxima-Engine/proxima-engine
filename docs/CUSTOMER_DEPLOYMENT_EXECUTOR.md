@@ -84,6 +84,24 @@ set +a
 node ./deployment-executor/receiver.mjs
 ```
 
+### Run as a Linux service
+
+The repository includes a systemd unit template at deployment-executor/agata-deployment-executor.service. After the smoke test succeeds, install the protected environment file and unit:
+
+```bash
+sudo useradd --system --create-home --shell /usr/sbin/nologin agata-deployer
+sudo usermod -aG docker agata-deployer
+sudo install -d -o root -g root -m 0700 /etc/agata
+sudo install -o root -g root -m 0600 deployment-executor.env /etc/agata/deployment-executor.env
+sudo install -o root -g root -m 0644 deployment-executor/agata-deployment-executor.service /etc/systemd/system/agata-deployment-executor.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now agata-deployment-executor
+sudo systemctl status agata-deployment-executor
+sudo journalctl -u agata-deployment-executor -f
+```
+
+The service user must be able to read each configured Compose project, .env file and secret file, and write to each configured executor state directory. The supplied unit allows writes to /var/lib/agata-deployment-executor; if your target map uses another state directory, add it to ReadWritePaths before starting the service. Membership in the docker group grants host-administrator-equivalent control; review that privilege and restrict the host accordingly.
+
 The reverse proxy must preserve the raw request body and forward X-Agata-Signature, X-Agata-Delivery-Id, X-Agata-Event, and X-Agata-Event-Id. Keep its upstream request timeout at or above six minutes: Agata Proxima allows deployment.created delivery up to six minutes for image pulls, Engine restarts and runtime health checks. The executor returns only after the Control Plane has accepted the execution result.
 
 ## Configure Agata Proxima
