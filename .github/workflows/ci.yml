@@ -42,6 +42,12 @@ jobs:
         run: python3 -m unittest discover -s tests_cli -v
       - name: Validate customer deployment executor syntax
         run: node --check deployment-executor/receiver.mjs
+      - name: Validate customer Compose installation contract
+        run: |
+          mkdir -p secrets
+          printf 'test-enrollment-token' > secrets/node_enrollment_token
+          printf '0123456789abcdef0123456789abcdef' > secrets/tenant_signing_key
+          PROXIMA_NODE_ID=00000000-0000-4000-8000-000000000001 PROXIMA_UPSTREAM_ADDR=127.0.0.1:5432 docker compose -f compose.customer.yaml config --quiet
       - name: Run engine tests
         run: cargo test -p proxima-engine
       - name: Build release engine
