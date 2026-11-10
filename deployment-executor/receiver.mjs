@@ -154,8 +154,6 @@ async function executeDeployment(event, deliveryId) {
   if (!/^[0-9a-f-]{36}$/i.test(deploymentId)) throw new Error("Deployment event has an invalid resource ID.");
   const target = targets.get(targetNode);
   if (!target) throw new Error("No customer deployment target is configured for this node ID.");
-  if (!target.allowedVersions.has(version)) throw new Error("Requested Engine version is not in this node target allowlist.");
-  if (!["running", "stopped"].includes(desiredState)) throw new Error("This reference executor supports running and stopped states; draining requires a configured drain controller.");
 
   const stateFile = target.stateFile;
   const state = await readState(stateFile);
@@ -195,6 +193,29 @@ async function executeDeployment(event, deliveryId) {
       version,
       evidence: baseEvidence,
     });
+
+    const rejection = !target.allowedVersions.has(version)
+      ? "Requested Engine version is not in this node target allowlist."
+      : !["running", "stopped"].includes(desiredState)
+        ? "This reference executor supports running and stopped states; draining requires a configured drain controller."
+        : null;
+    if (rejection) {
+      await reportResult(deploymentId, {
+        status: "failed",
+        observed_state: "unknown",
+        version,
+        message: rejection,
+        evidence: { ...baseEvidence, health_check: false },
+      });
+      await saveState(stateFile, {
+        ...state,
+        completed: {
+          ...(state.completed || {}),
+          [deploymentId]: { version, desired_state: desiredState, status: "failed", completed_at: new Date().toISOString() },
+        },
+      });
+      return { accepted: true, failed: true, reason: rejection };
+    }
 
     const previousVersion = state.last_known_good_version && target.allowedVersions.has(state.last_known_good_version)
       ? state.last_known_good_version
