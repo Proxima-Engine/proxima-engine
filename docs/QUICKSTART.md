@@ -142,3 +142,73 @@ Connect your PostgreSQL client to port 6432. The Engine reads configuration from
 - [ ] Complete the [tenant isolation guide](TENANT_ISOLATION.md).
 - [ ] Connect an existing application using [driver integration recipes](INTEGRATIONS.md).
 - [ ] Review [deployment](DEPLOYMENT.md), [security](SECURITY.md), and [operations](OPERATIONS.md) before routing sensitive workloads.
+
+## Install a registered customer node (Windows and Linux)
+
+This section installs a registered Engine node connected to Agata Proxima Cloud. It is different from the disposable local development stack above.
+
+### Windows 10/11 and Windows Server
+
+**Downloads required**
+
+- [Download the Engine source ZIP](https://github.com/Proxima-Engine/proxima-engine/archive/refs/heads/feat/cloud-node-heartbeat-20261110.zip) and extract it.
+- From Agata Proxima Cloud → Node Management, download the registered node's `.env`, one-time `node_enrollment_token`, and `tenant_signing_key`.
+- The ZIP includes [install-customer.ps1](../install-customer.ps1) and [compose.customer.yaml](../compose.customer.yaml). These files must stay together in the extracted folder.
+
+**Prerequisites**
+
+Install Docker Desktop with its WSL 2 backend, enable Linux containers, and start Docker Desktop. Confirm these commands work in PowerShell:
+
+```powershell
+docker info --format '{{.OSType}}'
+docker compose version
+```
+
+The first command must print `linux`; Compose must report version 2.x. Proxima Engine is a Linux container, and Docker Desktop runs it on Windows through its Linux backend.
+
+**Prepare the downloaded files**
+
+1. Put the node-specific `.env` in the extracted repository root, beside `compose.customer.yaml`.
+2. Create a folder named `secrets` in that same directory.
+3. Put the downloaded one-time token at `secrets/node_enrollment_token`.
+4. Put the tenant signing key at `secrets/tenant_signing_key`.
+5. Keep the folder accessible only to the operators who administer this node. The secret filenames have no `.txt` extension; enable File name extensions in File Explorer to verify them.
+
+**Install**
+
+Open PowerShell in the extracted folder and run:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\install-customer.ps1
+```
+
+The installer validates the files, Docker daemon, Linux-container mode, Compose v2 configuration, starts the Engine, and checks the actual Docker container health state. It waits up to 120 seconds and prints container logs if health does not pass. On success, it prints the Engine endpoint `127.0.0.1:6432`.
+
+Confirm the node becomes healthy in Agata Proxima Fleet after its signed heartbeat. The Engine stores its enrolled node identity in a named Docker volume. Keep `secrets/tenant_signing_key` in place for subsequent starts; the one-time enrollment token is consumed only during first enrollment.
+
+**Operate**
+
+```powershell
+docker compose -f compose.customer.yaml ps
+docker compose -f compose.customer.yaml logs --tail 100 engine
+docker compose -f compose.customer.yaml restart engine
+docker compose -f compose.customer.yaml down
+```
+
+The upstream PostgreSQL hostname must be reachable from inside the Linux container. Do not set it to `localhost` unless PostgreSQL runs in that same container. Keep port 6432 private; use a private network and firewall policy when the application is on another host.
+
+### Linux
+
+Install Docker Engine and the Docker Compose v2 plugin. Place the same three node downloads and the `secrets/` files in the extracted repository root, then run:
+
+```bash
+chmod +x ./install-customer.sh
+./install-customer.sh
+```
+
+The Bash installer validates the files and Compose configuration, builds and starts the Engine, and waits for the Docker health check.
+
+### Installation scope
+
+The PowerShell installer installs and operates the Proxima Engine Linux container on a Windows host. It is not an MSI package or a native Windows executable/service. The reference deployment-executor service installer uses Linux systemd; executor service installation on Windows is not included in this Engine installer. See [Node enrollment](NODE_ENROLLMENT.md) and [Customer-managed deployment executor](CUSTOMER_DEPLOYMENT_EXECUTOR.md) for the complete enrollment and deployment lifecycle.
