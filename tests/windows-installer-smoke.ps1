@@ -11,7 +11,7 @@ Set-Content -LiteralPath (Join-Path $tempRoot "secrets/node_enrollment_token") -
 Set-Content -LiteralPath (Join-Path $tempRoot "secrets/tenant_signing_key") -Value "0123456789abcdef0123456789abcdef" -NoNewline
 
 $script:dockerCalls = [System.Collections.Generic.List[string]]::new()
-function global:docker {
+function docker {
   $call = ($args | ForEach-Object { [string]$_ }) -join " "
   $script:dockerCalls.Add($call)
   $global:LASTEXITCODE = 0
