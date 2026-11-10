@@ -162,3 +162,91 @@ The Proxima Engine source and covered documentation are distributed under the [M
 Use [GitHub Issues](https://github.com/Agata-Proxima/proxima-engine/issues) for reproducible Engine bugs and feature requests. Read [Contributing](CONTRIBUTING.md) before submitting a pull request. For vulnerabilities, use the private reporting process in [SECURITY.md](SECURITY.md).
 
 <p align="center">Built by Agata Proxima · <a href="https://agataproxima.com">agataproxima.com</a> · <a href="https://github.com/Agata-Proxima">GitHub organization</a></p>
+
+## Install a registered Engine node on Windows or Linux
+
+The customer-node installer supports Windows 10/11 and Windows Server hosts that run Docker Desktop or Docker Engine with **Linux containers** and Docker Compose v2. Windows users have a dedicated PowerShell installer; Linux users have a Bash installer. Both install the same Proxima Engine container and use the same signed enrollment and heartbeat protocol.
+
+### Windows downloads
+
+1. Download the [Proxima Engine source ZIP](https://github.com/Proxima-Engine/proxima-engine/archive/refs/heads/feat/cloud-node-heartbeat-20261110.zip) and extract it.
+2. Download the node-specific `.env`, `node_enrollment_token`, and `tenant_signing_key` files from Agata Proxima Cloud → Node Management → the registered node's setup/download section. These are generated credentials; they are not public repository files.
+3. Download the [Windows PowerShell installer](https://raw.githubusercontent.com/Proxima-Engine/proxima-engine/feat/cloud-node-heartbeat-20261110/install-customer.ps1) if it is not already present in the ZIP. The [customer Compose file](https://raw.githubusercontent.com/Proxima-Engine/proxima-engine/feat/cloud-node-heartbeat-20261110/compose.customer.yaml) must remain beside it.
+4. In the extracted folder, create a directory named `secrets`. Place the downloaded secret files there using the exact extensionless filenames:
+   - `secrets/node_enrollment_token`
+   - `secrets/tenant_signing_key`
+5. Place the downloaded `.env` in the same folder as `install-customer.ps1` and `compose.customer.yaml`. Keep this folder private. In File Explorer, enable **File name extensions** so Windows does not silently append `.txt` to the secret filenames.
+
+### Windows prerequisites
+
+- Windows 10/11 or Windows Server with a supported Docker installation.
+- Docker Desktop configured to use the WSL 2 backend and Linux containers, or Docker Engine with Compose v2 on the Windows host.
+- Docker daemon running before installation.
+- The node-specific `.env` and both secret files from Node Management.
+- Network access from the Engine container to the configured PostgreSQL upstream and Agata Proxima HTTPS enrollment/heartbeat endpoints.
+
+The Engine is distributed as a Linux container. On Windows, Docker Desktop runs that container through its Linux/WSL 2 backend; this is the supported Windows installation path. The PowerShell installer is a Windows host installer, not an MSI and not a native Windows service binary.
+
+### Run the Windows installer
+
+Open PowerShell in the extracted folder. If the machine's execution policy blocks a locally downloaded script, allow it for this PowerShell process only:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\install-customer.ps1
+```
+
+The installer performs these checks and actions in order:
+
+1. Confirms that `.env`, `compose.customer.yaml`, and both secret files exist.
+2. Confirms the Docker CLI and a running Docker daemon.
+3. Confirms that Docker is using Linux containers and Docker Compose v2 is available.
+4. Validates the customer Compose configuration.
+5. Builds and starts the Engine container.
+6. Waits up to 120 seconds for the container's Docker health check to report `healthy`.
+7. Prints container status and the local PostgreSQL proxy endpoint.
+
+A successful installation prints **Proxima Engine is healthy**. Then open Agata Proxima → Node Management/Fleet and confirm the registered node reports healthy after its signed heartbeat arrives. The one-time enrollment token is consumed during first enrollment; the persistent node identity is stored in a named Docker volume. Keep the tenant signing key mounted and protected for subsequent starts.
+
+### Verify and operate on Windows
+
+```powershell
+docker compose -f compose.customer.yaml ps
+docker compose -f compose.customer.yaml logs --tail 100 engine
+Invoke-RestMethod http://127.0.0.1:6432
+```
+
+The last command is not a PostgreSQL query test; use a PostgreSQL driver or `psql` configured for `127.0.0.1:6432` to verify SQL connectivity. For the complete disposable local SQL walkthrough, follow [Quickstart](QUICKSTART.md).
+
+Restart and stop the registered node:
+
+```powershell
+docker compose -f compose.customer.yaml restart engine
+docker compose -f compose.customer.yaml down
+```
+
+Start it again without rebuilding:
+
+```powershell
+docker compose -f compose.customer.yaml up -d
+```
+
+### Linux installation
+
+Linux customers use the matching Bash installer after placing the same four configuration/secret files in the extracted repository folder:
+
+```bash
+chmod +x ./install-customer.sh
+./install-customer.sh
+```
+
+For the Linux deployment-executor service installer and its security requirements, see [Customer-managed deployment executor](CUSTOMER_DEPLOYMENT_EXECUTOR.md).
+
+### Network and security requirements
+
+- The Engine listens on TCP 6432 and binds to host loopback by default. Keep this binding when the application runs on the same host.
+- If the application runs in another container, attach it to the configured Compose network and use the Engine service name and port. For a different host, use a private network/VPN, a deliberate private bind address, and a restrictive firewall rule.
+- The configured PostgreSQL upstream address is resolved from inside the Engine container. `localhost` refers to the container itself, not the Windows host. Use a reachable database hostname or the appropriate Docker Desktop host gateway address.
+- Never expose PostgreSQL proxy port 6432, the status interface, or metrics publicly.
+- Never commit, email, or paste `.env`, enrollment tokens, tenant signing keys, node identity files, operator API keys, or webhook secrets.
+- The tenant signing key must match the key used by the trusted application backend to sign tenant-context tokens. It is distinct from the one-time enrollment token and the node identity signing key.
