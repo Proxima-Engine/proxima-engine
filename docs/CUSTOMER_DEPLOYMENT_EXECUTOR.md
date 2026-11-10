@@ -106,6 +106,9 @@ The reverse proxy must preserve the raw request body and forward X-Agata-Signatu
 
 ## Configure Agata Proxima
 
+The recommended path is the guided setup in Deployments → Set up deployment executor. Select a healthy Engine node, enter the public HTTPS endpoint, executor identity, approved Engine versions and customer host paths. Agata Proxima creates the dedicated organization API key and signed deployment.created webhook, then returns a one-time deployment-executor.env file. Download it before leaving the result screen. If webhook creation fails after the API key is created, the wizard attempts to revoke the key.
+
+Manual setup is also available:
 1. Open Developer → API keys and create a dedicated write-capable key for the executor.
 2. Open Developer → Webhooks and create one HTTPS endpoint using the route above.
 3. Subscribe to exactly deployment.created. Do not use * for this executor.
