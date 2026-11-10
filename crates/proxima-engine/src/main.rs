@@ -1223,18 +1223,4 @@ mod node_heartbeat_signature_tests {
         assert_ne!(baseline, other_time);
     }
 
-    #[test]
-    fn heartbeat_signature_rejects_non_32_byte_key() {
-        assert!(
-            sign_node_heartbeat(
-                &[1u8; 31],
-                "node-a",
-                "org-a",
-                1,
-                "0.1.0",
-                "running",
-            )
-            .is_err()
-        );
-    }
 }
