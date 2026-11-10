@@ -71,6 +71,16 @@ PORT=8789
 
 The allowlist must contain only Engine releases the customer has reviewed and approved. Incoming webhook values are never added to it.
 
+The executor binds to 127.0.0.1 only. Put a customer-managed HTTPS reverse proxy in front of it. For Caddy, copy [the example Caddyfile](../deployment-executor/Caddyfile.example), replace executor.example.com with a DNS name pointing to the customer host, and reload Caddy. Caddy obtains and renews the TLS certificate automatically when ports 80 and 443 are reachable.
+
+Example:
+
+```caddyfile
+executor.example.com {
+    reverse_proxy 127.0.0.1:8789
+}
+```
+
 Run the service behind a customer-managed HTTPS reverse proxy at:
 
 POST https://<customer-executor-host>/webhooks/agata/deployments
