@@ -99,7 +99,10 @@ node ./deployment-executor/receiver.mjs
 The repository includes a systemd unit template at deployment-executor/agata-deployment-executor.service. After the smoke test succeeds, install the protected environment file and unit:
 
 ```bash
-getent passwd 10001 || sudo useradd --system --uid 10001 --create-home --shell /usr/sbin/nologin agata-deployer
+if ! id agata-deployer >/dev/null 2>&1; then
+  if getent passwd 10001 >/dev/null; then echo 'UID 10001 is already in use; choose and configure a matching Engine UID before continuing.' >&2; exit 1; fi
+  sudo useradd --system --uid 10001 --create-home --shell /usr/sbin/nologin agata-deployer
+fi
 sudo usermod -aG docker agata-deployer
 sudo install -d -o root -g root -m 0700 /etc/agata
 sudo install -d -o agata-deployer -g docker -m 0700 /var/lib/agata-deployment-executor
