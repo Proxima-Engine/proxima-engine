@@ -1,0 +1,90 @@
+# Customer-managed Engine deployment executor
+
+This reference executor connects Agata Proxima's signed deployment event to a customer's Docker Compose installation of Proxima Engine. It runs inside the customer's infrastructure and has permission to control the customer's Engine container.
+
+## What it does
+
+1. Receives deployment.created over HTTPS.
+2. Verifies the exact raw-body HMAC-SHA256 signature and five-minute timestamp window.
+3. Rejects events for a different node or a release version outside the customer's explicit allowlist.
+4. Sends the applying callback with a stable executor and execution ID.
+5. Pulls the requested versioned Engine image and applies the requested running or stopped state using fixed Docker Compose arguments. It never executes command text from a webhook.
+6. Checks the real container state. A running Engine must pass its local /healthz endpoint.
+7. Sends healthy only after the check passes. If a running rollout fails and a prior known-good release is recorded, it restores that release and reports rolled_back.
+8. Persists completed deployment IDs locally. It can recover from a lost local completion marker by inspecting the authoritative Control Plane deployment result before retrying side effects.
+
+The draining state is intentionally rejected because a safe drain operation requires an application-specific connection-drain controller. Do not select that state unless you have configured and tested such a controller.
+
+## Prerequisites
+
+- Linux or Windows host with Docker Engine and Docker Compose v2.
+- Node.js 22 or newer.
+- The Engine already installed with compose.customer.yaml.
+- A published Engine container image for each release version you intend to deploy.
+- One organization-scoped API key with permission to write deployment results.
+- Exactly one enabled HTTPS webhook subscribed to deployment.created for the organization.
+
+The Engine image is published by the tagged-release workflow. For a tag such as v0.1.0, the workflow publishes both 0.1.0 and v0.1.0 plus latest. Make the ghcr.io/proxima-engine/proxima-engine package public before asking unauthenticated customer hosts to pull it; otherwise configure Docker registry authentication on the customer host.
+
+## Install
+
+Download this repository's ZIP and extract it on the same customer host that runs the Engine Compose project. Create a protected environment file for the executor. Do not commit it:
+
+```dotenv
+AGATA_API_BASE_URL=https://api.agataproxima.com
+AGATA_API_KEY=aga_<organization-scoped-write-key>
+AGATA_WEBHOOK_SIGNING_SECRET=<one-time-webhook-signing-secret>
+PROXIMA_NODE_ID=<registered-node-uuid>
+PROXIMA_DEPLOYMENT_EXECUTOR_ID=customer-prod-engine-01
+PROXIMA_ENGINE_ALLOWLIST=0.1.0,0.1.1
+PROXIMA_DEPLOYMENT_PROJECT_DIR=/opt/proxima
+PROXIMA_DEPLOYMENT_COMPOSE_FILE=compose.customer.yaml
+PROXIMA_DEPLOYMENT_STATE_DIR=/var/lib/agata-deployment-executor
+PORT=8789
+```
+
+The allowlist must contain only Engine releases the customer has reviewed and approved. Incoming webhook values are never added to it.
+
+Run the service behind a customer-managed HTTPS reverse proxy at:
+
+POST https://<customer-executor-host>/webhooks/agata/deployments
+
+For a smoke test:
+
+```bash
+set -a
+. /etc/agata-deployment-executor.env
+set +a
+node ./deployment-executor/receiver.mjs
+```
+
+The reverse proxy must preserve the raw request body and forward X-Agata-Signature, X-Agata-Delivery-Id, X-Agata-Event, and X-Agata-Event-Id.
+
+## Configure Agata Proxima
+
+1. Open Developer → API keys and create a dedicated write-capable key for the executor.
+2. Open Developer → Webhooks and create one HTTPS endpoint using the route above.
+3. Subscribe to exactly deployment.created. Do not use * for this executor.
+4. Copy the signing secret shown once and store it as AGATA_WEBHOOK_SIGNING_SECRET.
+5. Confirm there is only one enabled webhook subscribed to deployment.created for the organization.
+6. Confirm the target node is healthy in Node Management.
+7. Create a staging deployment using a version in the allowlist.
+
+## Supported states and rollback
+
+- running: pull the versioned image, start the Engine and require /healthz to pass.
+- stopped: pull the versioned image, stop the Engine and verify the service is no longer running.
+- draining: rejected. Add an application-specific drain controller before enabling this state.
+
+A failed running rollout attempts to restore the previous version only when that version is recorded as known-good and remains in the allowlist. The executor reports rolled_back only after the restored Engine passes its health check. If rollback cannot be verified, it reports failed.
+
+## Security and operations
+
+- This process can control Docker and therefore has high privilege on its host. Run it as a dedicated OS identity and restrict access to its environment file.
+- Access to the Docker socket or Docker group is effectively host-administrator access. Do not expose the Docker socket over TCP.
+- Keep the API key, webhook secret, and node identity separate. Rotate the API key and webhook secret independently.
+- Keep the executor state directory persistent and protected. It stores deployment IDs and release metadata, not API keys or webhook secrets.
+- The webhook receiver returns 503 when execution or callback delivery cannot be completed, allowing the Control Plane delivery queue to retry.
+- Test invalid signatures, duplicate delivery, image pull failure, health-check failure, rollback success and rollback failure in staging before production use.
+
+Agata Proxima records deployment intent and verified execution results. The customer remains in control of the Docker host, database, release approvals and infrastructure credentials.
