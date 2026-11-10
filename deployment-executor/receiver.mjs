@@ -300,6 +300,6 @@ const server = createServer((req, res) => {
   req.on("error", () => { if (!res.headersSent) respond(400, { error: "request_read_failed" }); });
 });
 
-server.requestTimeout = 180_000;
-server.headersTimeout = 185_000;
+server.requestTimeout = 360_000;
+server.headersTimeout = 365_000;
 server.listen(port, () => console.log(`Agata Proxima deployment executor listening on port ${port}`));
