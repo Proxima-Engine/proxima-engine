@@ -58,7 +58,7 @@ set +a
 node ./deployment-executor/receiver.mjs
 ```
 
-The reverse proxy must preserve the raw request body and forward X-Agata-Signature, X-Agata-Delivery-Id, X-Agata-Event, and X-Agata-Event-Id.
+The reverse proxy must preserve the raw request body and forward X-Agata-Signature, X-Agata-Delivery-Id, X-Agata-Event, and X-Agata-Event-Id. Keep its upstream request timeout at or above six minutes: Agata Proxima allows deployment.created delivery up to six minutes for image pulls, Engine restarts and runtime health checks. The executor returns only after the Control Plane has accepted the execution result.
 
 ## Configure Agata Proxima
 
