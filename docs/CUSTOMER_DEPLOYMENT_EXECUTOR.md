@@ -26,6 +26,30 @@ The draining state is intentionally rejected because a safe drain operation requ
 
 The Engine image is published by the tagged-release workflow. For a tag such as v0.1.0, the workflow publishes both 0.1.0 and v0.1.0 plus latest. Make the ghcr.io/proxima-engine/proxima-engine package public before asking unauthenticated customer hosts to pull it; otherwise configure Docker registry authentication on the customer host.
 
+One executor webhook is configured per organization. The reference executor can manage multiple registered Engine nodes when their Compose projects are on the same Docker host: configure a target map file and give each node its own project directory, Compose file, state directory and approved version list. For nodes on separate Docker hosts or clusters, use a customer-owned orchestrator/custom executor; this reference implementation does not manage remote Docker contexts.
+
+Example target map (save as targets.json):
+
+```json
+{
+  "00000000-0000-4000-8000-000000000001": {
+    "project_dir": "/opt/proxima/node-a",
+    "compose_file": "compose.customer.yaml",
+    "state_dir": "/var/lib/agata-deployment-executor/node-a",
+    "allowed_versions": ["0.1.0", "0.1.1"]
+  },
+  "00000000-0000-4000-8000-000000000002": {
+    "project_dir": "/opt/proxima/node-b",
+    "compose_file": "compose.customer.yaml",
+    "state_dir": "/var/lib/agata-deployment-executor/node-b",
+    "allowed_versions": ["0.1.0"]
+  }
+}
+```
+
+Set PROXIMA_DEPLOYMENT_TARGETS_FILE to this file in the executor environment. Each project directory must contain its own Compose file and .env configuration. If this variable is not set, the executor supports the simpler single-node PROXIMA_NODE_ID and PROXIMA_ENGINE_ALLOWLIST settings.
+
+
 ## Install
 
 Download this repository's ZIP and extract it on the same customer host that runs the Engine Compose project. Create a protected environment file for the executor. Do not commit it:
@@ -37,6 +61,8 @@ AGATA_WEBHOOK_SIGNING_SECRET=<one-time-webhook-signing-secret>
 PROXIMA_NODE_ID=<registered-node-uuid>
 PROXIMA_DEPLOYMENT_EXECUTOR_ID=customer-prod-engine-01
 PROXIMA_ENGINE_ALLOWLIST=0.1.0,0.1.1
+# For a same-host multi-node fleet, replace the two single-node settings above with:
+# PROXIMA_DEPLOYMENT_TARGETS_FILE=/etc/agata/targets.json
 PROXIMA_DEPLOYMENT_PROJECT_DIR=/opt/proxima
 PROXIMA_DEPLOYMENT_COMPOSE_FILE=compose.customer.yaml
 PROXIMA_DEPLOYMENT_STATE_DIR=/var/lib/agata-deployment-executor
