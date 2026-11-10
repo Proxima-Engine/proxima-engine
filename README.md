@@ -15,7 +15,7 @@
   <a href="https://www.linkedin.com/company/agata-proxima/">LinkedIn</a>
 </p>
 
-**Start:** [What is Agata Proxima?](#what-is-agata-proxima) · [Customer Docker install](docs/NODE_ENROLLMENT.md#2-one-command-docker-installation-hosted-cloud) · [Launch evaluation](docs/LAUNCH.md) · [Quickstart](docs/QUICKSTART.md) · [Local developer mode](docs/LOCAL_DEVELOPMENT.md) · [Engine CLI](docs/CLI.md) · [Documentation index](docs/README.md)
+**Start:** [What is Agata Proxima?](#what-is-agata-proxima) · [Customer Docker install](docs/NODE_ENROLLMENT.md#2-one-command-docker-installation-hosted-cloud) · [Deployment executor](docs/CUSTOMER_DEPLOYMENT_EXECUTOR.md) · [Launch evaluation](docs/LAUNCH.md) · [Quickstart](docs/QUICKSTART.md) · [Local developer mode](docs/LOCAL_DEVELOPMENT.md) · [Engine CLI](docs/CLI.md) · [Documentation index](docs/README.md)
 
 **Technical guides:** [Architecture](docs/ARCHITECTURE.md) · [Tenant isolation](docs/TENANT_ISOLATION.md) · [Driver integrations](docs/INTEGRATIONS.md) · [API and metrics](docs/API.md) · [Security](docs/SECURITY.md) · [Deployment](docs/DEPLOYMENT.md) · [Verification](docs/VERIFICATION.md)
 
@@ -129,6 +129,7 @@ See [Tenant isolation](docs/TENANT_ISOLATION.md), [Verification](docs/VERIFICATI
 | [Driver integrations](docs/INTEGRATIONS.md) | psql, Node.js, Python, and Rust connection examples |
 | [API reference](docs/API.md) | PostgreSQL endpoint, health/status routes, and Prometheus metrics |
 | [Node enrollment](docs/NODE_ENROLLMENT.md) | Customer Docker installation, one-time enrollment, signed heartbeat, and identity persistence |
+| [Customer deployment executor](docs/CUSTOMER_DEPLOYMENT_EXECUTOR.md) | Install and operate the customer-managed, signed Docker Compose deployment executor |
 | [Deployment](docs/DEPLOYMENT.md) | Container build, TLS, networking, persistence, and deployment configuration |
 | [Operations](docs/OPERATIONS.md) | Health checks, logs, monitoring, recovery, and troubleshooting |
 | [Engineering case study](docs/ENGINEERING_CASE_STUDY.md) | Executed tenant-isolation, RLS, PgBouncer, concurrency, authentication, and recovery results |
