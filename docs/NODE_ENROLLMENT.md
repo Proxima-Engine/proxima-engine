@@ -41,39 +41,26 @@ Use HTTPS for remote control-plane hosts. Loopback HTTP is reserved for local de
 
 ## 2. One-command Docker installation (hosted Cloud)
 
-The hosted customer path uses the published Engine container. Docker and Docker Compose are required on the customer-managed host. The customer keeps PostgreSQL and its tenant signing key under their own control; Agata Proxima does not create or take ownership of the customer's database.
+This is the recommended customer path. Docker Engine and Docker Compose v2 are required on the customer's host. Agata Proxima does not provision, own, or receive the customer's PostgreSQL credentials.
 
-1. Register a node in Agata Proxima Cloud and copy its one-time enrollment token.
-2. Download `compose.customer.yaml` from this repository and save it as `compose.yaml` in a protected directory.
-3. Create a `.env` file beside it with the values below. Do not commit this file.
-
-```dotenv
-PROXIMA_NODE_ID=<node-uuid>
-PROXIMA_NODE_ENROLLMENT_URL=https://api.agataproxima.com/api/v1/nodes/enroll
-PROXIMA_NODE_ENROLLMENT_TOKEN=<one-time-token>
-PROXIMA_UPSTREAM_ADDR=<customer-postgres-host>:5432
-PROXIMA_TENANT_SIGNING_KEY=<customer-generated-32-byte-or-longer-secret>
-PROXIMA_LISTEN_ADDR=0.0.0.0:6432
-```
-
-Generate a tenant signing key locally (never reuse the node enrollment token as this key):
+1. Register a node in Agata Proxima Cloud and download the three generated files from the registration result: .env, node_enrollment_token, and tenant_signing_key.
+2. Download the public Engine repository ZIP and extract it on the customer host.
+3. Place .env and compose.customer.yaml in the repository root. Create a secrets directory beside them and save the two secret downloads as secrets/node_enrollment_token and secrets/tenant_signing_key.
+4. Set the upstream address in .env to the PostgreSQL host reachable from the Engine container. The tenant signing key must be the same secret the trusted application backend uses to sign tenant context. Never reuse the one-time enrollment token as the tenant signing key.
+5. Start the Engine:
 
 ```bash
-openssl rand -hex 32
+docker compose -f compose.customer.yaml up --build -d
+docker compose -f compose.customer.yaml logs -f engine
 ```
 
-4. Start the Engine:
+The Compose file mounts the enrollment token and tenant signing key as read-only secret files. Neither secret is passed as a container environment variable. The Engine reads the enrollment token file only during first enrollment, persists its node identity in the named Docker volume, and sends signed heartbeats every 30 seconds. No heartbeat cron job, custom webhook receiver, or customer-written enrollment code is required.
 
-```bash
-docker compose -f compose.yaml up -d
-docker compose -f compose.yaml logs -f engine
-```
+When Fleet shows the node as healthy, replace the contents of secrets/node_enrollment_token with the harmless text enrollment-complete. The persisted node identity is used on subsequent starts, so the consumed one-time token is no longer needed. Keep secrets/tenant_signing_key protected and persistent.
 
-5. Confirm the container is healthy and the node appears as healthy in Fleet. The Engine redeems the one-time token, persists its node identity in the named Docker volume, and sends signed heartbeats every 30 seconds. No heartbeat cron job, custom webhook receiver, or customer-written enrollment code is required.
+For PowerShell, use the same files and Docker Compose commands. The host directory containing .env and secrets must be accessible only to the customer operators who manage the Engine.
 
-For PowerShell, create the same `.env` file with a text editor and run the same Docker Compose commands. Protect the directory and volume because the persisted identity contains the node signing credential.
-
-The container listens on port 6432. Keep that port private to the application network or restrict it with the customer's firewall. Configure the application to connect to the Engine, not directly to PostgreSQL. The upstream address must be reachable from inside the container; `localhost` means the container itself, not the customer's host.
+The Engine listens on port 6432. By default, the host port is bound to 127.0.0.1. If the application runs in another container, attach it to the shared proxima-engine-network and connect to engine:6432. Do not expose port 6432 publicly without a customer-controlled firewall rule. The upstream PostgreSQL address must be reachable from inside the Engine container; localhost means the container itself, not the host.
 
 ## 3. Configure the Engine — PowerShell
 
