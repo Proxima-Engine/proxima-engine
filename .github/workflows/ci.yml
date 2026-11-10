@@ -42,6 +42,10 @@ jobs:
         run: python3 -m unittest discover -s tests_cli -v
       - name: Validate customer deployment executor syntax
         run: node --check deployment-executor/receiver.mjs
+      - name: Validate customer installer scripts
+        run: |
+          bash -n install-customer.sh
+          pwsh -NoProfile -Command '$tokens = $null; $errors = $null; [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path "install-customer.ps1"), [ref]$tokens, [ref]$errors) > $null; if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error $_ }; exit 1 }'
       - name: Validate customer Compose installation contract
         run: |
           mkdir -p secrets
