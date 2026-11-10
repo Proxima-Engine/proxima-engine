@@ -121,7 +121,15 @@ node ./deployment-executor/receiver.mjs
 
 ### Run as a Linux service
 
-The repository includes a systemd unit template at deployment-executor/agata-deployment-executor.service. After the smoke test succeeds, install the protected environment file and unit:
+For the standard single-host installation, place the downloaded `deployment-executor.env` in `/opt/proxima` and run the supplied installer:
+
+```bash
+sudo ./install-deployment-executor.sh
+```
+
+The installer checks Node.js 22+, Docker Compose, the executor environment file and the service unit; creates the restricted service account; installs the environment file and systemd unit with protected permissions; grants the service access to the Docker socket; and enables the service. It does not configure the public HTTPS reverse proxy or DNS. Configure those separately before creating deployments.
+
+For manual installation or a non-standard host, the repository includes a systemd unit template at `deployment-executor/agata-deployment-executor.service`. The equivalent manual steps are:
 
 ```bash
 if ! id agata-deployer >/dev/null 2>&1; then
