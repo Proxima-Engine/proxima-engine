@@ -1,7 +1,6 @@
 services:
   engine:
     image: ghcr.io/proxima-engine/proxima-engine:${PROXIMA_ENGINE_VERSION:-latest}
-    pull_policy: always
     build:
       context: .
       dockerfile: Dockerfile
