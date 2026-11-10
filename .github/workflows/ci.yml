@@ -40,6 +40,8 @@ jobs:
         uses: Swatinem/rust-cache@v2
       - name: Test public Engine CLI
         run: python3 -m unittest discover -s tests_cli -v
+      - name: Validate customer deployment executor syntax
+        run: node --check deployment-executor/receiver.mjs
       - name: Run engine tests
         run: cargo test -p proxima-engine
       - name: Build release engine
