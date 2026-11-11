@@ -258,12 +258,6 @@ async fn bootstrap_node_identity() -> Result<(), Box<dyn std::error::Error + Sen
             // The Control Plane master secret is never sent to the customer node.
             env::set_var("PROXIMA_TENANT_SIGNING_KEY", tenant_key);
         }
-        if let Some(legacy_key) = value["legacy_tenant_signing_key"].as_str() {
-            if legacy_key.len() < 32 {
-                return Err("Legacy tenant signing key must contain at least 32 bytes".into());
-            }
-            env::set_var("PROXIMA_TENANT_SIGNING_KEY_PREVIOUS", legacy_key);
-        }
 
         env::set_var("PROXIMA_NODE_ID", node_id);
         env::set_var("PROXIMA_ORGANIZATION_ID", organization_id);
@@ -285,23 +279,25 @@ async fn bootstrap_node_identity() -> Result<(), Box<dyn std::error::Error + Sen
     if identity_path.is_file() {
         let bytes = fs::read(&identity_path)?;
         let mut identity: serde_json::Value = serde_json::from_slice(&bytes)?;
+        // Keep the old verifier secret in process memory only while already-issued
+        // one-hour tokens may still exist. Never persist the Control Plane master
+        // secret in the customer node identity file.
+        let legacy_key = env::var("PROXIMA_TENANT_SIGNING_KEY").ok().or_else(|| {
+            env::var("PROXIMA_TENANT_SIGNING_KEY_FILE")
+                .ok()
+                .and_then(|path| fs::read_to_string(path).ok())
+                .map(|value| value.trim().to_owned())
+        });
+        if let Some(key) = legacy_key.filter(|key| {
+            key.len() >= 32 && identity["tenant_signing_key"].as_str() != Some(key.as_str())
+        }) {
+            env::set_var("PROXIMA_TENANT_SIGNING_KEY_PREVIOUS", key);
+        }
+
         if identity["tenant_signing_key"].as_str().is_none()
             && (env::var("PROXIMA_NODE_HEARTBEAT_URL").is_ok()
                 || env::var("PROXIMA_NODE_ENROLLMENT_URL").is_ok())
         {
-            // Preserve the pre-upgrade verifier key for the maximum lifetime of
-            // already-issued tokens. The new organization key becomes primary.
-            if identity["legacy_tenant_signing_key"].as_str().is_none() {
-                let legacy_key = env::var("PROXIMA_TENANT_SIGNING_KEY").ok().or_else(|| {
-                    env::var("PROXIMA_TENANT_SIGNING_KEY_FILE")
-                        .ok()
-                        .and_then(|path| fs::read_to_string(path).ok())
-                        .map(|value| value.trim().to_owned())
-                });
-                if let Some(key) = legacy_key.filter(|key| key.len() >= 32) {
-                    identity["legacy_tenant_signing_key"] = serde_json::Value::String(key);
-                }
-            }
             // Upgrade an identity created before organization-scoped tenant keys
             // were returned during enrollment. This signed, domain-separated
             // refresh does not require consuming another enrollment token.
