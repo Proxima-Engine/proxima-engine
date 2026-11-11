@@ -166,6 +166,7 @@ mod tests {
             listen_addr: "127.0.0.1:6432".parse().unwrap(),
             upstream_addr: "127.0.0.1:5432".into(),
             tenant_signing_key: None,
+            tenant_signing_key_previous: None,
             tenant_role_prefix: "proxima_tenant_".into(),
             upstream_connect_timeout: std::time::Duration::from_secs(1),
             max_connections: 10,
