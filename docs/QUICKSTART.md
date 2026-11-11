@@ -147,67 +147,58 @@ Connect your PostgreSQL client to port 6432. The Engine reads configuration from
 
 This section installs a registered Engine node connected to Agata Proxima Cloud. It is different from the disposable local development stack above.
 
+### 1. Register the node
+
+In Agata Proxima Cloud → Nodes, create the node in the intended organization. Copy the Windows PowerShell setup or Linux shell setup shown with the one-time enrollment token. The token is single-use and is not the tenant signing key.
+
+### 2. Download the Engine installer
+
+Download the [Proxima Engine source ZIP](https://github.com/Proxima-Engine/proxima-engine/archive/refs/heads/main.zip) and extract it. The ZIP includes the Windows PowerShell installer, Linux Bash installer and customer Compose file.
+
 ### Windows 10/11
-
-**Downloads required**
-
-- [Download the Engine source ZIP](https://github.com/Proxima-Engine/proxima-engine/archive/refs/heads/main.zip) and extract it.
-- From Agata Proxima Cloud → Node Management, download the registered node's `.env`, one-time `node_enrollment_token`, and `tenant_signing_key`.
-- The ZIP includes [install-customer.ps1](../install-customer.ps1) and [compose.customer.yaml](../compose.customer.yaml). These files must stay together in the extracted folder.
 
 **Prerequisites**
 
-Install Docker Desktop with its WSL 2 backend, enable Linux containers, and start Docker Desktop. Confirm these commands work in PowerShell:
-
-```powershell
-docker info --format '{{.OSType}}'
-docker compose version
-```
-
-The first command must print `linux`; Compose must report version 2.x. Proxima Engine is a Linux container, and Docker Desktop runs it on Windows through its Linux backend.
-
-**Prepare the downloaded files**
-
-1. Put the node-specific `.env` in the extracted repository root, beside `compose.customer.yaml`.
-2. Create a folder named `secrets` in that same directory.
-3. Put the downloaded one-time token at `secrets/node_enrollment_token`.
-4. Put the tenant signing key at `secrets/tenant_signing_key`.
-5. Keep the folder accessible only to the operators who administer this node. The secret filenames have no `.txt` extension; enable File name extensions in File Explorer to verify them.
+- Docker Desktop installed and running with its WSL 2 backend.
+- Docker Desktop switched to Linux containers.
+- Network access from the Engine container to the PostgreSQL upstream and Agata Proxima HTTPS enrollment/heartbeat endpoints.
 
 **Install**
 
-Open PowerShell in the extracted folder and run:
+Open PowerShell in the extracted Engine repository folder. Paste the Windows setup commands copied from Agata Proxima → Nodes into the same PowerShell session. Then run:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 .\install-customer.ps1
 ```
 
-The installer validates the files, Docker daemon, Linux-container mode, Compose v2 configuration, starts the Engine, and checks the actual Docker container health state. It waits up to 120 seconds and prints container logs if health does not pass. On success, it prints the Engine endpoint `127.0.0.1:6432`.
-
-Confirm the node becomes healthy in Agata Proxima Fleet after its signed heartbeat. The Engine stores its enrolled node identity in a named Docker volume. Keep `secrets/tenant_signing_key` in place for subsequent starts; the one-time enrollment token is consumed only during first enrollment.
-
-**Operate**
-
-```powershell
-docker compose -f compose.customer.yaml ps
-docker compose -f compose.customer.yaml logs --tail 100 engine
-docker compose -f compose.customer.yaml restart engine
-docker compose -f compose.customer.yaml down
-```
-
-The upstream PostgreSQL hostname must be reachable from inside the Linux container. Do not set it to `localhost` unless PostgreSQL runs in that same container. Keep port 6432 private; use a private network and firewall policy when the application is on another host.
+The installer creates `.env` and `secrets/node_enrollment_token` from the copied node configuration. It asks for the PostgreSQL upstream host and port if `PROXIMA_UPSTREAM_ADDR` is not already set. It validates Docker Desktop's Linux-container mode and Compose v2, validates the Compose configuration, builds and starts the Engine, and waits up to 120 seconds for the actual Docker health state. On success, it prints the local PostgreSQL proxy endpoint `127.0.0.1:6432`.
 
 ### Linux
 
-Install Docker Engine and the Docker Compose v2 plugin. Place the same three node downloads and the `secrets/` files in the extracted repository root, then run:
+**Prerequisites**
+
+- Docker Engine and Docker Compose v2.
+- Network access from the Engine container to the PostgreSQL upstream and Agata Proxima HTTPS enrollment/heartbeat endpoints.
+
+**Install**
+
+Open a shell in the extracted Engine repository folder. Paste the Linux setup commands copied from Agata Proxima → Nodes into that same shell session. Then run:
 
 ```bash
 chmod +x ./install-customer.sh
 ./install-customer.sh
 ```
 
-The Bash installer validates the files and Compose configuration, builds and starts the Engine, and waits for the Docker health check.
+The Bash installer creates `.env` and the one-time enrollment token file, prompts for the PostgreSQL upstream when needed, validates Compose, builds and starts the Engine, and waits for the Docker health check.
+
+### After installation
+
+During first enrollment, the Control Plane returns the node heartbeat key and a separate organization-scoped tenant-token verification key over HTTPS. The Engine validates both and stores them in the protected node identity file in a named Docker volume. The Control Plane master signing secret is never sent to customer nodes. No customer has to download, create or manually copy a tenant signing key.
+
+Confirm the node reports healthy in Agata Proxima Fleet after its signed heartbeat. The one-time enrollment token is consumed on first bootstrap. Replace the contents of `secrets/node_enrollment_token` with the harmless text `enrollment-complete`; keep the file itself in place because Compose references it on later starts.
+
+The Engine listens on port 6432 and binds to host loopback by default. The upstream PostgreSQL hostname must be reachable from inside the Engine container. Do not set it to `localhost` unless PostgreSQL runs in that same container. Keep port 6432 private; use a private network and firewall policy when the application is on another host.
 
 ### Installation scope
 
