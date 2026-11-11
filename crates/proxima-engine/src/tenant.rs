@@ -400,3 +400,26 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod previous_key_tests {
+    use super::*;
+
+    #[test]
+    fn accepts_existing_tokens_with_previous_key_during_rotation() {
+        let previous = b"legacy-global-tenant-signing-key-0001";
+        let current = b"organization-scoped-tenant-signing-key-01";
+        let verifier = TenantTokenVerifier::new_with_previous(current, Some(previous)).unwrap();
+        let token = format!("v1.tenant_a.2000.{}", sign_payload(previous, "v1", "tenant_a", 2000));
+        assert_eq!(verifier.verify(&token, 1000).unwrap().tenant_id, "tenant_a");
+    }
+
+    #[test]
+    fn rejects_previous_key_when_not_configured() {
+        let previous = b"legacy-global-tenant-signing-key-0001";
+        let current = b"organization-scoped-tenant-signing-key-01";
+        let verifier = TenantTokenVerifier::new(current).unwrap();
+        let token = format!("v1.tenant_a.2000.{}", sign_payload(previous, "v1", "tenant_a", 2000));
+        assert_eq!(verifier.verify(&token, 1000), Err(TenantTokenError::InvalidSignature));
+    }
+}
