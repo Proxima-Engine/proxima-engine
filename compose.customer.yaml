@@ -1,0 +1,46 @@
+services:
+  engine:
+    image: ghcr.io/proxima-engine/proxima-engine:${PROXIMA_ENGINE_VERSION:-latest}
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      PROXIMA_NODE_ID: ${PROXIMA_NODE_ID:?Set PROXIMA_NODE_ID in .env}
+      PROXIMA_NODE_IDENTITY_PATH: /var/lib/proxima/node-identity.json
+      PROXIMA_NODE_ENROLLMENT_URL: ${PROXIMA_NODE_ENROLLMENT_URL:-https://api.agataproxima.com/api/v1/nodes/enroll}
+      PROXIMA_NODE_HEARTBEAT_URL: ${PROXIMA_NODE_HEARTBEAT_URL:-https://api.agataproxima.com/api/v1/nodes/heartbeat}
+      PROXIMA_NODE_ENROLLMENT_TOKEN_FILE: /run/secrets/node_enrollment_token
+      PROXIMA_ENVIRONMENT: ${PROXIMA_ENVIRONMENT:-production}
+      PROXIMA_LISTEN_ADDR: ${PROXIMA_LISTEN_ADDR:-0.0.0.0:6432}
+      PROXIMA_UPSTREAM_ADDR: ${PROXIMA_UPSTREAM_ADDR:?Set PROXIMA_UPSTREAM_ADDR in .env}
+      PROXIMA_DASHBOARD_ENABLED: "false"
+      PROXIMA_METRICS_LISTEN_ADDR: 127.0.0.1:9090
+    ports:
+      - "${PROXIMA_BIND_ADDRESS:-127.0.0.1}:6432:6432"
+    secrets:
+      - node_enrollment_token
+    volumes:
+      - proxima-node-data:/var/lib/proxima
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9090/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,noexec,nosuid
+
+secrets:
+  node_enrollment_token:
+    file: ./secrets/node_enrollment_token
+
+networks:
+  default:
+    name: ${PROXIMA_DOCKER_NETWORK:-proxima-engine-network}
+
+volumes:
+  proxima-node-data:

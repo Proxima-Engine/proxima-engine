@@ -4,6 +4,7 @@ use bytes::{Buf, BytesMut};
 use std::io;
 use std::sync::Arc;
 
+use hmac::Mac;
 use proxima_engine::{
     attestation::{AttestationConfig, AttestationLedger, SecurityState, TelemetrySummary},
     break_glass,
@@ -158,6 +159,23 @@ async fn deliver_pending_attestations(
         }
     }
 }
+fn sign_node_heartbeat(
+    key: &[u8],
+    node_id: &str,
+    organization_id: &str,
+    timestamp: i64,
+    version: &str,
+    runtime_status: &str,
+) -> Result<String, hmac::digest::InvalidLength> {
+    let canonical = format!(
+        "proxima-node-heartbeat-v1\n{}\n{}\n{}\n{}\n{}",
+        node_id, organization_id, timestamp, version, runtime_status
+    );
+    let mut mac = hmac::Hmac::<Sha256>::new_from_slice(key)?;
+    mac.update(canonical.as_bytes());
+    Ok(hex::encode(mac.finalize().into_bytes()))
+}
+
 fn attestation_ingest_url_allowed(url: &str, allow_insecure_http: bool) -> bool {
     let Ok(parsed) = reqwest::Url::parse(url) else {
         return false;
@@ -175,18 +193,44 @@ fn attestation_ingest_url_allowed(url: &str, allow_insecure_http: bool) -> bool 
 }
 
 async fn bootstrap_node_identity() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    use std::{env, fs, path::PathBuf};
+    use std::{
+        env, fs,
+        path::{Path, PathBuf},
+        time::{SystemTime, UNIX_EPOCH},
+    };
 
-    let identity_path = env::var_os("PROXIMA_NODE_IDENTITY_PATH")
-        .map(PathBuf::from)
-        .or_else(|| {
-            env::var_os("LOCALAPPDATA").map(|base| {
-                PathBuf::from(base)
-                    .join("AgataProxima")
-                    .join("node-identity.json")
-            })
-        })
-        .unwrap_or_else(|| PathBuf::from("data/node-identity.json"));
+    fn persist_identity(
+        identity_path: &Path,
+        identity: &serde_json::Value,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let parent = identity_path.parent().ok_or("Invalid node identity path")?;
+        fs::create_dir_all(parent)?;
+        let temporary_path = identity_path.with_extension("json.tmp");
+        if temporary_path.exists() {
+            fs::remove_file(&temporary_path)?;
+        }
+        let identity_bytes = serde_json::to_vec_pretty(identity)?;
+        #[cfg(unix)]
+        {
+            use std::{io::Write, os::unix::fs::OpenOptionsExt};
+            let mut file = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&temporary_path)?;
+            file.write_all(&identity_bytes)?;
+            file.sync_all()?;
+        }
+        #[cfg(not(unix))]
+        fs::write(&temporary_path, &identity_bytes)?;
+
+        #[cfg(windows)]
+        if identity_path.exists() {
+            fs::remove_file(identity_path)?;
+        }
+        fs::rename(&temporary_path, identity_path)?;
+        Ok(())
+    }
 
     fn apply_identity(
         value: &serde_json::Value,
@@ -206,10 +250,123 @@ async fn bootstrap_node_identity() -> Result<(), Box<dyn std::error::Error + Sen
             return Err("Node signing key must be exactly 32 bytes".into());
         }
 
-        std::env::set_var("PROXIMA_NODE_ID", node_id);
-        std::env::set_var("PROXIMA_ORGANIZATION_ID", organization_id);
-        std::env::set_var("PROXIMA_NODE_SIGNING_KEY_HEX", key);
+        if let Some(tenant_key) = value["tenant_signing_key"].as_str() {
+            if hex::decode(tenant_key)?.len() != 32 {
+                return Err("Organization tenant signing key must be exactly 32 bytes (hex encoded)".into());
+            }
+            // This is an organization-scoped key derived by the Control Plane.
+            // The Control Plane master secret is never sent to the customer node.
+            env::set_var("PROXIMA_TENANT_SIGNING_KEY", tenant_key);
+        }
+        if let Some(legacy_key) = value["legacy_tenant_signing_key"].as_str() {
+            if legacy_key.len() < 32 {
+                return Err("Legacy tenant signing key must contain at least 32 bytes".into());
+            }
+            env::set_var("PROXIMA_TENANT_SIGNING_KEY_PREVIOUS", legacy_key);
+        }
+
+        env::set_var("PROXIMA_NODE_ID", node_id);
+        env::set_var("PROXIMA_ORGANIZATION_ID", organization_id);
+        env::set_var("PROXIMA_NODE_SIGNING_KEY_HEX", key);
         Ok(())
+    }
+
+    let identity_path = env::var_os("PROXIMA_NODE_IDENTITY_PATH")
+        .map(PathBuf::from)
+        .or_else(|| {
+            env::var_os("LOCALAPPDATA").map(|base| {
+                PathBuf::from(base)
+                    .join("AgataProxima")
+                    .join("node-identity.json")
+            })
+        })
+        .unwrap_or_else(|| PathBuf::from("data/node-identity.json"));
+
+    if identity_path.is_file() {
+        let bytes = fs::read(&identity_path)?;
+        let mut identity: serde_json::Value = serde_json::from_slice(&bytes)?;
+        if identity["tenant_signing_key"].as_str().is_none()
+            && (env::var("PROXIMA_NODE_HEARTBEAT_URL").is_ok()
+                || env::var("PROXIMA_NODE_ENROLLMENT_URL").is_ok())
+        {
+            // Preserve the pre-upgrade verifier key for the maximum lifetime of
+            // already-issued tokens. The new organization key becomes primary.
+            if identity["legacy_tenant_signing_key"].as_str().is_none() {
+                let legacy_key = env::var("PROXIMA_TENANT_SIGNING_KEY").ok().or_else(|| {
+                    env::var("PROXIMA_TENANT_SIGNING_KEY_FILE")
+                        .ok()
+                        .and_then(|path| fs::read_to_string(path).ok())
+                        .map(|value| value.trim().to_owned())
+                });
+                if let Some(key) = legacy_key.filter(|key| key.len() >= 32) {
+                    identity["legacy_tenant_signing_key"] = serde_json::Value::String(key);
+                }
+            }
+            // Upgrade an identity created before organization-scoped tenant keys
+            // were returned during enrollment. This signed, domain-separated
+            // refresh does not require consuming another enrollment token.
+            let node_id = identity["node_id"]
+                .as_str()
+                .ok_or("Identity is missing node_id")?;
+            let organization_id = identity["organization_id"]
+                .as_str()
+                .ok_or("Identity is missing organization_id")?;
+            let node_key_hex = identity["signing_key"]
+                .as_str()
+                .ok_or("Identity is missing signing_key")?;
+            let node_key = hex::decode(node_key_hex)?;
+            if node_key.len() != 32 {
+                return Err("Node signing key must be exactly 32 bytes".into());
+            }
+
+            let heartbeat_url = env::var("PROXIMA_NODE_HEARTBEAT_URL").ok().or_else(|| {
+                env::var("PROXIMA_NODE_ENROLLMENT_URL")
+                    .ok()
+                    .map(|url| url.replace("/api/v1/nodes/enroll", "/api/v1/nodes/heartbeat"))
+            }).ok_or("Missing PROXIMA_NODE_HEARTBEAT_URL for organization-key refresh")?;
+            let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
+            let version = env!("CARGO_PKG_VERSION");
+            let runtime_status = "running";
+            let canonical = format!(
+                "proxima-node-identity-refresh-v1\n{}\n{}\n{}\n{}\n{}",
+                node_id, organization_id, timestamp, version, runtime_status
+            );
+            let mut mac = hmac::Hmac::<Sha256>::new_from_slice(&node_key)
+                .map_err(|_| "Invalid node signing key")?;
+            mac.update(canonical.as_bytes());
+            let signature = hex::encode(mac.finalize().into_bytes());
+
+            let response = reqwest::Client::new()
+                .post(heartbeat_url)
+                .json(&serde_json::json!({
+                    "node_id": node_id,
+                    "timestamp": timestamp,
+                    "version": version,
+                    "runtime_status": runtime_status,
+                    "signature": signature,
+                    "include_tenant_signing_key": true
+                }))
+                .send()
+                .await?
+                .error_for_status()?;
+            let refresh: serde_json::Value = response.json().await?;
+            let tenant_key = refresh["tenant_signing_key"]
+                .as_str()
+                .ok_or("Control Plane identity refresh response is missing tenant_signing_key")?;
+            if hex::decode(tenant_key)?.len() != 32 {
+                return Err("Control Plane returned an invalid organization tenant signing key".into());
+            }
+            identity["tenant_signing_key"] = serde_json::Value::String(tenant_key.to_owned());
+            persist_identity(&identity_path, &identity)?;
+        }
+
+        apply_identity(&identity)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&identity_path, fs::Permissions::from_mode(0o600))?;
+        }
+        return Ok(());
     }
 
     if env::var("PROXIMA_NODE_SIGNING_KEY_HEX")
@@ -220,15 +377,14 @@ async fn bootstrap_node_identity() -> Result<(), Box<dyn std::error::Error + Sen
         return Ok(());
     }
 
-    if identity_path.is_file() {
-        let bytes = fs::read(&identity_path)?;
-        let identity: serde_json::Value = serde_json::from_slice(&bytes)?;
-        apply_identity(&identity)?;
-        return Ok(());
-    }
-
     let url = env::var("PROXIMA_NODE_ENROLLMENT_URL").ok();
-    let token = env::var("PROXIMA_NODE_ENROLLMENT_TOKEN").ok();
+    let enrollment_token_file = env::var_os("PROXIMA_NODE_ENROLLMENT_TOKEN_FILE")
+        .map(PathBuf::from);
+    let token = if let Some(path) = enrollment_token_file.as_ref() {
+        Some(fs::read_to_string(path)?.trim().to_owned())
+    } else {
+        env::var("PROXIMA_NODE_ENROLLMENT_TOKEN").ok()
+    };
     let node_id = env::var("PROXIMA_NODE_ID").ok();
 
     if url.is_none() && token.is_none() && node_id.is_none() {
@@ -251,12 +407,18 @@ async fn bootstrap_node_identity() -> Result<(), Box<dyn std::error::Error + Sen
 
     let identity: serde_json::Value = response.json().await?;
 
-    // Validate the complete identity before persisting it.
+    // Validate both credentials before persisting the identity.
     let key = identity["signing_key"]
         .as_str()
         .ok_or("Enrollment response is missing signing_key")?;
     if hex::decode(key)?.len() != 32 {
         return Err("Enrollment returned an invalid signing key".into());
+    }
+    let tenant_key = identity["tenant_signing_key"]
+        .as_str()
+        .ok_or("Enrollment response is missing the organization-scoped tenant_signing_key")?;
+    if hex::decode(tenant_key)?.len() != 32 {
+        return Err("Enrollment returned an invalid organization tenant signing key".into());
     }
     let _ = identity["organization_id"]
         .as_str()
@@ -265,15 +427,11 @@ async fn bootstrap_node_identity() -> Result<(), Box<dyn std::error::Error + Sen
         .as_str()
         .ok_or("Enrollment response is missing node_id")?;
 
-    let parent = identity_path.parent().ok_or("Invalid node identity path")?;
-    fs::create_dir_all(parent)?;
-
-    let temporary_path = identity_path.with_extension("json.tmp");
-    fs::write(&temporary_path, serde_json::to_vec_pretty(&identity)?)?;
-    fs::rename(&temporary_path, &identity_path)?;
-
+    persist_identity(&identity_path, &identity)?;
     apply_identity(&identity)?;
-    env::remove_var("PROXIMA_NODE_ENROLLMENT_TOKEN");
+    if enrollment_token_file.is_none() {
+        env::remove_var("PROXIMA_NODE_ENROLLMENT_TOKEN");
+    }
 
     eprintln!("Engine node identity loaded successfully.");
     Ok(())
@@ -289,13 +447,25 @@ async fn main() -> io::Result<()> {
     rustls::crypto::CryptoProvider::install_default(rustls::crypto::aws_lc_rs::default_provider())
         .map_err(|_| io::Error::other("failed to install rustls AWS-LC crypto provider"))?;
 
+    // Enrollment must run before configuration is loaded: it supplies the
+    // node identity and organization-scoped tenant verification key.
+    if let Err(error) = bootstrap_node_identity().await {
+        eprintln!("Engine node bootstrap failed: {error}");
+        std::process::exit(1);
+    }
+
     let config = Config::from_env()?;
     let config_tenant_role_prefix = config.tenant_role_prefix.clone();
 
     let verifier = config
         .tenant_signing_key
         .as_deref()
-        .map(TenantTokenVerifier::new)
+        .map(|key| {
+            TenantTokenVerifier::new_with_previous(
+                key,
+                config.tenant_signing_key_previous.as_deref(),
+            )
+        })
         .transpose()
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.to_string()))?;
 
@@ -345,11 +515,6 @@ async fn main() -> io::Result<()> {
         .timeout(std::time::Duration::from_secs(5))
         .build()
         .ok();
-    if let Err(error) = bootstrap_node_identity().await {
-        eprintln!("Engine node bootstrap failed: {error}");
-        std::process::exit(1);
-    }
-
     if let (Some(url), Some(token), Some(client)) = (
         security_event_url.clone(),
         security_event_token.clone(),
@@ -394,6 +559,98 @@ async fn main() -> io::Result<()> {
             }
         });
     }
+    let allow_insecure_attestation_http = matches!(
+        std::env::var("PROXIMA_ATTESTATION_ALLOW_INSECURE_HTTP")
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase()
+            .as_str(),
+        "true" | "1" | "yes"
+    );
+    // Report signed liveness independently of the slower hourly attestation ledger.
+    // This updates Fleet health without turning enrollment into a health assertion.
+    let heartbeat_url = std::env::var("PROXIMA_NODE_HEARTBEAT_URL")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| {
+            std::env::var("PROXIMA_NODE_ENROLLMENT_URL")
+                .ok()
+                .map(|value| value.replace("/api/v1/nodes/enroll", "/api/v1/nodes/heartbeat"))
+        })
+        .or_else(|| {
+            std::env::var("PROXIMA_ATTESTATION_INGEST_URL")
+                .ok()
+                .map(|value| value.replace("/api/v1/attestations", "/api/v1/nodes/heartbeat"))
+        })
+        .filter(|url| attestation_ingest_url_allowed(url, allow_insecure_attestation_http));
+    let heartbeat_identity = (
+        std::env::var("PROXIMA_NODE_ID").ok(),
+        std::env::var("PROXIMA_ORGANIZATION_ID").ok(),
+        std::env::var("PROXIMA_NODE_SIGNING_KEY_HEX").ok(),
+    );
+    if let (Some(url), (Some(node_id), Some(organization_id), Some(key_hex))) =
+        (heartbeat_url, heartbeat_identity)
+    {
+        let signing_key = hex::decode(&key_hex).ok().filter(|key| key.len() == 32);
+        if let Some(signing_key) = signing_key {
+            let client = reqwest::Client::builder()
+                .redirect(reqwest::redirect::Policy::none())
+                .timeout(std::time::Duration::from_secs(8))
+                .build();
+            if let Ok(client) = client {
+                tokio::spawn(async move {
+                    let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
+                    loop {
+                        interval.tick().await;
+                        let timestamp = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|value| value.as_secs() as i64)
+                            .unwrap_or_default();
+                        let version = env!("CARGO_PKG_VERSION").to_string();
+                        let runtime_status = "running";
+                        let signature = match sign_node_heartbeat(
+                            &signing_key,
+                            &node_id,
+                            &organization_id,
+                            timestamp,
+                            &version,
+                            runtime_status,
+                        ) {
+                            Ok(signature) => signature,
+                            Err(_) => {
+                                error!("could not initialize node heartbeat signature");
+                                continue;
+                            }
+                        };
+                        let payload = serde_json::json!({
+                            "node_id": node_id,
+                            "timestamp": timestamp,
+                            "version": version,
+                            "runtime_status": runtime_status,
+                            "signature": signature
+                        });
+                        match client.post(&url).json(&payload).send().await {
+                            Ok(response) if response.status().is_success() => {
+                                info!(node_id = %node_id, "signed node heartbeat accepted");
+                            }
+                            Ok(response) => {
+                                error!(node_id = %node_id, status = %response.status(), "node heartbeat rejected; retrying on next interval");
+                            }
+                            Err(error) => {
+                                error!(node_id = %node_id, %error, "node heartbeat delivery failed; retrying on next interval");
+                            }
+                        }
+                    }
+                });
+                info!("signed node heartbeat enabled; interval=30s");
+            }
+        } else {
+            error!("node heartbeat disabled because the enrolled signing key is invalid");
+        }
+    } else if std::env::var("PROXIMA_NODE_ID").is_ok() {
+        error!("node heartbeat is not configured: verify node identity and PROXIMA_NODE_HEARTBEAT_URL or enrollment URL");
+    }
+
     let attestation_config = AttestationConfig::from_env();
     let attestation_signing_ready = attestation_config.signing_key.is_some();
     let attestation_p99 = std::env::var("PROXIMA_ATTESTATION_P99_OVERHEAD_MS")
@@ -406,14 +663,6 @@ async fn main() -> io::Result<()> {
         let configured_ingest_url = std::env::var("PROXIMA_ATTESTATION_INGEST_URL")
             .ok()
             .filter(|value| !value.trim().is_empty());
-        let allow_insecure_attestation_http = matches!(
-            std::env::var("PROXIMA_ATTESTATION_ALLOW_INSECURE_HTTP")
-                .unwrap_or_default()
-                .trim()
-                .to_ascii_lowercase()
-                .as_str(),
-            "true" | "1" | "yes"
-        );
         let ingest_url = configured_ingest_url
             .clone()
             .filter(|url| attestation_ingest_url_allowed(url, allow_insecure_attestation_http));
@@ -1057,4 +1306,68 @@ mod attestation_ingest_url_tests {
         ));
         assert!(!attestation_ingest_url_allowed("not-a-url", true));
     }
+}
+#[cfg(test)]
+mod node_heartbeat_signature_tests {
+    use super::sign_node_heartbeat;
+
+    #[test]
+    fn heartbeat_signature_is_deterministic_for_the_same_payload() {
+        let key = [7u8; 32];
+        let first = sign_node_heartbeat(
+            &key,
+            "node-a",
+            "org-a",
+            1_800_000_000,
+            "0.1.0",
+            "running",
+        )
+        .unwrap();
+        let second = sign_node_heartbeat(
+            &key,
+            "node-a",
+            "org-a",
+            1_800_000_000,
+            "0.1.0",
+            "running",
+        )
+        .unwrap();
+        assert_eq!(first, second);
+        assert_eq!(first.len(), 64);
+    }
+
+    #[test]
+    fn heartbeat_signature_changes_when_signed_fields_change() {
+        let key = [7u8; 32];
+        let baseline = sign_node_heartbeat(
+            &key,
+            "node-a",
+            "org-a",
+            1_800_000_000,
+            "0.1.0",
+            "running",
+        )
+        .unwrap();
+        let other_node = sign_node_heartbeat(
+            &key,
+            "node-b",
+            "org-a",
+            1_800_000_000,
+            "0.1.0",
+            "running",
+        )
+        .unwrap();
+        let other_time = sign_node_heartbeat(
+            &key,
+            "node-a",
+            "org-a",
+            1_800_000_001,
+            "0.1.0",
+            "running",
+        )
+        .unwrap();
+        assert_ne!(baseline, other_node);
+        assert_ne!(baseline, other_time);
+    }
+
 }

@@ -58,6 +58,7 @@ impl std::error::Error for TenantTokenError {}
 #[derive(Clone)]
 pub struct TenantTokenVerifier {
     secret: Vec<u8>,
+    previous_secret: Option<Vec<u8>>,
     replay_dir: PathBuf,
 }
 
@@ -73,6 +74,25 @@ impl TenantTokenVerifier {
             .unwrap_or_else(|| PathBuf::from("data/proxima-break-glass-replays"));
         Ok(Self {
             secret: secret.to_vec(),
+            previous_secret: None,
+            replay_dir,
+        })
+    }
+
+    pub fn new_with_previous(
+        secret: impl AsRef<[u8]>,
+        previous_secret: Option<&str>,
+    ) -> Result<Self, TenantTokenError> {
+        let secret = secret.as_ref();
+        if secret.len() < 32 || previous_secret.is_some_and(|previous| previous.as_bytes().len() < 32) {
+            return Err(TenantTokenError::InvalidSignature);
+        }
+        let replay_dir = std::env::var_os("PROXIMA_BREAK_GLASS_REPLAY_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("data/proxima-break-glass-replays"));
+        Ok(Self {
+            secret: secret.to_vec(),
+            previous_secret: previous_secret.map(|previous| previous.as_bytes().to_vec()),
             replay_dir,
         })
     }
@@ -87,6 +107,7 @@ impl TenantTokenVerifier {
         }
         Ok(Self {
             secret: secret.to_vec(),
+            previous_secret: None,
             replay_dir,
         })
     }
@@ -124,7 +145,11 @@ impl TenantTokenVerifier {
         }
 
         let expected = sign_payload(&self.secret, version, tenant_id, expires_at);
-        if !constant_time_hex_eq(&expected, signature) {
+        let valid_current = constant_time_hex_eq(&expected, signature);
+        let valid_previous = self.previous_secret.as_ref().is_some_and(|secret| {
+            constant_time_hex_eq(&sign_payload(secret, version, tenant_id, expires_at), signature)
+        });
+        if !valid_current && !valid_previous {
             return Err(TenantTokenError::InvalidSignature);
         }
 
@@ -166,7 +191,11 @@ impl TenantTokenVerifier {
             return Err(TenantTokenError::InvalidFormat);
         }
         let payload = format!("bg1.{tenant_id}.{expires_at}.{nonce}");
-        if !constant_time_hex_eq(&sign_message(&self.secret, &payload), parts[4]) {
+        let valid_current = constant_time_hex_eq(&sign_message(&self.secret, &payload), parts[4]);
+        let valid_previous = self.previous_secret.as_ref().is_some_and(|secret| {
+            constant_time_hex_eq(&sign_message(secret, &payload), parts[4])
+        });
+        if !valid_current && !valid_previous {
             return Err(TenantTokenError::InvalidSignature);
         }
         fs::create_dir_all(&self.replay_dir)
@@ -369,5 +398,28 @@ mod tests {
             verifier.verify("v1.tenant_a.2000.00.extra", 1000),
             Err(TenantTokenError::InvalidFormat)
         );
+    }
+}
+
+#[cfg(test)]
+mod previous_key_tests {
+    use super::*;
+
+    #[test]
+    fn accepts_existing_tokens_with_previous_key_during_rotation() {
+        let previous = "legacy-global-tenant-signing-key-0001";
+        let current = "organization-scoped-tenant-signing-key-01";
+        let verifier = TenantTokenVerifier::new_with_previous(current, Some(previous)).unwrap();
+        let token = format!("v1.tenant_a.2000.{}", sign_payload(previous.as_bytes(), "v1", "tenant_a", 2000));
+        assert_eq!(verifier.verify(&token, 1000).unwrap().tenant_id, "tenant_a");
+    }
+
+    #[test]
+    fn rejects_previous_key_when_not_configured() {
+        let previous = "legacy-global-tenant-signing-key-0001";
+        let current = "organization-scoped-tenant-signing-key-01";
+        let verifier = TenantTokenVerifier::new(current).unwrap();
+        let token = format!("v1.tenant_a.2000.{}", sign_payload(previous.as_bytes(), "v1", "tenant_a", 2000));
+        assert_eq!(verifier.verify(&token, 1000), Err(TenantTokenError::InvalidSignature));
     }
 }

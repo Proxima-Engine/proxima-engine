@@ -40,6 +40,26 @@ jobs:
         uses: Swatinem/rust-cache@v2
       - name: Test public Engine CLI
         run: python3 -m unittest discover -s tests_cli -v
+      - name: Validate customer deployment executor syntax
+        run: node --check deployment-executor/receiver.mjs
+      - name: Validate customer installer scripts
+        run: |
+          bash -n install-customer.sh
+          bash -n install-deployment-executor.sh
+          bash tests/linux-installer-smoke.sh
+          pwsh -NoProfile -Command '$tokens = $null; $errors = $null; [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path "install-customer.ps1"), [ref]$tokens, [ref]$errors) > $null; if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error $_ }; exit 1 }'
+      - name: Validate customer Compose installation contract
+        run: |
+          mkdir -p secrets
+          printf 'test-enrollment-token' > secrets/node_enrollment_token
+          cat > .env <<'EOF'
+          PROXIMA_NODE_ID=00000000-0000-4000-8000-000000000001
+          PROXIMA_NODE_ENROLLMENT_URL=https://api.agataproxima.com/api/v1/nodes/enroll
+          PROXIMA_UPSTREAM_ADDR=127.0.0.1:5432
+          PROXIMA_LISTEN_ADDR=0.0.0.0:6432
+          PROXIMA_ENVIRONMENT=production
+          EOF
+          docker compose -f compose.customer.yaml config --quiet
       - name: Run engine tests
         run: cargo test -p proxima-engine
       - name: Build release engine
@@ -52,3 +72,24 @@ jobs:
         run: docker build -t proxima-engine:ci .
       - name: Verify PgBouncer tenant-pool isolation
         run: bash scripts/test-pgbouncer-pooling.sh
+
+
+  windows-installer:
+    name: Windows customer installer
+    runs-on: windows-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Parse Windows installer
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path "install-customer.ps1"), [ref]$tokens, [ref]$errors) > $null
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_ }
+            exit 1
+          }
+      - name: Execute Windows installer smoke test with Docker host simulation
+        shell: pwsh
+        run: ./tests/windows-installer-smoke.ps1

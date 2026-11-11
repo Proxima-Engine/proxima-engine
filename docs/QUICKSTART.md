@@ -142,3 +142,64 @@ Connect your PostgreSQL client to port 6432. The Engine reads configuration from
 - [ ] Complete the [tenant isolation guide](TENANT_ISOLATION.md).
 - [ ] Connect an existing application using [driver integration recipes](INTEGRATIONS.md).
 - [ ] Review [deployment](DEPLOYMENT.md), [security](SECURITY.md), and [operations](OPERATIONS.md) before routing sensitive workloads.
+
+## Install a registered customer node (Windows and Linux)
+
+This section installs a registered Engine node connected to Agata Proxima Cloud. It is different from the disposable local development stack above.
+
+### 1. Register the node
+
+In Agata Proxima Cloud → Nodes, create the node in the intended organization. Copy the Windows PowerShell setup or Linux shell setup shown with the one-time enrollment token. The token is single-use and is not the tenant signing key.
+
+### 2. Download the Engine installer
+
+Download the [Proxima Engine source ZIP](https://github.com/Proxima-Engine/proxima-engine/archive/refs/heads/main.zip) and extract it. The ZIP includes the Windows PowerShell installer, Linux Bash installer and customer Compose file.
+
+### Windows 10/11
+
+**Prerequisites**
+
+- Docker Desktop installed and running with its WSL 2 backend.
+- Docker Desktop switched to Linux containers.
+- Network access from the Engine container to the PostgreSQL upstream and Agata Proxima HTTPS enrollment/heartbeat endpoints.
+
+**Install**
+
+Open PowerShell in the extracted Engine repository folder. Paste the Windows setup commands copied from Agata Proxima → Nodes into the same PowerShell session. Then run:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\install-customer.ps1
+```
+
+The installer creates `.env` and `secrets/node_enrollment_token` from the copied node configuration. It asks for the PostgreSQL upstream host and port if `PROXIMA_UPSTREAM_ADDR` is not already set. It validates Docker Desktop's Linux-container mode and Compose v2, validates the Compose configuration, builds and starts the Engine, and waits up to 120 seconds for the actual Docker health state. On success, it prints the local PostgreSQL proxy endpoint `127.0.0.1:6432`.
+
+### Linux
+
+**Prerequisites**
+
+- Docker Engine and Docker Compose v2.
+- Network access from the Engine container to the PostgreSQL upstream and Agata Proxima HTTPS enrollment/heartbeat endpoints.
+
+**Install**
+
+Open a shell in the extracted Engine repository folder. Paste the Linux setup commands copied from Agata Proxima → Nodes into that same shell session. Then run:
+
+```bash
+chmod +x ./install-customer.sh
+./install-customer.sh
+```
+
+The Bash installer creates `.env` and the one-time enrollment token file, prompts for the PostgreSQL upstream when needed, validates Compose, builds and starts the Engine, and waits for the Docker health check.
+
+### After installation
+
+During first enrollment, the Control Plane returns the node heartbeat key and a separate organization-scoped tenant-token verification key over HTTPS. The Engine validates both and stores them in the protected node identity file in a named Docker volume. The Control Plane master signing secret is never sent to customer nodes. No customer has to download, create or manually copy a tenant signing key.
+
+Confirm the node reports healthy in Agata Proxima Fleet after its signed heartbeat. The one-time enrollment token is consumed on first bootstrap. Replace the contents of `secrets/node_enrollment_token` with the harmless text `enrollment-complete`; keep the file itself in place because Compose references it on later starts.
+
+The Engine listens on port 6432 and binds to host loopback by default. The upstream PostgreSQL hostname must be reachable from inside the Engine container. Do not set it to `localhost` unless PostgreSQL runs in that same container. Keep port 6432 private; use a private network and firewall policy when the application is on another host.
+
+### Installation scope
+
+The PowerShell installer installs and operates the Proxima Engine Linux container on a Windows host. It is not an MSI package or a native Windows executable/service. The reference deployment-executor service installer uses Linux systemd; executor service installation on Windows is not included in this Engine installer. See [Node enrollment](NODE_ENROLLMENT.md) and [Customer-managed deployment executor](CUSTOMER_DEPLOYMENT_EXECUTOR.md) for the complete enrollment and deployment lifecycle.

@@ -6,7 +6,7 @@ This guide describes the Engine controls, their activation settings, and the ope
 
 ## Implemented security controls
 
-- **Signed tenant context:** when `PROXIMA_TENANT_SIGNING_KEY` is configured, the Engine requires a valid, unexpired HMAC-SHA256 tenant token during PostgreSQL startup. Missing, malformed, expired, and incorrectly signed tokens are rejected.
+- **Signed tenant context:** when `PROXIMA_TENANT_SIGNING_KEY` or `PROXIMA_TENANT_SIGNING_KEY_FILE` is configured, the Engine requires a valid, unexpired HMAC-SHA256 tenant token during PostgreSQL startup. Prefer the file setting with a mounted secret in customer deployments. Missing, malformed, expired, and incorrectly signed tokens are rejected.
 - **Tenant-specific role routing:** the verified tenant ID is mapped through `PROXIMA_TENANT_ROLE_PREFIX` to the corresponding PostgreSQL login role. Each accepted Engine client session has its own upstream PostgreSQL session.
 - **PostgreSQL authorization:** tenant roles operate under PostgreSQL grants and RLS policies. Use non-superuser roles without `BYPASSRLS`, and apply `FORCE ROW LEVEL SECURITY` where the schema requires it.
 - **Client and upstream TLS:** configure the client certificate/key pair and set `PROXIMA_TLS_REQUIRE_CLIENT=true` to reject plaintext client connections. Configure upstream `verify-full` with a trusted CA and expected server name.
@@ -27,7 +27,7 @@ The Engine keeps each accepted client connection bound to its own upstream sessi
 ## Required deployment configuration
 
 - [ ] Pin and review the exact source commit or container image digest.
-- [ ] Set `PROXIMA_TENANT_SIGNING_KEY` and verify that tenant-token enforcement is active in the Engine status output.
+- [ ] Mount the tenant signing key as a secret file and set `PROXIMA_TENANT_SIGNING_KEY_FILE`; verify that tenant-token enforcement is active in the Engine status output.
 - [ ] Issue short-lived tenant tokens only from a trusted backend after authenticating the user and authorizing tenant membership.
 - [ ] Use non-superuser PostgreSQL tenant roles without `BYPASSRLS`.
 - [ ] Apply and test RLS policies for every tenant-scoped table and relevant read/write operation.

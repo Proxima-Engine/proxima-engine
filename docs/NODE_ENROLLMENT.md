@@ -39,7 +39,29 @@ Keep the token in a protected terminal or secret store. Do not paste it into Git
 
 Use HTTPS for remote control-plane hosts. Loopback HTTP is reserved for local development.
 
-## 2. Configure the Engine — PowerShell
+## 2. One-command Docker installation (hosted Cloud)
+
+This is the supported customer path. Docker Engine and Docker Compose v2 are required on Linux. Windows 10/11 hosts use Docker Desktop with its WSL 2 backend and Linux containers. Agata Proxima does not provision, own, or receive the customer's PostgreSQL credentials.
+
+1. Register a node in Agata Proxima Cloud → Nodes. Copy the Windows PowerShell setup or Linux shell setup shown with the one-time enrollment token.
+2. Download the public Proxima Engine source ZIP and extract it on the customer host.
+3. Open a terminal in the extracted repository folder, paste the matching setup commands into that same terminal session, and run the installer:
+   - Windows: `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` followed by `./install-customer.ps1`
+   - Linux: `chmod +x ./install-customer.sh` followed by `./install-customer.sh`
+4. When prompted, enter the PostgreSQL upstream host and port reachable from inside the Engine container. The installer writes the node's `.env` file and the one-time enrollment token file automatically.
+5. Confirm the installer reports a healthy Engine container, then confirm the node reports healthy in Agata Proxima Fleet after its signed heartbeat.
+
+The customer Compose file mounts only the one-time enrollment token as a read-only secret. During the HTTPS enrollment exchange, the Control Plane returns the generated node heartbeat key and a separate organization-scoped tenant-token verification key. The Engine validates both and stores them in the protected node identity file. The Control Plane master signing secret is never sent to customer nodes. The identity file is persisted in a named Docker volume; on Unix, it is created with owner-only permissions. No customer has to download or manually copy a tenant signing key.
+
+The enrollment token is consumed during the first bootstrap. After Fleet shows the node as healthy, replace the contents of `secrets/node_enrollment_token` with the harmless text `enrollment-complete`. Keep the file itself in place because Compose references it on subsequent starts. The persisted identity is used on every later start.
+
+The Windows PowerShell installer checks Docker Desktop's Linux-container mode, Compose v2, the generated environment and token file, then builds and starts the Engine and waits for the actual Docker health state. It is a Windows host installer for the Linux Engine container, not an MSI or a native Windows service binary.
+
+The Linux Bash installer performs the same setup and health checks. Keep the repository's `.env` and `secrets/` directory accessible only to the operators who administer the node. Do not commit them.
+
+The Engine listens on port 6432. By default, the host port is bound to 127.0.0.1. If the application runs in another container, attach it to the shared `proxima-engine-network` and connect to `engine:6432`. Do not expose port 6432 publicly without a customer-controlled firewall rule. The upstream PostgreSQL address must be reachable from inside the Engine container; localhost means the container itself, not the host.
+
+## 3. Configure the Engine — PowerShell
 
 Replace the placeholders with the values issued for the node:
 
@@ -54,7 +76,7 @@ $env:PROXIMA_UPSTREAM_ADDR = "127.0.0.1:5432"
 cargo run -p proxima-engine
 ```
 
-The Engine sends `POST /api/v1/nodes/enroll` with JSON fields `node_id` and `enrollment_token`. The control plane validates the one-time token and returns the node identity and signing credential. The Engine validates the response and persists the identity.
+The Engine sends `POST /api/v1/nodes/enroll` with JSON fields `node_id` and `enrollment_token`. The Control Plane validates the one-time token and returns the node heartbeat key plus the organization's derived tenant-token verification key. The Engine validates both credentials and persists them in the protected identity file. The Control Plane master secret is never returned.
 
 Remove the bootstrap token after enrollment:
 
@@ -62,7 +84,7 @@ Remove the bootstrap token after enrollment:
 Remove-Item Env:PROXIMA_NODE_ENROLLMENT_TOKEN -ErrorAction SilentlyContinue
 ```
 
-## 3. Configure the Engine — Bash
+## 4. Configure the Engine — Bash
 
 ```bash
 export PROXIMA_NODE_ID="<node-uuid>"
@@ -76,28 +98,30 @@ unset PROXIMA_NODE_ENROLLMENT_TOKEN
 
 Set the values in the same process environment that starts the Engine. The Engine reads process environment variables; it does not automatically load a plain `.env` file.
 
-## 4. Persist and protect the identity
+## 5. Persist and protect the identity
 
 Default identity paths:
 
 - Windows: `%LOCALAPPDATA%\AgataProxima\node-identity.json`, when `LOCALAPPDATA` exists.
 - Other environments: `data/node-identity.json`.
 
-Set `PROXIMA_NODE_IDENTITY_PATH` to choose another path. The identity file contains the node ID, organization ID, and a 32-byte signing credential. Restrict file permissions and include the file in protected backups.
+Set `PROXIMA_NODE_IDENTITY_PATH` to choose another path. The identity file contains the node ID, organization ID, the 32-byte node heartbeat key and the 32-byte organization-scoped tenant-token verification key. Restrict file permissions and include the file in protected backups. The Control Plane master secret is not stored on the Engine.
 
-The Engine reuses a valid saved identity on later starts, so the one-time enrollment token is needed only for the initial bootstrap. Use a separate identity path for each node.
+The Engine reuses a valid saved identity on later starts, so the one-time enrollment token is needed only for the initial bootstrap. If an existing identity predates organization-scoped tenant keys, the updated Engine uses a signed, domain-separated heartbeat refresh to obtain the key for its organization and updates the identity file without replacing the node UUID or consuming another enrollment token. Use a separate identity path for each node.
 
-## 5. Credential reference
+When the Engine has a registered node identity and a compatible heartbeat endpoint, it sends an HMAC-SHA256 signed liveness report every 30 seconds. The heartbeat uses the enrolled node signing key, is independent of the hourly attestation ledger, and does not assert tenant isolation. Fleet marks a node degraded after 90 seconds without a heartbeat and offline after five minutes. The control plane rejects stale, replayed, incorrectly signed, or revoked-node heartbeats.
+
+## 6. Credential reference
 
 | Variable or file | Purpose | Handling |
 |---|---|---|
 | `PROXIMA_NODE_ENROLLMENT_TOKEN` | One-time bootstrap credential | Short-lived; remove after enrollment |
 | `PROXIMA_NODE_IDENTITY_PATH` | Persistent identity file | Contains a signing credential; protect it |
 | `PROXIMA_NODE_SIGNING_KEY_HEX` | 32-byte node signing key, hex encoded | Normally loaded from saved identity; never commit |
-| `PROXIMA_TENANT_SIGNING_KEY` | HMAC key for application-signed tenant context | Separate from node credentials; at least 32 bytes |
+| `PROXIMA_TENANT_SIGNING_KEY` | Organization-scoped HMAC key for tenant context | Automatically loaded from the enrolled identity on Cloud-registered nodes; for manual provisioning, configure the trusted signer's matching key. Never copy the Control Plane master secret to a customer node |
 | `PROXIMA_ATTESTATION_INGEST_TOKEN` | Optional bearer credential for a compatible evidence receiver | Use the required `aga_` prefix; never commit |
 
-These credentials serve different trust boundaries. Keep each in its designated configuration field and rotate it through the corresponding issuer.
+These credentials serve different trust boundaries. The Control Plane master secret derives organization-specific tenant keys; the node identity carries only the key for its own organization. Keep each credential in its designated secret store and rotate it through the corresponding issuer.
 
 ## Troubleshooting
 
@@ -107,4 +131,4 @@ These credentials serve different trust boundaries. Keep each in its designated 
 - **Identity file error:** check the path, JSON format, and read/write permissions.
 - **Engine exits before listening:** inspect the startup error and verify all supplied enrollment values.
 
-See [Configuration](CONFIGURATION.md), [Operations](OPERATIONS.md), and [Cloud control-plane boundary](CLOUD_CONTROL_PLANE.md).
+See [Configuration](CONFIGURATION.md), [Operations](OPERATIONS.md), [Customer deployment executor](CUSTOMER_DEPLOYMENT_EXECUTOR.md), and [Cloud control-plane boundary](CLOUD_CONTROL_PLANE.md).

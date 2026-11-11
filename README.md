@@ -15,7 +15,7 @@
   <a href="https://www.linkedin.com/company/agata-proxima/">LinkedIn</a>
 </p>
 
-**Start:** [What is Agata Proxima?](#what-is-agata-proxima) · [Launch evaluation](docs/LAUNCH.md) · [Quickstart](docs/QUICKSTART.md) · [Local developer mode](docs/LOCAL_DEVELOPMENT.md) · [Engine CLI](docs/CLI.md) · [Documentation index](docs/README.md)
+**Start:** [What is Agata Proxima?](#what-is-agata-proxima) · [Customer Docker install](docs/NODE_ENROLLMENT.md#2-one-command-docker-installation-hosted-cloud) · [Guided customer install (Windows/Linux)](docs/CUSTOMER_DEPLOYMENT_EXECUTOR.md#install-the-engine-customer-node) · [Deployment executor](docs/CUSTOMER_DEPLOYMENT_EXECUTOR.md) · [Launch evaluation](docs/LAUNCH.md) · [Quickstart](docs/QUICKSTART.md) · [Local developer mode](docs/LOCAL_DEVELOPMENT.md) · [Engine CLI](docs/CLI.md) · [Documentation index](docs/README.md)
 
 **Technical guides:** [Architecture](docs/ARCHITECTURE.md) · [Tenant isolation](docs/TENANT_ISOLATION.md) · [Driver integrations](docs/INTEGRATIONS.md) · [API and metrics](docs/API.md) · [Security](docs/SECURITY.md) · [Deployment](docs/DEPLOYMENT.md) · [Verification](docs/VERIFICATION.md)
 
@@ -128,7 +128,8 @@ See [Tenant isolation](docs/TENANT_ISOLATION.md), [Verification](docs/VERIFICATI
 | [Tenant isolation](docs/TENANT_ISOLATION.md) | PostgreSQL roles, RLS policies, signed context, and test results |
 | [Driver integrations](docs/INTEGRATIONS.md) | psql, Node.js, Python, and Rust connection examples |
 | [API reference](docs/API.md) | PostgreSQL endpoint, health/status routes, and Prometheus metrics |
-| [Node enrollment](docs/NODE_ENROLLMENT.md) | Engine-side node identity and enrollment contract |
+| [Node enrollment](docs/NODE_ENROLLMENT.md) | Customer Docker installation, one-time enrollment, signed heartbeat, and identity persistence |
+| [Customer deployment executor](docs/CUSTOMER_DEPLOYMENT_EXECUTOR.md) | Install and operate the customer-managed, signed Docker Compose deployment executor |
 | [Deployment](docs/DEPLOYMENT.md) | Container build, TLS, networking, persistence, and deployment configuration |
 | [Operations](docs/OPERATIONS.md) | Health checks, logs, monitoring, recovery, and troubleshooting |
 | [Engineering case study](docs/ENGINEERING_CASE_STUDY.md) | Executed tenant-isolation, RLS, PgBouncer, concurrency, authentication, and recovery results |
@@ -158,6 +159,92 @@ The Proxima Engine source and covered documentation are distributed under the [M
 
 ## Contribute
 
-Use [GitHub Issues](https://github.com/Agata-Proxima/proxima-engine/issues) for reproducible Engine bugs and feature requests. Read [Contributing](CONTRIBUTING.md) before submitting a pull request. For vulnerabilities, use the private reporting process in [SECURITY.md](SECURITY.md).
+Use [GitHub Issues](https://github.com/Proxima-Engine/proxima-engine/issues) for reproducible Engine bugs and feature requests. Read [Contributing](CONTRIBUTING.md) before submitting a pull request. For vulnerabilities, use the private reporting process in [SECURITY.md](SECURITY.md).
 
 <p align="center">Built by Agata Proxima · <a href="https://agataproxima.com">agataproxima.com</a> · <a href="https://github.com/Agata-Proxima">GitHub organization</a></p>
+
+## Install a registered Engine node on Windows or Linux
+
+The customer-node installer supports Windows 10/11 hosts running Docker Desktop with the WSL 2 backend, Linux containers, and Docker Compose v2. Windows users have a dedicated PowerShell installer; Linux users have a Bash installer. Both install the same Proxima Engine container and use the same signed enrollment and heartbeat protocol.
+
+### Windows downloads
+
+1. Download the [Proxima Engine source ZIP](https://github.com/Proxima-Engine/proxima-engine/archive/refs/heads/main.zip) and extract it.
+2. In Agata Proxima Cloud → Nodes, copy the Windows PowerShell setup commands shown with the node's one-time enrollment token.
+3. Keep the included [Windows PowerShell installer](https://raw.githubusercontent.com/Proxima-Engine/proxima-engine/main/install-customer.ps1) and [customer Compose file](https://raw.githubusercontent.com/Proxima-Engine/proxima-engine/main/compose.customer.yaml) together in the extracted repository folder.
+4. Paste the copied setup commands into the same PowerShell session. The installer generates `.env` and `secrets/node_enrollment_token`; it prompts for the PostgreSQL upstream address if it is not set. No tenant signing key download is required.
+
+### Windows prerequisites
+
+- Windows 10/11 with Docker Desktop configured to use the WSL 2 backend and Linux containers.
+- Docker daemon running before installation.
+- The Windows setup commands copied from the registered node in Node Management.
+- Network access from the Engine container to the configured PostgreSQL upstream and Agata Proxima HTTPS enrollment/heartbeat endpoints.
+
+The Engine is distributed as a Linux container. On Windows, Docker Desktop runs that container through its Linux/WSL 2 backend; this is the supported Windows installation path. The PowerShell installer is a Windows host installer, not an MSI and not a native Windows service binary.
+
+### Run the Windows installer
+
+Open PowerShell in the extracted folder. If the machine's execution policy blocks a locally downloaded script, allow it for this PowerShell process only:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\install-customer.ps1
+```
+
+The installer performs these checks and actions in order:
+
+1. Generates the node environment file and one-time enrollment-token secret from the copied setup commands.
+2. Prompts for the PostgreSQL upstream host and port when it is not already configured.
+3. Confirms the Docker CLI and a running Docker daemon.
+4. Confirms that Docker is using Linux containers and Docker Compose v2 is available.
+5. Validates the customer Compose configuration.
+6. Builds and starts the Engine container.
+7. Waits up to 120 seconds for the container's Docker health check to report `healthy`.
+8. Prints container status and the local PostgreSQL proxy endpoint.
+
+A successful installation prints **Proxima Engine is healthy**. Then open Agata Proxima → Nodes/Fleet and confirm the registered node reports healthy after its signed heartbeat arrives. During first enrollment, the Control Plane returns the node heartbeat key and an organization-scoped tenant verification key over HTTPS. The Engine stores both in its protected identity file in a named Docker volume. The Control Plane master signing secret is never sent to customer nodes. After the node is healthy, replace the contents of `secrets/node_enrollment_token` with `enrollment-complete`; keep the file in place for subsequent Compose starts.
+
+### Verify and operate on Windows
+
+```powershell
+docker compose -f compose.customer.yaml ps
+docker compose -f compose.customer.yaml logs --tail 100 engine
+$containerId = docker compose -f compose.customer.yaml ps -q engine
+docker inspect --format '{{.State.Health.Status}}' $containerId
+```
+
+The final command prints the container health state. To verify SQL connectivity, connect your application or a PostgreSQL client to `127.0.0.1:6432` using the database credentials configured for your upstream PostgreSQL service.
+
+Restart and stop the registered node:
+
+```powershell
+docker compose -f compose.customer.yaml restart engine
+docker compose -f compose.customer.yaml down
+```
+
+Start it again without rebuilding:
+
+```powershell
+docker compose -f compose.customer.yaml up -d
+```
+
+### Linux installation
+
+Linux customers copy the Linux shell setup commands from Agata Proxima → Nodes and paste them into a shell in the extracted repository folder. The Bash installer creates the environment and enrollment-token secret automatically:
+
+```bash
+chmod +x ./install-customer.sh
+./install-customer.sh
+```
+
+For the Linux deployment-executor service installer and its security requirements, see [Customer-managed deployment executor](CUSTOMER_DEPLOYMENT_EXECUTOR.md).
+
+### Network and security requirements
+
+- The Engine listens on TCP 6432 and binds to host loopback by default. Keep this binding when the application runs on the same host.
+- If the application runs in another container, attach it to the configured Compose network and use the Engine service name and port. For a different host, use a private network/VPN, a deliberate private bind address, and a restrictive firewall rule.
+- The configured PostgreSQL upstream address is resolved from inside the Engine container. `localhost` refers to the container itself, not the Windows host. Use a reachable database hostname or the appropriate Docker Desktop host gateway address.
+- Never expose PostgreSQL proxy port 6432, the status interface, or metrics publicly.
+- Never commit, email, or paste `.env`, enrollment tokens, node identity files, operator API keys, or webhook secrets.
+- The Control Plane master tenant-signing secret stays in the Control Plane. A customer Engine receives only its own organization's derived verification key during HTTPS enrollment; the Engine stores it in the protected identity file.
