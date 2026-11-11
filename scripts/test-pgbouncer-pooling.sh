@@ -77,6 +77,59 @@ run_tenant() {
       -c "$sql"
 }
 
+# Exercise backend-local state across actual PgBouncer transaction releases.
+# Proxima's tenant identity is authenticated at startup and mapped to a dedicated
+# PostgreSQL role; this synthetic GUC is a probe for PostgreSQL/PgBouncer cleanup,
+# not a claim that Proxima stores its tenant identity in a session variable.
+assert_context_cleared_on_reused_backend() {
+  local label="$1"
+  local token="$2"
+  local password="$3"
+  local begin_sql="$4"
+  local end_sql="$5"
+  local setup_result before_pid reuse_result reused_pid context
+
+  setup_result="$(run_tenant "$token" "$password" \
+    "$begin_sql SELECT pg_backend_pid(); $end_sql")"
+  before_pid="$(printf '%s\\n' "$setup_result" | tail -n 1)"
+  if [[ ! "$before_pid" =~ ^[0-9]+$ ]]; then
+    echo "FAIL: $label did not return a valid backend PID (got: $before_pid)" >&2
+    exit 1
+  fi
+
+  reuse_result="$(run_tenant "$token" "$password" \
+    "SELECT pg_backend_pid() || '|' || COALESCE(NULLIF(current_setting('proxima.tenant_id', true), ''), '<unset>')")"
+  reused_pid="${reuse_result%%|*}"
+  context="${reuse_result#*|}"
+
+  test "$reused_pid" = "$before_pid" || {
+    echo "FAIL: $label did not inspect the same reused backend (before=$before_pid after=$reused_pid)" >&2
+    exit 1
+  }
+  test "$context" = "<unset>" || {
+    echo "FAIL: $label leaked tenant context '$context' onto reused backend $reused_pid" >&2
+    exit 1
+  }
+
+  echo "PASS: $label cleared before backend $reused_pid was reused"
+}
+
+# SET LOCAL semantics: transaction-scoped identity must disappear on COMMIT.
+assert_context_cleared_on_reused_backend \
+  "COMMIT transaction-local context" "$token_a" tenant-a-password \
+  "BEGIN; SELECT set_config('proxima.tenant_id', 'tenant_a', true);" "COMMIT"
+
+# SET LOCAL semantics must also disappear when the transaction rolls back.
+assert_context_cleared_on_reused_backend \
+  "ROLLBACK transaction-local context" "$token_a" tenant-a-password \
+  "BEGIN; SELECT set_config('proxima.tenant_id', 'tenant_a', true);" "ROLLBACK"
+
+# A session-scoped setting survives COMMIT in PostgreSQL. Its disappearance on
+# the same backend proves PgBouncer's configured DISCARD ALL reset ran before reuse.
+assert_context_cleared_on_reused_backend \
+  "PgBouncer DISCARD ALL session-state reset" "$token_a" tenant-a-password \
+  "BEGIN; SELECT set_config('proxima.tenant_id', 'tenant_a', false);" "COMMIT"
+
 # Confirm tenant A and tenant B each receive only their own data.
 test "$(run_tenant "$token_a" tenant-a-password \
   "SELECT string_agg(secret, ',' ORDER BY secret) FROM pgbouncer_tenant_test.records")" = "A-secret"
@@ -132,6 +185,6 @@ if PGPASSWORD=tenant-a-password PGOPTIONS='' \
   exit 1
 fi
 
-echo "PASS: PgBouncer transaction pooling reused each tenant role's backend, kept tenant pools separate, denied cross-tenant reads/writes, and rejected invalid/missing tenant context."
+echo "PASS: PgBouncer transaction pooling reused each tenant role's backend, cleared COMMIT/ROLLBACK transaction-local context, reset session state with DISCARD ALL before backend reuse, denied cross-tenant reads/writes, and rejected invalid/missing tenant context."
 echo "Tenant A backend PID: $tenant_a_pid"
 echo "Tenant B backend PID: $tenant_b_pid"
