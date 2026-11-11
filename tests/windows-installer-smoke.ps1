@@ -3,12 +3,13 @@ Set-StrictMode -Version Latest
 
 $sourceRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("proxima-windows-installer-test-" + [guid]::NewGuid().ToString("N"))
-New-Item -ItemType Directory -Path (Join-Path $tempRoot "secrets") -Force | Out-Null
+New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
 Copy-Item (Join-Path $sourceRoot "install-customer.ps1") $tempRoot
 Copy-Item (Join-Path $sourceRoot "compose.customer.yaml") $tempRoot
-Set-Content -LiteralPath (Join-Path $tempRoot ".env") -Value ("PROXIMA_NODE_ID=00000000-0000-4000-8000-000000000001" + [Environment]::NewLine + "PROXIMA_UPSTREAM_ADDR=postgres:5432") -NoNewline
-Set-Content -LiteralPath (Join-Path $tempRoot "secrets/node_enrollment_token") -Value "test-one-time-token" -NoNewline
-Set-Content -LiteralPath (Join-Path $tempRoot "secrets/tenant_signing_key") -Value "0123456789abcdef0123456789abcdef" -NoNewline
+$env:PROXIMA_NODE_ID = "00000000-0000-4000-8000-000000000001"
+$env:PROXIMA_NODE_ENROLLMENT_URL = "https://api.agataproxima.com/api/v1/nodes/enroll"
+$env:PROXIMA_NODE_ENROLLMENT_TOKEN = "test-one-time-token"
+$env:PROXIMA_UPSTREAM_ADDR = "postgres:5432"
 
 $global:dockerCalls = [System.Collections.Generic.List[string]]::new()
 function global:docker {
@@ -28,6 +29,18 @@ function global:docker {
 
 try {
   & (Join-Path $tempRoot "install-customer.ps1")
+
+  $generatedEnv = Get-Content -LiteralPath (Join-Path $tempRoot ".env") -Raw
+  $generatedToken = Get-Content -LiteralPath (Join-Path $tempRoot "secrets/node_enrollment_token") -Raw
+  if ($generatedEnv -notmatch "PROXIMA_UPSTREAM_ADDR=postgres:5432") {
+    throw "Windows installer did not generate the PostgreSQL upstream setting."
+  }
+  if ($generatedToken.Trim() -ne "test-one-time-token") {
+    throw "Windows installer did not create the one-time enrollment secret file correctly."
+  }
+  if (Test-Path Env:PROXIMA_NODE_ENROLLMENT_TOKEN) {
+    throw "Windows installer did not remove the one-time token from the current process environment."
+  }
 
   $requiredCalls = @(
     "info --format {{.OSType}}",
