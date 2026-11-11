@@ -19,6 +19,9 @@ if (-not (Test-Path -LiteralPath (Join-Path $root ".env") -PathType Leaf)) {
   if ([string]::IsNullOrWhiteSpace($env:PROXIMA_NODE_ENROLLMENT_URL)) {
     $env:PROXIMA_NODE_ENROLLMENT_URL = "https://api.agataproxima.com/api/v1/nodes/enroll"
   }
+  if ([string]::IsNullOrWhiteSpace($env:PROXIMA_NODE_HEARTBEAT_URL)) {
+    $env:PROXIMA_NODE_HEARTBEAT_URL = $env:PROXIMA_NODE_ENROLLMENT_URL.Replace("/api/v1/nodes/enroll", "/api/v1/nodes/heartbeat")
+  }
   if ([string]::IsNullOrWhiteSpace($env:PROXIMA_UPSTREAM_ADDR)) {
     $env:PROXIMA_UPSTREAM_ADDR = Read-Host "PostgreSQL upstream host:port (for example, db.example.com:5432)"
   }
@@ -31,6 +34,7 @@ if (-not (Test-Path -LiteralPath (Join-Path $root ".env") -PathType Leaf)) {
   @(
     "PROXIMA_NODE_ID=$($env:PROXIMA_NODE_ID)"
     "PROXIMA_NODE_ENROLLMENT_URL=$($env:PROXIMA_NODE_ENROLLMENT_URL)"
+    "PROXIMA_NODE_HEARTBEAT_URL=$($env:PROXIMA_NODE_HEARTBEAT_URL)"
     "PROXIMA_UPSTREAM_ADDR=$($env:PROXIMA_UPSTREAM_ADDR)"
     "PROXIMA_LISTEN_ADDR=$($env:PROXIMA_LISTEN_ADDR)"
     "PROXIMA_ENVIRONMENT=production"
