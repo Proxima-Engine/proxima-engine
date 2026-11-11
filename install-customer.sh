@@ -8,6 +8,7 @@ command -v docker >/dev/null 2>&1 || { echo "Docker CLI is required." >&2; exit 
 if [[ ! -f .env ]]; then
   : "${PROXIMA_NODE_ID:?Set PROXIMA_NODE_ID using the enrollment configuration copied from Agata Proxima → Nodes}"
   PROXIMA_NODE_ENROLLMENT_URL="${PROXIMA_NODE_ENROLLMENT_URL:-https://api.agataproxima.com/api/v1/nodes/enroll}"
+  PROXIMA_NODE_HEARTBEAT_URL="${PROXIMA_NODE_HEARTBEAT_URL:-${PROXIMA_NODE_ENROLLMENT_URL%/enroll}/heartbeat}"
   if [[ -z "${PROXIMA_UPSTREAM_ADDR:-}" ]]; then
     read -r -p "PostgreSQL upstream host:port (for example, db.example.com:5432): " PROXIMA_UPSTREAM_ADDR
   fi
@@ -15,6 +16,7 @@ if [[ ! -f .env ]]; then
   cat > .env <<EOF
 PROXIMA_NODE_ID=$PROXIMA_NODE_ID
 PROXIMA_NODE_ENROLLMENT_URL=$PROXIMA_NODE_ENROLLMENT_URL
+PROXIMA_NODE_HEARTBEAT_URL=$PROXIMA_NODE_HEARTBEAT_URL
 PROXIMA_UPSTREAM_ADDR=$PROXIMA_UPSTREAM_ADDR
 PROXIMA_LISTEN_ADDR=${PROXIMA_LISTEN_ADDR:-0.0.0.0:6432}
 PROXIMA_ENVIRONMENT=production
