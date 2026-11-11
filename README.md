@@ -169,9 +169,9 @@ The customer-node installer supports Windows 10/11 hosts running Docker Desktop 
 
 ### Windows downloads
 
-1. Download the [Proxima Engine source ZIP](https://github.com/Proxima-Engine/proxima-engine/archive/refs/heads/feat/cloud-node-heartbeat-20261110.zip) and extract it.
+1. Download the [Proxima Engine source ZIP](https://github.com/Proxima-Engine/proxima-engine/archive/refs/heads/main.zip) and extract it.
 2. Download the node-specific `.env`, `node_enrollment_token`, and `tenant_signing_key` files from Agata Proxima Cloud → Node Management → the registered node's setup/download section. These are generated credentials; they are not public repository files.
-3. Download the [Windows PowerShell installer](https://raw.githubusercontent.com/Proxima-Engine/proxima-engine/feat/cloud-node-heartbeat-20261110/install-customer.ps1) if it is not already present in the ZIP. The [customer Compose file](https://raw.githubusercontent.com/Proxima-Engine/proxima-engine/feat/cloud-node-heartbeat-20261110/compose.customer.yaml) must remain beside it.
+3. Download the [Windows PowerShell installer](https://raw.githubusercontent.com/Proxima-Engine/proxima-engine/main/install-customer.ps1) if it is not already present in the ZIP. The [customer Compose file](https://raw.githubusercontent.com/Proxima-Engine/proxima-engine/main/compose.customer.yaml) must remain beside it.
 4. In the extracted folder, create a directory named `secrets`. Place the downloaded secret files there using the exact extensionless filenames:
    - `secrets/node_enrollment_token`
    - `secrets/tenant_signing_key`
