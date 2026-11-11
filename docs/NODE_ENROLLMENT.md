@@ -107,7 +107,7 @@ Default identity paths:
 
 Set `PROXIMA_NODE_IDENTITY_PATH` to choose another path. The identity file contains the node ID, organization ID, the 32-byte node heartbeat key and the 32-byte organization-scoped tenant-token verification key. Restrict file permissions and include the file in protected backups. The Control Plane master secret is not stored on the Engine.
 
-The Engine reuses a valid saved identity on later starts, so the one-time enrollment token is needed only for the initial bootstrap. Use a separate identity path for each node.
+The Engine reuses a valid saved identity on later starts, so the one-time enrollment token is needed only for the initial bootstrap. If an existing identity predates organization-scoped tenant keys, the updated Engine uses a signed, domain-separated heartbeat refresh to obtain the key for its organization and updates the identity file without replacing the node UUID or consuming another enrollment token. Use a separate identity path for each node.
 
 When the Engine has a registered node identity and a compatible heartbeat endpoint, it sends an HMAC-SHA256 signed liveness report every 30 seconds. The heartbeat uses the enrolled node signing key, is independent of the hourly attestation ledger, and does not assert tenant isolation. Fleet marks a node degraded after 90 seconds without a heartbeat and offline after five minutes. The control plane rejects stale, replayed, incorrectly signed, or revoked-node heartbeats.
 
