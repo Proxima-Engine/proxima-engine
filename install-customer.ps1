@@ -22,6 +22,9 @@ if (-not (Test-Path -LiteralPath (Join-Path $root ".env") -PathType Leaf)) {
   if ([string]::IsNullOrWhiteSpace($env:PROXIMA_UPSTREAM_ADDR)) {
     $env:PROXIMA_UPSTREAM_ADDR = Read-Host "PostgreSQL upstream host:port (for example, db.example.com:5432)"
   }
+  if ([string]::IsNullOrWhiteSpace($env:PROXIMA_LISTEN_ADDR)) {
+    $env:PROXIMA_LISTEN_ADDR = "0.0.0.0:6432"
+  }
   if ([string]::IsNullOrWhiteSpace($env:PROXIMA_UPSTREAM_ADDR)) {
     throw "A PostgreSQL upstream address is required."
   }
@@ -29,7 +32,7 @@ if (-not (Test-Path -LiteralPath (Join-Path $root ".env") -PathType Leaf)) {
     "PROXIMA_NODE_ID=$($env:PROXIMA_NODE_ID)"
     "PROXIMA_NODE_ENROLLMENT_URL=$($env:PROXIMA_NODE_ENROLLMENT_URL)"
     "PROXIMA_UPSTREAM_ADDR=$($env:PROXIMA_UPSTREAM_ADDR)"
-    "PROXIMA_LISTEN_ADDR=$($env:PROXIMA_LISTEN_ADDR ?? '0.0.0.0:6432')"
+    "PROXIMA_LISTEN_ADDR=$($env:PROXIMA_LISTEN_ADDR)"
     "PROXIMA_ENVIRONMENT=production"
   ) | Set-Content -LiteralPath (Join-Path $root ".env") -Encoding ascii
 }
