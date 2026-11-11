@@ -240,6 +240,17 @@ chmod +x ./install-customer.sh
 
 For the Linux deployment-executor service installer and its security requirements, see [Customer-managed deployment executor](CUSTOMER_DEPLOYMENT_EXECUTOR.md).
 
+## Customer-managed deployment executor
+
+The Engine node installer and the deployment executor are separate services:
+
+- **Engine node:** the PowerShell installer `install-customer.ps1` supports Windows hosts using Docker Desktop in Linux-container mode. The Bash installer `install-customer.sh` supports Linux hosts with Docker Engine and Compose v2. Both install the Engine container and establish signed Fleet heartbeats.
+- **Deployment executor:** this customer-hosted receiver applies approved Engine version changes after Agata sends a signed `deployment.created` event. It verifies the signature, node identity and version allowlist, performs fixed Compose operations, checks runtime health and reports the observed result to the Control Plane.
+- **Linux production service:** the supplied `install-deployment-executor.sh` installs the receiver as a protected systemd service. It requires Node.js 22+, Docker Engine/Compose, systemd and a customer-managed HTTPS reverse proxy.
+- **Windows executor host:** the Node.js receiver can run interactively for development or staging. Production requires a customer-managed Windows service wrapper with a protected service account, or a customer-owned orchestrator. The Linux systemd installer is not a Windows service installer.
+
+In Agata Proxima, **Deployments → Set up deployment executor** creates the dedicated organization API key and signed webhook and returns the one-time `deployment-executor.env` file. It does not remotely install software or configure DNS. Install the public executor on the customer host first, configure its HTTPS route, then use the dashboard wizard to provision the credentials. Follow the [complete customer deployment executor guide](docs/CUSTOMER_DEPLOYMENT_EXECUTOR.md) for the installation, configuration, security and rollback procedure.
+
 ### Network and security requirements
 
 - The Engine listens on TCP 6432 and binds to host loopback by default. Keep this binding when the application runs on the same host.
