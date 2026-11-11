@@ -151,7 +151,7 @@ This section installs a registered Engine node connected to Agata Proxima Cloud.
 
 **Downloads required**
 
-- [Download the Engine source ZIP](https://github.com/Proxima-Engine/proxima-engine/archive/refs/heads/feat/cloud-node-heartbeat-20261110.zip) and extract it.
+- [Download the Engine source ZIP](https://github.com/Proxima-Engine/proxima-engine/archive/refs/heads/main.zip) and extract it.
 - From Agata Proxima Cloud → Node Management, download the registered node's `.env`, one-time `node_enrollment_token`, and `tenant_signing_key`.
 - The ZIP includes [install-customer.ps1](../install-customer.ps1) and [compose.customer.yaml](../compose.customer.yaml). These files must stay together in the extracted folder.
 
