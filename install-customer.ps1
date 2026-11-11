@@ -43,7 +43,7 @@ if (-not (Test-Path -LiteralPath $tokenPath -PathType Leaf)) {
     throw "The one-time enrollment token is missing. Copy the enrollment configuration from Agata Proxima → Nodes and rerun this installer."
   }
   New-Item -ItemType Directory -Force -Path (Split-Path -Parent $tokenPath) | Out-Null
-  [System.IO.File]::WriteAllText($tokenPath, $env:PROXIMA_NODE_ENROLLMENT_TOKEN, [System.Text.Encoding]::UTF8)
+  [System.IO.File]::WriteAllText($tokenPath, $env:PROXIMA_NODE_ENROLLMENT_TOKEN, [System.Text.UTF8Encoding]::new($false))
 }
 Remove-Item Env:PROXIMA_NODE_ENROLLMENT_TOKEN -ErrorAction SilentlyContinue
 
