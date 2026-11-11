@@ -35,6 +35,9 @@ try {
   if ($generatedEnv -notmatch "PROXIMA_UPSTREAM_ADDR=postgres:5432") {
     throw "Windows installer did not generate the PostgreSQL upstream setting."
   }
+  if ($generatedEnv -notmatch "PROXIMA_NODE_HEARTBEAT_URL=https://api.agataproxima.com/api/v1/nodes/heartbeat") {
+    throw "Windows installer did not persist the node heartbeat URL."
+  }
   if ($generatedToken.Trim() -ne "test-one-time-token") {
     throw "Windows installer did not create the one-time enrollment secret file correctly."
   }
