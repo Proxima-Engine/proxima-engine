@@ -58,6 +58,7 @@ impl std::error::Error for TenantTokenError {}
 #[derive(Clone)]
 pub struct TenantTokenVerifier {
     secret: Vec<u8>,
+    previous_secret: Option<Vec<u8>>,
     replay_dir: PathBuf,
 }
 
@@ -73,6 +74,25 @@ impl TenantTokenVerifier {
             .unwrap_or_else(|| PathBuf::from("data/proxima-break-glass-replays"));
         Ok(Self {
             secret: secret.to_vec(),
+            previous_secret: None,
+            replay_dir,
+        })
+    }
+
+    pub fn new_with_previous(
+        secret: impl AsRef<[u8]>,
+        previous_secret: Option<&[u8]>,
+    ) -> Result<Self, TenantTokenError> {
+        let secret = secret.as_ref();
+        if secret.len() < 32 || previous_secret.is_some_and(|previous| previous.len() < 32) {
+            return Err(TenantTokenError::InvalidSignature);
+        }
+        let replay_dir = std::env::var_os("PROXIMA_BREAK_GLASS_REPLAY_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("data/proxima-break-glass-replays"));
+        Ok(Self {
+            secret: secret.to_vec(),
+            previous_secret: previous_secret.map(ToOwned::to_owned),
             replay_dir,
         })
     }
@@ -87,6 +107,7 @@ impl TenantTokenVerifier {
         }
         Ok(Self {
             secret: secret.to_vec(),
+            previous_secret: None,
             replay_dir,
         })
     }
@@ -124,7 +145,11 @@ impl TenantTokenVerifier {
         }
 
         let expected = sign_payload(&self.secret, version, tenant_id, expires_at);
-        if !constant_time_hex_eq(&expected, signature) {
+        let valid_current = constant_time_hex_eq(&expected, signature);
+        let valid_previous = self.previous_secret.as_ref().is_some_and(|secret| {
+            constant_time_hex_eq(&sign_payload(secret, version, tenant_id, expires_at), signature)
+        });
+        if !valid_current && !valid_previous {
             return Err(TenantTokenError::InvalidSignature);
         }
 
@@ -166,7 +191,11 @@ impl TenantTokenVerifier {
             return Err(TenantTokenError::InvalidFormat);
         }
         let payload = format!("bg1.{tenant_id}.{expires_at}.{nonce}");
-        if !constant_time_hex_eq(&sign_message(&self.secret, &payload), parts[4]) {
+        let valid_current = constant_time_hex_eq(&sign_message(&self.secret, &payload), parts[4]);
+        let valid_previous = self.previous_secret.as_ref().is_some_and(|secret| {
+            constant_time_hex_eq(&sign_message(secret, &payload), parts[4])
+        });
+        if !valid_current && !valid_previous {
             return Err(TenantTokenError::InvalidSignature);
         }
         fs::create_dir_all(&self.replay_dir)
