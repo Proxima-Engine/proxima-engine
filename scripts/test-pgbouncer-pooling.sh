@@ -91,7 +91,7 @@ assert_context_cleared_on_reused_backend() {
 
   setup_result="$(run_tenant "$token" "$password" \
     "$begin_sql SELECT pg_backend_pid(); $end_sql")"
-  before_pid="$(printf '%s\\n' "$setup_result" | tail -n 1)"
+  before_pid="$(printf '%s\n' "$setup_result" | tail -n 1)"
   if [[ ! "$before_pid" =~ ^[0-9]+$ ]]; then
     echo "FAIL: $label did not return a valid backend PID (got: $before_pid)" >&2
     exit 1
