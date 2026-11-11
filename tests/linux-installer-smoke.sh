@@ -9,6 +9,7 @@ cd "$temp_root"
 
 docker() {
   case "$*" in
+    "info --format {{.OSType}}") echo "linux" ;;
     "compose version") echo "Docker Compose version v2.30.0" ;;
     "compose -f compose.customer.yaml config --quiet") return 0 ;;
     "compose -f compose.customer.yaml up -d --build") return 0 ;;
