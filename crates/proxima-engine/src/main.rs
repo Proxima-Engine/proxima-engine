@@ -195,7 +195,6 @@ fn attestation_ingest_url_allowed(url: &str, allow_insecure_http: bool) -> bool 
 async fn bootstrap_node_identity() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     use std::{
         env, fs,
-        io::Write,
         path::{Path, PathBuf},
         time::{SystemTime, UNIX_EPOCH},
     };
@@ -213,7 +212,7 @@ async fn bootstrap_node_identity() -> Result<(), Box<dyn std::error::Error + Sen
         let identity_bytes = serde_json::to_vec_pretty(identity)?;
         #[cfg(unix)]
         {
-            use std::os::unix::fs::OpenOptionsExt;
+            use std::{io::Write, os::unix::fs::OpenOptionsExt};
             let mut file = fs::OpenOptions::new()
                 .write(true)
                 .create_new(true)
