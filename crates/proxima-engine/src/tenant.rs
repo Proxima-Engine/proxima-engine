@@ -81,10 +81,10 @@ impl TenantTokenVerifier {
 
     pub fn new_with_previous(
         secret: impl AsRef<[u8]>,
-        previous_secret: Option<&[u8]>,
+        previous_secret: Option<&str>,
     ) -> Result<Self, TenantTokenError> {
         let secret = secret.as_ref();
-        if secret.len() < 32 || previous_secret.is_some_and(|previous| previous.len() < 32) {
+        if secret.len() < 32 || previous_secret.is_some_and(|previous| previous.as_bytes().len() < 32) {
             return Err(TenantTokenError::InvalidSignature);
         }
         let replay_dir = std::env::var_os("PROXIMA_BREAK_GLASS_REPLAY_DIR")
@@ -92,7 +92,7 @@ impl TenantTokenVerifier {
             .unwrap_or_else(|| PathBuf::from("data/proxima-break-glass-replays"));
         Ok(Self {
             secret: secret.to_vec(),
-            previous_secret: previous_secret.map(ToOwned::to_owned),
+            previous_secret: previous_secret.map(|previous| previous.as_bytes().to_vec()),
             replay_dir,
         })
     }
