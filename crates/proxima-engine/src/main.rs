@@ -352,6 +352,13 @@ async fn main() -> io::Result<()> {
     rustls::crypto::CryptoProvider::install_default(rustls::crypto::aws_lc_rs::default_provider())
         .map_err(|_| io::Error::other("failed to install rustls AWS-LC crypto provider"))?;
 
+    // Enrollment must run before configuration is loaded: it supplies the
+    // node identity and organization-scoped tenant verification key.
+    if let Err(error) = bootstrap_node_identity().await {
+        eprintln!("Engine node bootstrap failed: {error}");
+        std::process::exit(1);
+    }
+
     let config = Config::from_env()?;
     let config_tenant_role_prefix = config.tenant_role_prefix.clone();
 
@@ -408,11 +415,6 @@ async fn main() -> io::Result<()> {
         .timeout(std::time::Duration::from_secs(5))
         .build()
         .ok();
-    if let Err(error) = bootstrap_node_identity().await {
-        eprintln!("Engine node bootstrap failed: {error}");
-        std::process::exit(1);
-    }
-
     if let (Some(url), Some(token), Some(client)) = (
         security_event_url.clone(),
         security_event_token.clone(),
