@@ -11,7 +11,7 @@ services:
       PROXIMA_NODE_ENROLLMENT_URL: ${PROXIMA_NODE_ENROLLMENT_URL:-https://api.agataproxima.com/api/v1/nodes/enroll}
       PROXIMA_NODE_HEARTBEAT_URL: ${PROXIMA_NODE_HEARTBEAT_URL:-https://api.agataproxima.com/api/v1/nodes/heartbeat}
       PROXIMA_NODE_ENROLLMENT_TOKEN_FILE: /run/secrets/node_enrollment_token
-      PROXIMA_TENANT_SIGNING_KEY_FILE: /run/secrets/tenant_signing_key
+      PROXIMA_ENVIRONMENT: ${PROXIMA_ENVIRONMENT:-production}
       PROXIMA_LISTEN_ADDR: ${PROXIMA_LISTEN_ADDR:-0.0.0.0:6432}
       PROXIMA_UPSTREAM_ADDR: ${PROXIMA_UPSTREAM_ADDR:?Set PROXIMA_UPSTREAM_ADDR in .env}
       PROXIMA_DASHBOARD_ENABLED: "false"
@@ -20,7 +20,6 @@ services:
       - "${PROXIMA_BIND_ADDRESS:-127.0.0.1}:6432:6432"
     secrets:
       - node_enrollment_token
-      - tenant_signing_key
     volumes:
       - proxima-node-data:/var/lib/proxima
     healthcheck:
@@ -38,8 +37,6 @@ services:
 secrets:
   node_enrollment_token:
     file: ./secrets/node_enrollment_token
-  tenant_signing_key:
-    file: ./secrets/tenant_signing_key
 
 networks:
   default:
