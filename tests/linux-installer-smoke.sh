@@ -29,6 +29,7 @@ bash ./install-customer.sh
 
 grep -Fxq "PROXIMA_NODE_ID=00000000-0000-4000-8000-000000000001" .env
 grep -Fxq "PROXIMA_UPSTREAM_ADDR=postgres:5432" .env
+grep -Fxq "PROXIMA_NODE_HEARTBEAT_URL=https://api.agataproxima.com/api/v1/nodes/heartbeat" .env
 [[ "$(cat secrets/node_enrollment_token)" == "test-one-time-token" ]]
 [[ "$(stat -c '%a' secrets/node_enrollment_token)" == "600" ]]
 [[ ! -e secrets/tenant_signing_key ]]
