@@ -29,6 +29,7 @@ pub struct Config {
     pub listen_addr: SocketAddr,
     pub upstream_addr: String,
     pub tenant_signing_key: Option<String>,
+    pub tenant_signing_key_previous: Option<String>,
     pub tenant_role_prefix: String,
     pub upstream_connect_timeout: Duration,
     pub max_connections: usize,
@@ -78,9 +79,14 @@ impl Config {
             ));
         }
 
-        let tenant_signing_key_value = match env::var("PROXIMA_TENANT_SIGNING_KEY_FILE") {
-            Ok(path) => Some(std::fs::read_to_string(path)?.trim().to_owned()),
-            Err(_) => env::var("PROXIMA_TENANT_SIGNING_KEY").ok(),
+        // A node identity loaded during bootstrap sets the organization key in
+        // the environment. It must take precedence over any legacy key file.
+        let tenant_signing_key_value = match env::var("PROXIMA_TENANT_SIGNING_KEY") {
+            Ok(value) => Some(value),
+            Err(_) => match env::var("PROXIMA_TENANT_SIGNING_KEY_FILE") {
+                Ok(path) => Some(std::fs::read_to_string(path)?.trim().to_owned()),
+                Err(_) => None,
+            },
         };
         let tenant_signing_key = match tenant_signing_key_value {
             Some(value) if value.trim().is_empty() => None,
@@ -93,6 +99,13 @@ impl Config {
             Some(value) => Some(value),
             None => None,
         };
+        let tenant_signing_key_previous = non_empty_env("PROXIMA_TENANT_SIGNING_KEY_PREVIOUS");
+        if tenant_signing_key_previous.as_ref().is_some_and(|key| key.len() < 32) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "PROXIMA_TENANT_SIGNING_KEY_PREVIOUS must contain at least 32 bytes",
+            ));
+        }
 
         let upstream_connect_timeout_ms = env::var("PROXIMA_UPSTREAM_CONNECT_TIMEOUT_MS")
             .unwrap_or_else(|_| "10000".to_string())
@@ -179,6 +192,7 @@ impl Config {
             listen_addr,
             upstream_addr,
             tenant_signing_key,
+            tenant_signing_key_previous,
             tenant_role_prefix,
             upstream_connect_timeout: Duration::from_millis(upstream_connect_timeout_ms),
             max_connections,
@@ -246,6 +260,7 @@ mod tests {
             "PROXIMA_UPSTREAM_ADDR",
             "PROXIMA_TENANT_SIGNING_KEY",
             "PROXIMA_TENANT_SIGNING_KEY_FILE",
+            "PROXIMA_TENANT_SIGNING_KEY_PREVIOUS",
             "PROXIMA_UPSTREAM_CONNECT_TIMEOUT_MS",
             "PROXIMA_MAX_CONNECTIONS",
             "PROXIMA_TLS_CERT_FILE",
@@ -266,6 +281,7 @@ mod tests {
         assert_eq!(config.listen_addr, "127.0.0.1:6432".parse().unwrap());
         assert_eq!(config.upstream_addr, "127.0.0.1:5432");
         assert_eq!(config.tenant_signing_key, None);
+        assert_eq!(config.tenant_signing_key_previous, None);
         assert_eq!(config.tenant_role_prefix, "proxima_tenant_");
         assert_eq!(config.upstream_connect_timeout, Duration::from_secs(10));
         assert_eq!(config.max_connections, 1024);
