@@ -52,12 +52,12 @@ Set PROXIMA_DEPLOYMENT_TARGETS_FILE to this file in the executor environment. Ea
 
 ## Install the Engine (customer node)
 
-The dashboard gives the customer a node-specific `.env`, a one-time enrollment-token file and a tenant-signing-key file. The customer does not need to hand-write Docker Compose configuration or paste secrets into shell commands.
+The dashboard gives the customer a node-specific `.env` and a separate one-time enrollment-token file. During signed HTTPS enrollment, the Control Plane also delivers the node heartbeat credential and the organization's derived tenant-token verification key; neither is downloaded as a separate file. The Control Plane master signing secret is never sent to the customer host. The customer does not need to hand-write Docker Compose configuration or paste secrets into shell commands.
 
 1. Install Docker Desktop (Windows) or Docker Engine with the Compose v2 plugin (Linux).
 2. Download the Engine ZIP from the node setup screen and extract it.
 3. In the extracted folder, create a `secrets` directory.
-4. Place the downloaded `.env` in the repository root. Place the one-time token at `secrets/node_enrollment_token` and the tenant signing key at `secrets/tenant_signing_key`.
+4. Place the downloaded `.env` in the repository root. Place the one-time token at `secrets/node_enrollment_token`. No `tenant_signing_key` file is created or required: the Engine receives the organization's derived verification key during enrollment and persists it in its protected node identity.
 5. Run the supplied installer from that folder:
 
    **Windows PowerShell**
@@ -71,7 +71,7 @@ The dashboard gives the customer a node-specific `.env`, a one-time enrollment-t
    ./install-customer.sh
    ```
 
-The installer validates the required files and Docker Compose configuration, builds the Engine image locally, starts the container, and waits for its real Docker health check. It prints the container logs if startup fails. The Engine consumes the one-time enrollment token from the mounted secret, persists its node identity in a Docker volume, and begins signed heartbeats. The token is not needed again after successful enrollment. Keep the `.env` and `secrets` directory private; never commit or email them.
+The installer validates the `.env`, one-time enrollment-token file and Docker Compose configuration, builds the Engine image locally, starts the container, and waits for its real Docker health check. It prints the container logs if startup fails. The Engine consumes the one-time enrollment token from the mounted secret, persists its node identity in a Docker volume, and begins signed heartbeats. The token is not needed again after successful enrollment. Keep the `.env` and `secrets` directory private; never commit or email them.
 
 The Engine listens on port 6432 and binds to loopback by default. Keep that binding when the application runs on the same host. If the application is on another host or container network, deliberately configure a private reachable bind address/network and firewall policy; do not expose PostgreSQL proxy traffic to the public internet.
 
