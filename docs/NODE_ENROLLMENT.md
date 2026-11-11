@@ -76,7 +76,7 @@ $env:PROXIMA_UPSTREAM_ADDR = "127.0.0.1:5432"
 cargo run -p proxima-engine
 ```
 
-The Engine sends `POST /api/v1/nodes/enroll` with JSON fields `node_id` and `enrollment_token`. The control plane validates the one-time token and returns the node identity and signing credential. The Engine validates the response and persists the identity.
+The Engine sends `POST /api/v1/nodes/enroll` with JSON fields `node_id` and `enrollment_token`. The Control Plane validates the one-time token and returns the node heartbeat key plus the organization's derived tenant-token verification key. The Engine validates both credentials and persists them in the protected identity file. The Control Plane master secret is never returned.
 
 Remove the bootstrap token after enrollment:
 
@@ -105,7 +105,7 @@ Default identity paths:
 - Windows: `%LOCALAPPDATA%\AgataProxima\node-identity.json`, when `LOCALAPPDATA` exists.
 - Other environments: `data/node-identity.json`.
 
-Set `PROXIMA_NODE_IDENTITY_PATH` to choose another path. The identity file contains the node ID, organization ID, and a 32-byte signing credential. Restrict file permissions and include the file in protected backups.
+Set `PROXIMA_NODE_IDENTITY_PATH` to choose another path. The identity file contains the node ID, organization ID, the 32-byte node heartbeat key and the 32-byte organization-scoped tenant-token verification key. Restrict file permissions and include the file in protected backups. The Control Plane master secret is not stored on the Engine.
 
 The Engine reuses a valid saved identity on later starts, so the one-time enrollment token is needed only for the initial bootstrap. Use a separate identity path for each node.
 
@@ -118,10 +118,10 @@ When the Engine has a registered node identity and a compatible heartbeat endpoi
 | `PROXIMA_NODE_ENROLLMENT_TOKEN` | One-time bootstrap credential | Short-lived; remove after enrollment |
 | `PROXIMA_NODE_IDENTITY_PATH` | Persistent identity file | Contains a signing credential; protect it |
 | `PROXIMA_NODE_SIGNING_KEY_HEX` | 32-byte node signing key, hex encoded | Normally loaded from saved identity; never commit |
-| `PROXIMA_TENANT_SIGNING_KEY` | HMAC key for application-signed tenant context | Separate from node credentials; at least 32 bytes |
+| `PROXIMA_TENANT_SIGNING_KEY` | Organization-scoped HMAC key for tenant context | Automatically loaded from the enrolled identity on Cloud-registered nodes; for manual provisioning, configure the trusted signer's matching key. Never copy the Control Plane master secret to a customer node |
 | `PROXIMA_ATTESTATION_INGEST_TOKEN` | Optional bearer credential for a compatible evidence receiver | Use the required `aga_` prefix; never commit |
 
-These credentials serve different trust boundaries. Keep each in its designated configuration field and rotate it through the corresponding issuer.
+These credentials serve different trust boundaries. The Control Plane master secret derives organization-specific tenant keys; the node identity carries only the key for its own organization. Keep each credential in its designated secret store and rotate it through the corresponding issuer.
 
 ## Troubleshooting
 
