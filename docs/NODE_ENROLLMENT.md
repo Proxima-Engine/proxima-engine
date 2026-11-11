@@ -41,42 +41,25 @@ Use HTTPS for remote control-plane hosts. Loopback HTTP is reserved for local de
 
 ## 2. One-command Docker installation (hosted Cloud)
 
-This is the recommended customer path. Docker Engine and Docker Compose v2 are required on the customer's host. Agata Proxima does not provision, own, or receive the customer's PostgreSQL credentials.
+This is the supported customer path. Docker Engine and Docker Compose v2 are required on Linux. Windows 10/11 hosts use Docker Desktop with its WSL 2 backend and Linux containers. Agata Proxima does not provision, own, or receive the customer's PostgreSQL credentials.
 
-1. Register a node in Agata Proxima Cloud and download the three generated files from the registration result: .env, node_enrollment_token, and tenant_signing_key.
-2. Download the public Engine repository ZIP and extract it on the customer host.
-3. Place .env and compose.customer.yaml in the repository root. Create a secrets directory beside them and save the two secret downloads as secrets/node_enrollment_token and secrets/tenant_signing_key.
-4. Set the upstream address in .env to the PostgreSQL host reachable from the Engine container. The tenant signing key must be the same secret the trusted application backend uses to sign tenant context. Never reuse the one-time enrollment token as the tenant signing key.
-5. Start the Engine:
+1. Register a node in Agata Proxima Cloud → Nodes. Copy the Windows PowerShell setup or Linux shell setup shown with the one-time enrollment token.
+2. Download the public Proxima Engine source ZIP and extract it on the customer host.
+3. Open a terminal in the extracted repository folder, paste the matching setup commands into that same terminal session, and run the installer:
+   - Windows: `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` followed by `./install-customer.ps1`
+   - Linux: `chmod +x ./install-customer.sh` followed by `./install-customer.sh`
+4. When prompted, enter the PostgreSQL upstream host and port reachable from inside the Engine container. The installer writes the node's `.env` file and the one-time enrollment token file automatically.
+5. Confirm the installer reports a healthy Engine container, then confirm the node reports healthy in Agata Proxima Fleet after its signed heartbeat.
 
-```bash
-docker compose -f compose.customer.yaml up --build -d
-docker compose -f compose.customer.yaml logs -f engine
-```
+The customer Compose file mounts only the one-time enrollment token as a read-only secret. During the HTTPS enrollment exchange, the Control Plane returns the generated node heartbeat key and a separate organization-scoped tenant-token verification key. The Engine validates both and stores them in the protected node identity file. The Control Plane master signing secret is never sent to customer nodes. The identity file is persisted in a named Docker volume; on Unix, it is created with owner-only permissions. No customer has to download or manually copy a tenant signing key.
 
-The Compose file mounts the enrollment token and tenant signing key as read-only secret files. Neither secret is passed as a container environment variable. The Engine runs as UID 10001. On Linux, make the secret directory and files readable by that UID while keeping them private from other host users (for example, chown the directory and files to 10001:10001, chmod the directory 0700 and the files 0400). On Docker Desktop, confirm the mounted files are readable inside the Linux container; do not make the host secrets directory broadly readable just to work around a permission issue. The Engine reads the enrollment token file only during first enrollment, persists its node identity in the named Docker volume, and sends signed heartbeats every 30 seconds. No heartbeat cron job, custom webhook receiver, or customer-written enrollment code is required.
+The enrollment token is consumed during the first bootstrap. After Fleet shows the node as healthy, replace the contents of `secrets/node_enrollment_token` with the harmless text `enrollment-complete`. Keep the file itself in place because Compose references it on subsequent starts. The persisted identity is used on every later start.
 
-When Fleet shows the node as healthy, replace the contents of secrets/node_enrollment_token with the harmless text enrollment-complete. The persisted node identity is used on subsequent starts, so the consumed one-time token is no longer needed. Keep secrets/tenant_signing_key protected and persistent.
+The Windows PowerShell installer checks Docker Desktop's Linux-container mode, Compose v2, the generated environment and token file, then builds and starts the Engine and waits for the actual Docker health state. It is a Windows host installer for the Linux Engine container, not an MSI or a native Windows service binary.
 
-For Windows, use the PowerShell installer included in the repository ZIP. Open PowerShell in the extracted repository folder and run:
+The Linux Bash installer performs the same setup and health checks. Keep the repository's `.env` and `secrets/` directory accessible only to the operators who administer the node. Do not commit them.
 
-```powershell
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-.\\install-customer.ps1
-```
-
-The installer checks that Docker Desktop is running in Linux-container mode, verifies Compose v2 and the supplied files, validates the Compose configuration, starts the Engine, and waits for the actual Docker health state. It prints the container status and recent logs if the health check fails. This is the supported Windows host installation path; the Engine itself runs as a Linux container through Docker Desktop's WSL 2 backend. It is a PowerShell installer script, not an MSI or native Windows service binary.
-
-For Linux, run the included Bash installer:
-
-```bash
-chmod +x ./install-customer.sh
-./install-customer.sh
-```
-
-The host directory containing .env and secrets must be accessible only to the customer operators who manage the Engine. Do not commit either file or the secrets directory.
-
-The Engine listens on port 6432. By default, the host port is bound to 127.0.0.1. If the application runs in another container, attach it to the shared proxima-engine-network and connect to engine:6432. Do not expose port 6432 publicly without a customer-controlled firewall rule. The upstream PostgreSQL address must be reachable from inside the Engine container; localhost means the container itself, not the host.
+The Engine listens on port 6432. By default, the host port is bound to 127.0.0.1. If the application runs in another container, attach it to the shared `proxima-engine-network` and connect to `engine:6432`. Do not expose port 6432 publicly without a customer-controlled firewall rule. The upstream PostgreSQL address must be reachable from inside the Engine container; localhost means the container itself, not the host.
 
 ## 3. Configure the Engine — PowerShell
 
