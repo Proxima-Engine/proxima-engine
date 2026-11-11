@@ -224,10 +224,31 @@ async fn bootstrap_node_identity() -> Result<(), Box<dyn std::error::Error + Sen
             return Err("Node signing key must be exactly 32 bytes".into());
         }
 
+        if let Some(tenant_key) = value["tenant_signing_key"].as_str() {
+            if hex::decode(tenant_key)?.len() != 32 {
+                return Err("Organization tenant signing key must be exactly 32 bytes (hex encoded)".into());
+            }
+            // This is an organization-scoped key derived by the Control Plane.
+            // The Control Plane master secret is never sent to the customer node.
+            std::env::set_var("PROXIMA_TENANT_SIGNING_KEY", tenant_key);
+        }
+
         std::env::set_var("PROXIMA_NODE_ID", node_id);
         std::env::set_var("PROXIMA_ORGANIZATION_ID", organization_id);
         std::env::set_var("PROXIMA_NODE_SIGNING_KEY_HEX", key);
         Ok(())
+    }
+
+    if identity_path.is_file() {
+        let bytes = fs::read(&identity_path)?;
+        let identity: serde_json::Value = serde_json::from_slice(&bytes)?;
+        apply_identity(&identity)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&identity_path, fs::Permissions::from_mode(0o600))?;
+        }
+        return Ok(());
     }
 
     if env::var("PROXIMA_NODE_SIGNING_KEY_HEX")
@@ -235,13 +256,6 @@ async fn bootstrap_node_identity() -> Result<(), Box<dyn std::error::Error + Sen
         .and_then(|key| hex::decode(key).ok())
         .is_some_and(|key| key.len() == 32)
     {
-        return Ok(());
-    }
-
-    if identity_path.is_file() {
-        let bytes = fs::read(&identity_path)?;
-        let identity: serde_json::Value = serde_json::from_slice(&bytes)?;
-        apply_identity(&identity)?;
         return Ok(());
     }
 
@@ -282,6 +296,12 @@ async fn bootstrap_node_identity() -> Result<(), Box<dyn std::error::Error + Sen
     if hex::decode(key)?.len() != 32 {
         return Err("Enrollment returned an invalid signing key".into());
     }
+    let tenant_key = identity["tenant_signing_key"]
+        .as_str()
+        .ok_or("Enrollment response is missing the organization-scoped tenant_signing_key")?;
+    if hex::decode(tenant_key)?.len() != 32 {
+        return Err("Enrollment returned an invalid organization tenant signing key".into());
+    }
     let _ = identity["organization_id"]
         .as_str()
         .ok_or("Enrollment response is missing organization_id")?;
@@ -293,7 +313,24 @@ async fn bootstrap_node_identity() -> Result<(), Box<dyn std::error::Error + Sen
     fs::create_dir_all(parent)?;
 
     let temporary_path = identity_path.with_extension("json.tmp");
-    fs::write(&temporary_path, serde_json::to_vec_pretty(&identity)?)?;
+    if temporary_path.exists() {
+        fs::remove_file(&temporary_path)?;
+    }
+    let identity_bytes = serde_json::to_vec_pretty(&identity)?;
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&temporary_path)?;
+        file.write_all(&identity_bytes)?;
+        file.sync_all()?;
+    }
+    #[cfg(not(unix))]
+    fs::write(&temporary_path, &identity_bytes)?;
     fs::rename(&temporary_path, &identity_path)?;
 
     apply_identity(&identity)?;
