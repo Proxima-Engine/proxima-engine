@@ -193,18 +193,45 @@ fn attestation_ingest_url_allowed(url: &str, allow_insecure_http: bool) -> bool 
 }
 
 async fn bootstrap_node_identity() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    use std::{env, fs, path::PathBuf};
+    use std::{
+        env, fs,
+        io::Write,
+        path::{Path, PathBuf},
+        time::{SystemTime, UNIX_EPOCH},
+    };
 
-    let identity_path = env::var_os("PROXIMA_NODE_IDENTITY_PATH")
-        .map(PathBuf::from)
-        .or_else(|| {
-            env::var_os("LOCALAPPDATA").map(|base| {
-                PathBuf::from(base)
-                    .join("AgataProxima")
-                    .join("node-identity.json")
-            })
-        })
-        .unwrap_or_else(|| PathBuf::from("data/node-identity.json"));
+    fn persist_identity(
+        identity_path: &Path,
+        identity: &serde_json::Value,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let parent = identity_path.parent().ok_or("Invalid node identity path")?;
+        fs::create_dir_all(parent)?;
+        let temporary_path = identity_path.with_extension("json.tmp");
+        if temporary_path.exists() {
+            fs::remove_file(&temporary_path)?;
+        }
+        let identity_bytes = serde_json::to_vec_pretty(identity)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            let mut file = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&temporary_path)?;
+            file.write_all(&identity_bytes)?;
+            file.sync_all()?;
+        }
+        #[cfg(not(unix))]
+        fs::write(&temporary_path, &identity_bytes)?;
+
+        #[cfg(windows)]
+        if identity_path.exists() {
+            fs::remove_file(identity_path)?;
+        }
+        fs::rename(&temporary_path, identity_path)?;
+        Ok(())
+    }
 
     fn apply_identity(
         value: &serde_json::Value,
@@ -230,18 +257,91 @@ async fn bootstrap_node_identity() -> Result<(), Box<dyn std::error::Error + Sen
             }
             // This is an organization-scoped key derived by the Control Plane.
             // The Control Plane master secret is never sent to the customer node.
-            std::env::set_var("PROXIMA_TENANT_SIGNING_KEY", tenant_key);
+            env::set_var("PROXIMA_TENANT_SIGNING_KEY", tenant_key);
         }
 
-        std::env::set_var("PROXIMA_NODE_ID", node_id);
-        std::env::set_var("PROXIMA_ORGANIZATION_ID", organization_id);
-        std::env::set_var("PROXIMA_NODE_SIGNING_KEY_HEX", key);
+        env::set_var("PROXIMA_NODE_ID", node_id);
+        env::set_var("PROXIMA_ORGANIZATION_ID", organization_id);
+        env::set_var("PROXIMA_NODE_SIGNING_KEY_HEX", key);
         Ok(())
     }
 
+    let identity_path = env::var_os("PROXIMA_NODE_IDENTITY_PATH")
+        .map(PathBuf::from)
+        .or_else(|| {
+            env::var_os("LOCALAPPDATA").map(|base| {
+                PathBuf::from(base)
+                    .join("AgataProxima")
+                    .join("node-identity.json")
+            })
+        })
+        .unwrap_or_else(|| PathBuf::from("data/node-identity.json"));
+
     if identity_path.is_file() {
         let bytes = fs::read(&identity_path)?;
-        let identity: serde_json::Value = serde_json::from_slice(&bytes)?;
+        let mut identity: serde_json::Value = serde_json::from_slice(&bytes)?;
+        if identity["tenant_signing_key"].as_str().is_none()
+            && (env::var("PROXIMA_NODE_HEARTBEAT_URL").is_ok()
+                || env::var("PROXIMA_NODE_ENROLLMENT_URL").is_ok())
+        {
+            // Upgrade an identity created before organization-scoped tenant keys
+            // were returned during enrollment. This signed, domain-separated
+            // refresh does not require consuming another enrollment token.
+            let node_id = identity["node_id"]
+                .as_str()
+                .ok_or("Identity is missing node_id")?;
+            let organization_id = identity["organization_id"]
+                .as_str()
+                .ok_or("Identity is missing organization_id")?;
+            let node_key_hex = identity["signing_key"]
+                .as_str()
+                .ok_or("Identity is missing signing_key")?;
+            let node_key = hex::decode(node_key_hex)?;
+            if node_key.len() != 32 {
+                return Err("Node signing key must be exactly 32 bytes".into());
+            }
+
+            let heartbeat_url = env::var("PROXIMA_NODE_HEARTBEAT_URL").ok().or_else(|| {
+                env::var("PROXIMA_NODE_ENROLLMENT_URL")
+                    .ok()
+                    .map(|url| url.replace("/api/v1/nodes/enroll", "/api/v1/nodes/heartbeat"))
+            }).ok_or("Missing PROXIMA_NODE_HEARTBEAT_URL for organization-key refresh")?;
+            let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
+            let version = env!("CARGO_PKG_VERSION");
+            let runtime_status = "running";
+            let canonical = format!(
+                "proxima-node-identity-refresh-v1\n{}\n{}\n{}\n{}\n{}",
+                node_id, organization_id, timestamp, version, runtime_status
+            );
+            let mut mac = hmac::Hmac::<Sha256>::new_from_slice(&node_key)
+                .map_err(|_| "Invalid node signing key")?;
+            mac.update(canonical.as_bytes());
+            let signature = hex::encode(mac.finalize().into_bytes());
+
+            let response = reqwest::Client::new()
+                .post(heartbeat_url)
+                .json(&serde_json::json!({
+                    "node_id": node_id,
+                    "timestamp": timestamp,
+                    "version": version,
+                    "runtime_status": runtime_status,
+                    "signature": signature,
+                    "include_tenant_signing_key": true
+                }))
+                .send()
+                .await?
+                .error_for_status()?;
+            let refresh: serde_json::Value = response.json().await?;
+            let tenant_key = refresh["tenant_signing_key"]
+                .as_str()
+                .ok_or("Control Plane identity refresh response is missing tenant_signing_key")?;
+            if hex::decode(tenant_key)?.len() != 32 {
+                return Err("Control Plane returned an invalid organization tenant signing key".into());
+            }
+            identity["tenant_signing_key"] = serde_json::Value::String(tenant_key.to_owned());
+            persist_identity(&identity_path, &identity)?;
+        }
+
         apply_identity(&identity)?;
         #[cfg(unix)]
         {
@@ -289,7 +389,7 @@ async fn bootstrap_node_identity() -> Result<(), Box<dyn std::error::Error + Sen
 
     let identity: serde_json::Value = response.json().await?;
 
-    // Validate the complete identity before persisting it.
+    // Validate both credentials before persisting the identity.
     let key = identity["signing_key"]
         .as_str()
         .ok_or("Enrollment response is missing signing_key")?;
@@ -309,30 +409,7 @@ async fn bootstrap_node_identity() -> Result<(), Box<dyn std::error::Error + Sen
         .as_str()
         .ok_or("Enrollment response is missing node_id")?;
 
-    let parent = identity_path.parent().ok_or("Invalid node identity path")?;
-    fs::create_dir_all(parent)?;
-
-    let temporary_path = identity_path.with_extension("json.tmp");
-    if temporary_path.exists() {
-        fs::remove_file(&temporary_path)?;
-    }
-    let identity_bytes = serde_json::to_vec_pretty(&identity)?;
-    #[cfg(unix)]
-    {
-        use std::io::Write;
-        use std::os::unix::fs::OpenOptionsExt;
-        let mut file = fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(&temporary_path)?;
-        file.write_all(&identity_bytes)?;
-        file.sync_all()?;
-    }
-    #[cfg(not(unix))]
-    fs::write(&temporary_path, &identity_bytes)?;
-    fs::rename(&temporary_path, &identity_path)?;
-
+    persist_identity(&identity_path, &identity)?;
     apply_identity(&identity)?;
     if enrollment_token_file.is_none() {
         env::remove_var("PROXIMA_NODE_ENROLLMENT_TOKEN");
