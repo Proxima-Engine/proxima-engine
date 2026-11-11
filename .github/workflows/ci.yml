@@ -51,8 +51,14 @@ jobs:
         run: |
           mkdir -p secrets
           printf 'test-enrollment-token' > secrets/node_enrollment_token
-          printf '0123456789abcdef0123456789abcdef' > secrets/tenant_signing_key
-          PROXIMA_NODE_ID=00000000-0000-4000-8000-000000000001 PROXIMA_UPSTREAM_ADDR=127.0.0.1:5432 docker compose -f compose.customer.yaml config --quiet
+          cat > .env <<'EOF'
+          PROXIMA_NODE_ID=00000000-0000-4000-8000-000000000001
+          PROXIMA_NODE_ENROLLMENT_URL=https://api.agataproxima.com/api/v1/nodes/enroll
+          PROXIMA_UPSTREAM_ADDR=127.0.0.1:5432
+          PROXIMA_LISTEN_ADDR=0.0.0.0:6432
+          PROXIMA_ENVIRONMENT=production
+          EOF
+          docker compose -f compose.customer.yaml config --quiet
       - name: Run engine tests
         run: cargo test -p proxima-engine
       - name: Build release engine
