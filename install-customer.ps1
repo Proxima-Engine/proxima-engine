@@ -4,16 +4,45 @@ Set-StrictMode -Version Latest
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $root
 
-$required = @(".env", "compose.customer.yaml", "secrets/node_enrollment_token", "secrets/tenant_signing_key")
-foreach ($path in $required) {
-  if (-not (Test-Path -LiteralPath (Join-Path $root $path) -PathType Leaf)) {
-    throw "Missing required customer setup file: $path. Download .env and both secret files from Agata Proxima → Nodes, then place them in this folder."
-  }
+if (-not (Test-Path -LiteralPath (Join-Path $root "compose.customer.yaml") -PathType Leaf)) {
+  throw "compose.customer.yaml is missing. Run this installer from the extracted Proxima Engine repository folder."
 }
 
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
   throw "Docker CLI was not found. Install Docker Desktop with the WSL 2 backend and Docker Compose v2, then rerun this script."
 }
+
+if (-not (Test-Path -LiteralPath (Join-Path $root ".env") -PathType Leaf)) {
+  if ([string]::IsNullOrWhiteSpace($env:PROXIMA_NODE_ID)) {
+    throw "Set PROXIMA_NODE_ID using the enrollment configuration copied from Agata Proxima → Nodes."
+  }
+  if ([string]::IsNullOrWhiteSpace($env:PROXIMA_NODE_ENROLLMENT_URL)) {
+    $env:PROXIMA_NODE_ENROLLMENT_URL = "https://api.agataproxima.com/api/v1/nodes/enroll"
+  }
+  if ([string]::IsNullOrWhiteSpace($env:PROXIMA_UPSTREAM_ADDR)) {
+    $env:PROXIMA_UPSTREAM_ADDR = Read-Host "PostgreSQL upstream host:port (for example, db.example.com:5432)"
+  }
+  if ([string]::IsNullOrWhiteSpace($env:PROXIMA_UPSTREAM_ADDR)) {
+    throw "A PostgreSQL upstream address is required."
+  }
+  @(
+    "PROXIMA_NODE_ID=$($env:PROXIMA_NODE_ID)"
+    "PROXIMA_NODE_ENROLLMENT_URL=$($env:PROXIMA_NODE_ENROLLMENT_URL)"
+    "PROXIMA_UPSTREAM_ADDR=$($env:PROXIMA_UPSTREAM_ADDR)"
+    "PROXIMA_LISTEN_ADDR=$($env:PROXIMA_LISTEN_ADDR ?? '0.0.0.0:6432')"
+    "PROXIMA_ENVIRONMENT=production"
+  ) | Set-Content -LiteralPath (Join-Path $root ".env") -Encoding ascii
+}
+
+$tokenPath = Join-Path $root "secrets/node_enrollment_token"
+if (-not (Test-Path -LiteralPath $tokenPath -PathType Leaf)) {
+  if ([string]::IsNullOrWhiteSpace($env:PROXIMA_NODE_ENROLLMENT_TOKEN)) {
+    throw "The one-time enrollment token is missing. Copy the enrollment configuration from Agata Proxima → Nodes and rerun this installer."
+  }
+  New-Item -ItemType Directory -Force -Path (Split-Path -Parent $tokenPath) | Out-Null
+  [System.IO.File]::WriteAllText($tokenPath, $env:PROXIMA_NODE_ENROLLMENT_TOKEN, [System.Text.Encoding]::UTF8)
+}
+Remove-Item Env:PROXIMA_NODE_ENROLLMENT_TOKEN -ErrorAction SilentlyContinue
 
 $dockerOs = docker info --format '{{.OSType}}'
 if ($LASTEXITCODE -ne 0) {
@@ -29,7 +58,7 @@ Write-Host $version
 
 $configOutput = docker compose -f compose.customer.yaml config --quiet 2>&1
 if ($LASTEXITCODE -ne 0) {
-  throw "Customer Compose configuration is invalid. Check .env and the two secret-file paths. Details: $configOutput"
+  throw "Customer Compose configuration is invalid. Check the generated .env file and enrollment-token secret. Details: $configOutput"
 }
 
 Write-Host "Building and starting Proxima Engine. The first build downloads Rust dependencies and can take several minutes."
@@ -65,6 +94,6 @@ if (-not $healthy) {
 Write-Host ""
 Write-Host "Proxima Engine is healthy."
 Write-Host "PostgreSQL proxy: 127.0.0.1:6432"
-Write-Host "Node enrollment and signed heartbeat now run from the Engine container."
+Write-Host "Node enrollment and signed heartbeat are active. The organization-scoped tenant verification key is stored in the protected node identity file."
 Write-Host "Confirm that the registered node appears as healthy in Agata Proxima Fleet."
 docker compose -f compose.customer.yaml ps
