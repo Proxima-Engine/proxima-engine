@@ -12,7 +12,7 @@ Start a local PostgreSQL database, PgBouncer transaction pool, and Proxima Engin
 ## 1. Clone and start the stack
 
 ```bash
-git clone https://github.com/Agata-Proxima/proxima-engine.git
+git clone https://github.com/Proxima-Engine/proxima-engine.git
 cd proxima-engine
 docker compose -f compose.dev.yaml up --build -d
 ```
