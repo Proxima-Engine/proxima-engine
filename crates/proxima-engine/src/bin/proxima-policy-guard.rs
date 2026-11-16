@@ -271,4 +271,13 @@ mod tests {
    let spec=json!({"tables":[{"schema":"public","table":"orders","tenant_column":"tenant_id","tenants":[]}]});
    assert!(generate(&spec).is_err());
  }
+ #[test] fn rejects_overlong_postgres_identifiers() {
+   let spec=json!({"tables":[{"schema":"public","table":"x".repeat(64),"tenant_column":"tenant_id","tenants":[{"tenant_id":"a","role":"proxima_a"}]}]});
+   assert!(generate(&spec).is_err());
+ }
+ #[test] fn rejects_duplicate_tenant_roles() {
+   let spec=json!({"tables":[{"schema":"public","table":"orders","tenant_column":"tenant_id","tenants":[
+     {"tenant_id":"tenant-a","role":"proxima_shared"},{"tenant_id":"tenant-b","role":"proxima_shared"}]}]});
+   assert!(generate(&spec).is_err());
+ }
 }
