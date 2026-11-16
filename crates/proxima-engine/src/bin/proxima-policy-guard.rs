@@ -86,11 +86,15 @@ fn report(rows: &[TableFinding]) -> Value {
         if f.rls_enabled && !f.rls_forced { issues.push("rls_not_forced"); }
         if !f.rls_forced || f.owner_bypasses_rls { issues.push("table_owner_bypasses_rls"); }
         if f.public_select { issues.push("public_select_grant"); }
+        if f.public_write_or_truncate { issues.push("public_write_or_truncate_grant"); }
+        if f.bypass_role_grant { issues.push("bypassrls_or_superuser_role_has_table_grant"); }
         if f.rls_enabled && f.policy_count == 0 { issues.push("no_rls_policies"); }
+        if f.permissive_policy_count > 1 { issues.push("multiple_permissive_policies_require_review"); }
         json!({"schema":f.schema,"table":f.table,"owner":f.owner,
           "rls_enabled":f.rls_enabled,"rls_forced":f.rls_forced,
           "owner_bypasses_rls":f.owner_bypasses_rls,"public_select":f.public_select,
-          "policy_count":f.policy_count,"findings":issues})
+          "public_write_or_truncate":f.public_write_or_truncate,"bypass_role_grant":f.bypass_role_grant,
+          "policy_count":f.policy_count,"permissive_policy_count":f.permissive_policy_count,"findings":issues})
     }).collect();
     let count: usize = tables.iter().map(|t| t["findings"].as_array().map_or(0, Vec::len)).sum();
     json!({"schema":"agata-proxima.postgresql-posture.v1",
@@ -99,7 +103,7 @@ fn report(rows: &[TableFinding]) -> Value {
       "status":if count==0 {"no_catalog_findings"} else {"attention_required"},
       "limitations":[
         "Catalog inspection cannot prove an arbitrary policy implements the intended tenant boundary.",
-        "Views, functions, dynamic SQL, role membership and application authorization require separate review.",
+        "Views, functions, dynamic SQL and application authorization require separate review.",
         "A clean report is not a security certification."
       ],"tables":tables})
 }
