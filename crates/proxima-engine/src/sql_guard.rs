@@ -132,6 +132,9 @@ mod tests {
             "SET session_replication_role = replica",
             "DISCARD ALL",
             "TRUNCATE TABLE public.orders",
+            "SELECT set_config('role', 'proxima_tenant_other', false)",
+            "DO $ BEGIN SET ROLE proxima_tenant_other; END $",
+            "CALL public.change_tenant_role()",
         ] {
             assert!(blocks_tenant_session_mutation(sql), "expected block: {sql}");
         }
@@ -151,6 +154,7 @@ mod tests {
             "-c role=proxima_tenant_other",
             "-c session_authorization=other_user",
             "-c row_security=off",
+            "-c row_security = false",
             "--session_replication_role=replica",
         ] {
             assert!(blocks_tenant_startup_options(options), "expected block: {options}");
