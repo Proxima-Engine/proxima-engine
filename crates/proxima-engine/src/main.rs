@@ -1205,6 +1205,13 @@ where
             if pending.len() < total_length {
                 break;
             }
+            if tenant_enforced && pending[0] == b'F' {
+                warn!("blocked legacy PostgreSQL FunctionCall in tenant-bound session");
+                return Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "legacy PostgreSQL FunctionCall is not permitted in tenant-bound sessions",
+                ));
+            }
             if tenant_enforced && matches!(pending[0], b'Q' | b'P') {
                 let frame = &pending[..total_length];
                 if let Some(sql) = sql_guard::sql_from_frontend_frame(frame) {
