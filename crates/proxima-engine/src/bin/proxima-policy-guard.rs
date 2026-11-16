@@ -209,6 +209,11 @@ BEGIN
                AND EXISTS (SELECT 1 FROM aclexplode(COALESCE(c.relacl,acldefault('r',c.relowner))) acl
                            WHERE acl.grantee<>c.relowner AND acl.privilege_type='TRUNCATE'))
      THEN RAISE EXCEPTION 'Agata Proxima: non-owner TRUNCATE grants bypass RLS'; END IF;
+  IF EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+             WHERE n.nspname={schema_literal} AND c.relname={table_literal}
+               AND EXISTS (SELECT 1 FROM aclexplode(COALESCE(c.relacl,acldefault('r',c.relowner))) acl
+                           WHERE acl.grantee=0 AND acl.privilege_type IN ('SELECT','INSERT','UPDATE','DELETE','TRUNCATE')))
+     THEN RAISE EXCEPTION 'Agata Proxima: PUBLIC has table privileges; reconcile PUBLIC grants before policy generation'; END IF;
   IF EXISTS (SELECT 1 FROM pg_policy p JOIN pg_class c ON c.oid=p.polrelid
              JOIN pg_namespace n ON n.oid=c.relnamespace
              WHERE n.nspname={schema_literal} AND c.relname={table_literal} AND p.polname={policy_literal})
