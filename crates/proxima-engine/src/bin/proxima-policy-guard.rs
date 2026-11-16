@@ -108,7 +108,7 @@ fn report(rows: &[TableFinding]) -> Value {
 fn generate(spec: &Value) -> Result<String, Box<dyn Error>> {
     let tables=spec.get("tables").and_then(Value::as_array).ok_or("policy spec requires tables array")?;
     if tables.is_empty() { return Err("tables array cannot be empty".into()); }
-    let mut out=String::from("-- Agata Proxima generated SQL. Review and apply through migrations.\n-- Tenant identity is bound to current_user, not a client-writable GUC.\n");
+    let mut out=String::from("-- Agata Proxima generated SQL. Review and apply through migrations.\n-- Tenant identity is bound to current_user, not a client-writable GUC.\nBEGIN;\n");
     for t in tables {
         let schema=t["schema"].as_str().ok_or("schema required")?;
         let name=t["table"].as_str().ok_or("table required")?;
@@ -135,8 +135,43 @@ fn generate(spec: &Value) -> Result<String, Box<dyn Error>> {
         }
         let target=format!("{}.{}",ident(schema),ident(name));
         let predicate=predicates.join(" OR ");
+        let role_values=tenants.iter().map(|tenant|literal(tenant["role"].as_str().unwrap())).collect::<Vec<_>>().join(", ");
+        let role_array=format!("ARRAY[{role_values}]::name[]");
+        let preflight=format!(r#"
+DO $agata_proxima_preflight$
+DECLARE owner_name name;
+BEGIN
+  SELECT pg_get_userbyid(c.relowner) INTO owner_name
+  FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+  WHERE n.nspname={schema_literal} AND c.relname={table_literal} AND c.relkind IN ('r','p');
+  IF owner_name IS NULL THEN RAISE EXCEPTION 'Agata Proxima: target table does not exist'; END IF;
+  IF owner_name = ANY({role_array}) THEN RAISE EXCEPTION 'Agata Proxima: tenant runtime roles must not own the protected table'; END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname=ANY({role_array}) AND (rolsuper OR rolbypassrls))
+     OR (WITH RECURSIVE member_roles(role_oid) AS (
+          SELECT oid FROM pg_roles WHERE rolname=ANY({role_array})
+          UNION SELECT am.roleid FROM pg_auth_members am JOIN member_roles mr ON am.member=mr.role_oid
+        ) SELECT EXISTS(SELECT 1 FROM member_roles mr JOIN pg_roles r ON r.oid=mr.role_oid WHERE r.rolsuper OR r.rolbypassrls))
+     OR EXISTS (SELECT 1 FROM pg_auth_members am JOIN pg_roles r ON r.oid=am.roleid OR r.oid=am.member WHERE r.rolname=ANY({role_array}))
+     THEN RAISE EXCEPTION 'Agata Proxima: tenant roles must exist, have no role memberships, and must not bypass RLS'; END IF;
+  IF (SELECT count(*) FROM pg_roles WHERE rolname=ANY({role_array})) <> {role_count}
+     THEN RAISE EXCEPTION 'Agata Proxima: one or more tenant roles do not exist'; END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname=owner_name AND (rolsuper OR rolbypassrls))
+     THEN RAISE EXCEPTION 'Agata Proxima: table owner bypasses row security'; END IF;
+  IF EXISTS (SELECT 1 FROM pg_policies WHERE schemaname={schema_literal} AND tablename={table_literal}
+             AND permissive='PERMISSIVE' AND policyname<>{policy_literal})
+     THEN RAISE EXCEPTION 'Agata Proxima: other permissive RLS policies must be reconciled first'; END IF;
+  IF EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+             WHERE n.nspname={schema_literal} AND c.relname={table_literal}
+               AND EXISTS (SELECT 1 FROM aclexplode(COALESCE(c.relacl,acldefault('r',c.relowner))) acl
+                           WHERE acl.grantee<>c.relowner AND acl.privilege_type='TRUNCATE'))
+     THEN RAISE EXCEPTION 'Agata Proxima: non-owner TRUNCATE grants bypass RLS'; END IF;
+END
+$agata_proxima_preflight$;
+"#,schema_literal=literal(schema),table_literal=literal(name),policy_literal=literal(policy),role_array=role_array,role_count=tenants.len());
+        out.push_str(&preflight);
         out.push_str(&format!("\nALTER TABLE {target} ENABLE ROW LEVEL SECURITY;\nALTER TABLE {target} FORCE ROW LEVEL SECURITY;\nDROP POLICY IF EXISTS {} ON {target};\nCREATE POLICY {} ON {target} FOR ALL TO {} USING ({predicate}) WITH CHECK ({predicate});\n",ident(policy),ident(policy),roles.join(", ")));
     }
+    out.push_str("\\nCOMMIT;\\n");
     Ok(out)
 }
 #[tokio::main]
