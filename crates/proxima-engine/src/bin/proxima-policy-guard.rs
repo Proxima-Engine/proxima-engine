@@ -11,6 +11,17 @@ struct TableFinding {
 }
 fn ident(v: &str) -> String { format!("\"{}\"", v.replace('"', "\"\"")) }
 fn literal(v: &str) -> String { format!("'{}'", v.replace('\'', "''")) }
+fn validate_ident(v: &str, label: &str) -> Result<(), Box<dyn Error>> {
+    if v.is_empty() || v.as_bytes().len() > 63 || v.contains('\0') {
+        return Err(format!("{label} must contain 1–63 UTF-8 bytes and no NUL byte").into());
+    }
+    Ok(())
+}
+fn valid_role_name(v: &str) -> bool {
+    let mut chars=v.chars();
+    matches!(chars.next(),Some(c) if c.is_ascii_alphabetic()||c=='_')
+        && chars.all(|c|c.is_ascii_alphanumeric()||c=='_')
+}
 
 fn audit_tls_connector() -> Result<MakeRustlsConnect, Box<dyn Error>> {
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
@@ -125,6 +136,8 @@ fn report(rows: &[TableFinding]) -> Value {
 fn generate(spec: &Value) -> Result<String, Box<dyn Error>> {
     let tables=spec.get("tables").and_then(Value::as_array).ok_or("policy spec requires tables array")?;
     if tables.is_empty() { return Err("tables array cannot be empty".into()); }
+    if tables.len()>100 { return Err("at most 100 tables may be generated in one policy spec".into()); }
+    let mut seen_tables=HashSet::new();
     let mut out=String::from("-- Agata Proxima generated SQL. Review and apply through migrations.\n-- Tenant identity is bound to current_user, not a client-writable GUC.\nBEGIN;\n");
     for t in tables {
         let schema=t["schema"].as_str().ok_or("schema required")?;
