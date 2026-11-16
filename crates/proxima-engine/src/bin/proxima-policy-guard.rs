@@ -43,11 +43,9 @@ async fn inspect(url: &str) -> Result<Vec<TableFinding>, Box<dyn Error>> {
         SELECT am.roleid FROM pg_auth_members am JOIN member_roles mr ON am.member=mr.role_oid
       )
       SELECT EXISTS(SELECT 1 FROM member_roles mr JOIN pg_roles r ON r.oid=mr.role_oid WHERE r.rolsuper OR r.rolbypassrls)
-        OR has_database_privilege(current_user,current_database(),'CREATE')
         OR EXISTS(SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
           WHERE c.relkind IN ('r','p','v','m') AND n.nspname NOT IN ('pg_catalog','information_schema')
-            AND (has_schema_privilege(current_user,n.oid,'CREATE')
-              OR has_table_privilege(current_user,c.oid,'INSERT')
+            AND (has_table_privilege(current_user,c.oid,'INSERT')
               OR has_table_privilege(current_user,c.oid,'UPDATE')
               OR has_table_privilege(current_user,c.oid,'DELETE')
               OR has_table_privilege(current_user,c.oid,'TRUNCATE')))
