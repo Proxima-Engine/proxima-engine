@@ -1,5 +1,7 @@
 use serde_json::{json, Value};
-use std::{env, error::Error, fs, path::Path};
+use std::{env, error::Error, fs, io::BufReader, path::Path, str::FromStr, time::Duration};
+use tokio_postgres::config::SslMode;
+use tokio_postgres_rustls::MakeRustlsConnect;
 
 struct TableFinding {
     schema: String, table: String, owner: String,
@@ -9,9 +11,30 @@ struct TableFinding {
 fn ident(v: &str) -> String { format!("\"{}\"", v.replace('"', "\"\"")) }
 fn literal(v: &str) -> String { format!("'{}'", v.replace('\'', "''")) }
 
+fn audit_tls_connector() -> Result<MakeRustlsConnect, Box<dyn Error>> {
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+    let mut roots = rustls::RootCertStore::empty();
+    roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    if let Ok(path) = env::var("PROXIMA_POLICY_AUDIT_TLS_CA_FILE") {
+        let file = fs::File::open(path)?;
+        let mut reader = BufReader::new(file);
+        let certificates = rustls_pemfile::certs(&mut reader).collect::<Result<Vec<_>, _>>()?;
+        if certificates.is_empty() { return Err("custom TLS CA file contains no certificates".into()); }
+        for certificate in certificates { roots.add(certificate)?; }
+    }
+    let config = rustls::ClientConfig::builder()
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+    Ok(MakeRustlsConnect::new(config))
+}
+
 async fn inspect(url: &str) -> Result<Vec<TableFinding>, Box<dyn Error>> {
-    let (client, connection) = tokio_postgres::connect(url, tokio_postgres::NoTls).await?;
+    let mut config = tokio_postgres::Config::from_str(url)?;
+    config.ssl_mode(SslMode::Require);
+    let tls = audit_tls_connector()?;
+    let (client, connection) = tokio::time::timeout(Duration::from_secs(10), config.connect(tls)).await??;
     tokio::spawn(async move { if let Err(e) = connection.await { eprintln!("audit connection ended: {e}"); } });
+    client.batch_execute("SET default_transaction_read_only = on; SET statement_timeout = '10s';").await?;
     let rows = client.query(r#"
         SELECT n.nspname, c.relname, pg_get_userbyid(c.relowner),
                c.relrowsecurity, c.relforcerowsecurity,
