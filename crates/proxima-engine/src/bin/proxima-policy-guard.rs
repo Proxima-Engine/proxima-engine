@@ -7,7 +7,7 @@ struct TableFinding {
     schema: String, table: String, owner: String,
     rls_enabled: bool, rls_forced: bool, owner_bypasses_rls: bool,
     public_select: bool, public_write_or_truncate: bool, bypass_role_grant: bool,
-    policy_count: i64, permissive_policy_count: i64,
+    policy_count: i64, permissive_policy_count: i64, security_definer_routines: i64,
 }
 fn ident(v: &str) -> String { format!("\"{}\"", v.replace('"', "\"\"")) }
 fn literal(v: &str) -> String { format!("'{}'", v.replace('\'', "''")) }
@@ -62,7 +62,11 @@ async fn inspect(url: &str) -> Result<Vec<TableFinding>, Box<dyn Error>> {
                EXISTS (SELECT 1 FROM aclexplode(COALESCE(c.relacl, acldefault('r', c.relowner))) a
                        JOIN pg_roles gr ON gr.oid=a.grantee WHERE gr.rolsuper OR gr.rolbypassrls),
                (SELECT count(*) FROM pg_policy p WHERE p.polrelid = c.oid),
-               (SELECT count(*) FROM pg_policy p WHERE p.polrelid = c.oid AND p.polpermissive)
+               (SELECT count(*) FROM pg_policy p WHERE p.polrelid = c.oid AND p.polpermissive),
+               (SELECT count(*) FROM pg_proc routine JOIN pg_namespace routine_schema ON routine_schema.oid=routine.pronamespace
+                 WHERE routine.prosecdef AND routine.prokind IN ('f','p')
+                   AND routine_schema.nspname NOT IN ('pg_catalog','information_schema')
+                   AND routine_schema.nspname NOT LIKE 'pg_%')
         FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
         LEFT JOIN pg_roles r ON r.rolname = pg_get_userbyid(c.relowner)
         WHERE c.relkind IN ('r','p')
@@ -74,7 +78,7 @@ async fn inspect(url: &str) -> Result<Vec<TableFinding>, Box<dyn Error>> {
         schema:r.get(0), table:r.get(1), owner:r.get(2), rls_enabled:r.get(3),
         rls_forced:r.get(4), owner_bypasses_rls:r.get(5), public_select:r.get(6),
         public_write_or_truncate:r.get(7), bypass_role_grant:r.get(8),
-        policy_count:r.get(9), permissive_policy_count:r.get(10)
+        policy_count:r.get(9), permissive_policy_count:r.get(10), security_definer_routines:r.get(11)
     }).collect())
 }
 fn report(rows: &[TableFinding]) -> Value {
@@ -88,11 +92,13 @@ fn report(rows: &[TableFinding]) -> Value {
         if f.bypass_role_grant { issues.push("bypassrls_or_superuser_role_has_table_grant"); }
         if f.rls_enabled && f.policy_count == 0 { issues.push("no_rls_policies"); }
         if f.permissive_policy_count > 1 { issues.push("multiple_permissive_policies_require_review"); }
+        if f.security_definer_routines > 0 { issues.push("security_definer_routines_require_review"); }
         json!({"schema":f.schema,"table":f.table,"owner":f.owner,
           "rls_enabled":f.rls_enabled,"rls_forced":f.rls_forced,
           "owner_bypasses_rls":f.owner_bypasses_rls,"public_select":f.public_select,
           "public_write_or_truncate":f.public_write_or_truncate,"bypass_role_grant":f.bypass_role_grant,
-          "policy_count":f.policy_count,"permissive_policy_count":f.permissive_policy_count,"findings":issues})
+          "policy_count":f.policy_count,"permissive_policy_count":f.permissive_policy_count,
+          "security_definer_routines":f.security_definer_routines,"findings":issues})
     }).collect();
     let count: usize = tables.iter().map(|t| t["findings"].as_array().map_or(0, Vec::len)).sum();
     json!({"schema":"agata-proxima.postgresql-posture.v1",
@@ -213,7 +219,7 @@ mod tests {
    assert!(!sql.contains("current_setting"));
  }
  #[test] fn flags_non_forced_owner_bypass() {
-   let rows=vec![TableFinding{schema:"public".into(),table:"orders".into(),owner:"app_owner".into(),rls_enabled:true,rls_forced:false,owner_bypasses_rls:false,public_select:false,public_write_or_truncate:false,bypass_role_grant:false,policy_count:1,permissive_policy_count:1}];
+   let rows=vec![TableFinding{schema:"public".into(),table:"orders".into(),owner:"app_owner".into(),rls_enabled:true,rls_forced:false,owner_bypasses_rls:false,public_select:false,public_write_or_truncate:false,bypass_role_grant:false,policy_count:1,permissive_policy_count:1,security_definer_routines:0}];
    let value=report(&rows);
    assert!(value["tables"][0]["findings"].as_array().unwrap().iter().any(|v|v=="table_owner_bypasses_rls"));
  }
