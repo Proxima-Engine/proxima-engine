@@ -192,6 +192,16 @@ BEGIN
                AND EXISTS (SELECT 1 FROM aclexplode(COALESCE(c.relacl,acldefault('r',c.relowner))) acl
                            WHERE acl.grantee<>c.relowner AND acl.privilege_type='TRUNCATE'))
      THEN RAISE EXCEPTION 'Agata Proxima: non-owner TRUNCATE grants bypass RLS'; END IF;
+  IF EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+             WHERE n.nspname={schema_literal} AND c.relname={table_literal}
+               AND EXISTS (SELECT 1 FROM aclexplode(COALESCE(c.relacl,acldefault('r',c.relowner))) acl
+                 WHERE acl.grantee<>0 AND acl.grantee<>c.relowner AND EXISTS(
+                   WITH RECURSIVE granted_roles(role_oid) AS (
+                     SELECT acl.grantee UNION SELECT am.roleid FROM pg_auth_members am JOIN granted_roles g ON am.member=g.role_oid
+                   )
+                   SELECT 1 FROM granted_roles g JOIN pg_roles r ON r.oid=g.role_oid WHERE r.rolsuper OR r.rolbypassrls
+                 )))
+     THEN RAISE EXCEPTION 'Agata Proxima: a table grantee can bypass row security'; END IF;
 END;
 $agata_proxima_preflight$;
 "#,schema_literal=literal(schema),table_literal=literal(name),policy_literal=literal(policy),role_array=role_array,role_count=tenants.len());
