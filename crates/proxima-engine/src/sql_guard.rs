@@ -50,6 +50,11 @@ pub fn blocks_tenant_session_mutation(sql: &str) -> bool {
 /// Detects startup -c options that could override the tenant-bound role or
 /// disable row-security behavior before the first SQL frame is received.
 pub fn blocks_tenant_startup_options(options: &str) -> bool {
+    let compact: String = options.chars().filter(|character| !character.is_whitespace()).collect::<String>().to_ascii_lowercase();
+    if compact.contains("role=") || compact.contains("session_authorization=")
+        || compact.contains("row_security=off") || compact.contains("session_replication_role=replica") {
+        return true;
+    }
     let tokens: Vec<&str> = options.split_whitespace().collect();
     let mut index = 0;
     while index < tokens.len() {
