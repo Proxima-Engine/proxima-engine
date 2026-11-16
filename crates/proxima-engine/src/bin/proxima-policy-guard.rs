@@ -209,6 +209,10 @@ BEGIN
                AND EXISTS (SELECT 1 FROM aclexplode(COALESCE(c.relacl,acldefault('r',c.relowner))) acl
                            WHERE acl.grantee<>c.relowner AND acl.privilege_type='TRUNCATE'))
      THEN RAISE EXCEPTION 'Agata Proxima: non-owner TRUNCATE grants bypass RLS'; END IF;
+  IF EXISTS (SELECT 1 FROM pg_policy p JOIN pg_class c ON c.oid=p.polrelid
+             JOIN pg_namespace n ON n.oid=c.relnamespace
+             WHERE n.nspname={schema_literal} AND c.relname={table_literal} AND p.polname={policy_literal})
+     THEN RAISE EXCEPTION 'Agata Proxima: policy name already exists; review the existing policy before replacement'; END IF;
   IF EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
              WHERE n.nspname={schema_literal} AND c.relname={table_literal}
                AND EXISTS (SELECT 1 FROM aclexplode(COALESCE(c.relacl,acldefault('r',c.relowner))) acl
@@ -223,7 +227,7 @@ END;
 $agata_proxima_preflight$;
 "#,schema_literal=literal(schema),table_literal=literal(name),policy_literal=literal(policy),role_array=role_array,role_count=tenants.len());
         out.push_str(&preflight);
-        out.push_str(&format!("\nALTER TABLE {target} ENABLE ROW LEVEL SECURITY;\nALTER TABLE {target} FORCE ROW LEVEL SECURITY;\nDROP POLICY IF EXISTS {} ON {target};\nCREATE POLICY {} ON {target} FOR ALL TO {} USING ({predicate}) WITH CHECK ({predicate});\n",ident(policy),ident(policy),roles.join(", ")));
+        out.push_str(&format!("\nALTER TABLE {target} ENABLE ROW LEVEL SECURITY;\nALTER TABLE {target} FORCE ROW LEVEL SECURITY;\nCREATE POLICY {} ON {target} FOR ALL TO {} USING ({predicate}) WITH CHECK ({predicate});\n",ident(policy),roles.join(", ")));
     }
     out.push_str("\nCOMMIT;\n");
     Ok(out)
