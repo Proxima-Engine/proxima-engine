@@ -269,6 +269,8 @@ mod tests {
    assert!(sql.contains("BEGIN;"));
    assert!(sql.contains("COMMIT;"));
    assert!(!sql.contains("current_setting"));
+   assert!(!sql.contains("DROP POLICY"));
+   assert!(sql.contains("policy name already exists"));
  }
  #[test] fn flags_non_forced_owner_bypass() {
    let rows=vec![TableFinding{schema:"public".into(),table:"orders".into(),owner:"app_owner".into(),rls_enabled:true,rls_forced:false,owner_bypasses_rls:false,public_select:false,public_write_or_truncate:false,bypass_role_grant:false,policy_count:1,permissive_policy_count:1,security_definer_routines:0}];
