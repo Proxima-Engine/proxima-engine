@@ -6,7 +6,8 @@ use tokio_postgres_rustls::MakeRustlsConnect;
 struct TableFinding {
     schema: String, table: String, owner: String,
     rls_enabled: bool, rls_forced: bool, owner_bypasses_rls: bool,
-    public_select: bool, policy_count: i64,
+    public_select: bool, public_write_or_truncate: bool, bypass_role_grant: bool,
+    policy_count: i64, permissive_policy_count: i64,
 }
 fn ident(v: &str) -> String { format!("\"{}\"", v.replace('"', "\"\"")) }
 fn literal(v: &str) -> String { format!("'{}'", v.replace('\'', "''")) }
@@ -34,25 +35,48 @@ async fn inspect(url: &str) -> Result<Vec<TableFinding>, Box<dyn Error>> {
     let tls = audit_tls_connector()?;
     let (client, connection) = tokio::time::timeout(Duration::from_secs(10), config.connect(tls)).await??;
     tokio::spawn(async move { if let Err(e) = connection.await { eprintln!("audit connection ended: {e}"); } });
-    client.batch_execute("SET default_transaction_read_only = on; SET statement_timeout = '10s';").await?;
+    client.batch_execute("SET default_transaction_read_only = on; SET statement_timeout = '10s'; SET lock_timeout = '2s';").await?;
+    let unsafe_inspector: bool = client.query_one(r#"
+      WITH RECURSIVE member_roles(role_oid) AS (
+        SELECT oid FROM pg_roles WHERE rolname=current_user
+        UNION
+        SELECT am.roleid FROM pg_auth_members am JOIN member_roles mr ON am.member=mr.role_oid
+      )
+      SELECT EXISTS(SELECT 1 FROM member_roles mr JOIN pg_roles r ON r.oid=mr.role_oid WHERE r.rolsuper OR r.rolbypassrls)
+        OR has_database_privilege(current_user,current_database(),'CREATE')
+        OR EXISTS(SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+          WHERE c.relkind IN ('r','p','v','m') AND n.nspname NOT IN ('pg_catalog','information_schema')
+            AND (has_schema_privilege(current_user,n.oid,'CREATE')
+              OR has_table_privilege(current_user,c.oid,'INSERT')
+              OR has_table_privilege(current_user,c.oid,'UPDATE')
+              OR has_table_privilege(current_user,c.oid,'DELETE')
+              OR has_table_privilege(current_user,c.oid,'TRUNCATE')))
+    "#, &[]).await?.get(0);
+    if unsafe_inspector { return Err("audit login must be read-only and must not be SUPERUSER or BYPASSRLS".into()); }
     let rows = client.query(r#"
         SELECT n.nspname, c.relname, pg_get_userbyid(c.relowner),
                c.relrowsecurity, c.relforcerowsecurity,
                COALESCE(r.rolsuper OR r.rolbypassrls, false),
                EXISTS (SELECT 1 FROM aclexplode(COALESCE(c.relacl, acldefault('r', c.relowner))) a
                        WHERE a.grantee = 0 AND a.privilege_type = 'SELECT'),
-               (SELECT count(*) FROM pg_policy p WHERE p.polrelid = c.oid)
+               EXISTS (SELECT 1 FROM aclexplode(COALESCE(c.relacl, acldefault('r', c.relowner))) a
+                       WHERE a.grantee = 0 AND a.privilege_type IN ('INSERT','UPDATE','DELETE','TRUNCATE')),
+               EXISTS (SELECT 1 FROM aclexplode(COALESCE(c.relacl, acldefault('r', c.relowner))) a
+                       JOIN pg_roles gr ON gr.oid=a.grantee WHERE gr.rolsuper OR gr.rolbypassrls),
+               (SELECT count(*) FROM pg_policy p WHERE p.polrelid = c.oid),
+               (SELECT count(*) FROM pg_policy p WHERE p.polrelid = c.oid AND p.polpermissive)
         FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
         LEFT JOIN pg_roles r ON r.rolname = pg_get_userbyid(c.relowner)
         WHERE c.relkind IN ('r','p')
           AND n.nspname NOT IN ('pg_catalog','information_schema')
-          AND n.nspname NOT LIKE 'pg_toast%'
+          AND n.nspname NOT LIKE 'pg_toast%' AND n.nspname NOT LIKE 'pg_temp_%'
         ORDER BY n.nspname,c.relname
     "#, &[]).await?;
     Ok(rows.into_iter().map(|r| TableFinding {
         schema:r.get(0), table:r.get(1), owner:r.get(2), rls_enabled:r.get(3),
         rls_forced:r.get(4), owner_bypasses_rls:r.get(5), public_select:r.get(6),
-        policy_count:r.get(7)
+        public_write_or_truncate:r.get(7), bypass_role_grant:r.get(8),
+        policy_count:r.get(9), permissive_policy_count:r.get(10)
     }).collect())
 }
 fn report(rows: &[TableFinding]) -> Value {
