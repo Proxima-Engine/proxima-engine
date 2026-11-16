@@ -116,12 +116,22 @@ fn generate(spec: &Value) -> Result<String, Box<dyn Error>> {
         let name=t["table"].as_str().ok_or("table required")?;
         let column=t["tenant_column"].as_str().ok_or("tenant_column required")?;
         let policy=t["policy_name"].as_str().unwrap_or("proxima_tenant_isolation");
+        if [schema,name,column,policy].iter().any(|value|value.is_empty()||value.len()>63) {
+            return Err(format!("{schema}.{name}: PostgreSQL identifiers must contain 1-63 bytes").into());
+        }
         let tenants=t["tenants"].as_array().ok_or("tenants array required")?;
-        if tenants.is_empty() { return Err(format!("{schema}.{name}: tenants cannot be empty").into()); }
+        if tenants.is_empty() || tenants.len()>100 { return Err(format!("{schema}.{name}: tenant mappings must contain 1-100 entries").into()); }
         let mut predicates=Vec::new(); let mut roles=Vec::new();
+        let mut tenant_ids=std::collections::HashSet::new();
+        let mut role_names=std::collections::HashSet::new();
         for tenant in tenants {
             let id=tenant["tenant_id"].as_str().ok_or("tenant_id required")?;
             let role=tenant["role"].as_str().ok_or("role required")?;
+            if id.is_empty()||id.len()>256||role.is_empty()||role.len()>63
+                || !role.bytes().all(|b|b.is_ascii_alphanumeric()||b==b'_')
+                || !tenant_ids.insert(id)||!role_names.insert(role) {
+                return Err(format!("{schema}.{name}: invalid or duplicate tenant-to-role mapping").into());
+            }
             predicates.push(format!("({} = {} AND current_user = {})",ident(column),literal(id),literal(role)));
             roles.push(ident(role));
         }
@@ -167,7 +177,7 @@ mod tests {
    assert!(!sql.contains("current_setting"));
  }
  #[test] fn flags_non_forced_owner_bypass() {
-   let rows=vec![TableFinding{schema:"public".into(),table:"orders".into(),owner:"app_owner".into(),rls_enabled:true,rls_forced:false,owner_bypasses_rls:false,public_select:false,policy_count:1}];
+   let rows=vec![TableFinding{schema:"public".into(),table:"orders".into(),owner:"app_owner".into(),rls_enabled:true,rls_forced:false,owner_bypasses_rls:false,public_select:false,public_write_or_truncate:false,bypass_role_grant:false,policy_count:1,permissive_policy_count:1}];
    let value=report(&rows);
    assert!(value["tables"][0]["findings"].as_array().unwrap().iter().any(|v|v=="table_owner_bypasses_rls"));
  }
