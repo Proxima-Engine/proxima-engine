@@ -207,6 +207,9 @@ mod tests {
    assert!(sql.contains("current_user = 'proxima_tenant_a'"));
    assert!(sql.contains("\"tenant_id\" = 'tenant-b'"));
    assert!(sql.contains("FORCE ROW LEVEL SECURITY"));
+   assert!(sql.contains("other permissive RLS policies must be reconciled first"));
+   assert!(sql.contains("BEGIN;"));
+   assert!(sql.contains("COMMIT;"));
    assert!(!sql.contains("current_setting"));
  }
  #[test] fn flags_non_forced_owner_bypass() {
