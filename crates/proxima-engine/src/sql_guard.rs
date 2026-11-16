@@ -9,30 +9,43 @@ use sqlparser::{
 /// remains the syntax authority for the full PostgreSQL dialect.
 pub fn blocks_tenant_session_mutation(sql: &str) -> bool {
     let dialect = PostgreSqlDialect {};
-    let Ok(statements) = Parser::parse_sql(&dialect, sql) else {
+    // Parse first for PostgreSQL syntax awareness. Token inspection below also
+    // catches security commands that a parser version may not model yet.
+    let _parsed = Parser::parse_sql(&dialect, sql);
+    let Ok(tokens) = sqlparser::tokenizer::Tokenizer::new(&dialect, sql).tokenize() else {
         return false;
     };
+    let tokens: Vec<String> = tokens
+        .iter()
+        .map(|token| token.to_string().to_ascii_lowercase().replace('"', ""))
+        .collect();
+    let at = |index: usize, expected: &str| tokens.get(index).is_some_and(|value| value == expected);
 
-    statements.iter().any(|statement| {
-        let normalized = statement
-            .to_string()
-            .to_ascii_lowercase()
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ");
-        let compact = normalized.replace(' ', "");
-        compact.starts_with("setrole")
-            || compact.starts_with("setlocalrole")
-            || compact.starts_with("setsessionauthorization")
-            || compact.starts_with("setlocalsessionauthorization")
-            || compact.starts_with("resetrole")
-            || compact.starts_with("resetsessionauthorization")
-            || compact.starts_with("discardall")
-            || compact.starts_with("setrow_security=off")
-            || compact.starts_with("setrow_securitytooff")
-            || compact.starts_with("setsession_replication_role=replica")
-            || compact.starts_with("setsession_replication_roleto'replica'")
-    })
+    if tokens.iter().any(|token| token.ends_with("set_config")) {
+        return true;
+    }
+    for index in 0..tokens.len() {
+        if at(index, "do") || at(index, "call") || at(index, "discard") && at(index + 1, "all") {
+            return true;
+        }
+        if at(index, "reset") && (at(index + 1, "role")
+            || at(index + 1, "session") && at(index + 2, "authorization")) {
+            return true;
+        }
+        if at(index, "set") {
+            let mut cursor = index + 1;
+            if at(cursor, "session") || at(cursor, "local") { cursor += 1; }
+            if at(cursor, "role")
+                || at(cursor, "session") && at(cursor + 1, "authorization") {
+                return true;
+            }
+            if (at(cursor, "row_security") && (at(cursor + 1, "=") || at(cursor + 1, "to")) && at(cursor + 2, "off"))
+                || (at(cursor, "session_replication_role") && (at(cursor + 1, "=") || at(cursor + 1, "to")) && at(cursor + 2, "replica")) {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 /// Extracts SQL text from PostgreSQL simple-query (Q) and Parse (P) frames.
