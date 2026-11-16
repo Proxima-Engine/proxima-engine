@@ -45,7 +45,7 @@ Create a mapping file with the exact schema, table, tenant key and tenant-to-rol
 
     cargo run -p proxima-engine --bin proxima-policy-guard -- generate policy-spec.json > generated-rls.sql
 
-The generated SQL is wrapped in a transaction and includes a preflight DO block. Before DDL it checks that the table exists, tenant roles exist, mapped roles have no role memberships or RLS-bypass path, the table owner is not a tenant role or RLS-bypass role, no other permissive policy applies, no non-owner TRUNCATE grant exists, no inherited bypass-role grant exists, and no user-defined SECURITY DEFINER routine is present.
+The generated SQL is wrapped in a transaction and includes a preflight DO block. Before DDL it checks that the table exists, tenant roles exist, mapped roles have no role memberships or RLS-bypass path, the table owner is not a tenant role or RLS-bypass role, no other permissive policy applies, no non-owner TRUNCATE grant exists, no PUBLIC table grant exists, no inherited bypass-role grant exists, and no user-defined SECURITY DEFINER routine is present.
 
 The DDL enables and forces RLS and creates a FOR ALL policy with matching USING and WITH CHECK predicates. Each predicate binds the tenant key to current_user. The preflight refuses to overwrite any existing policy with the selected name; inspect and rename or remove a pre-existing policy through a separately reviewed migration before regenerating. The generator does not trust a client-settable custom GUC as the sole tenant identity and does not execute DDL. Review the complete SQL, verify the target mapping, take a backup, and apply through your migration process.
 
