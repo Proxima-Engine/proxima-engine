@@ -124,6 +124,8 @@ mod tests {
     fn blocks_role_switches_and_row_security_disable() {
         for sql in [
             "SET ROLE proxima_tenant_other",
+            "SET \"role\" TO proxima_tenant_other",
+            "SET \"row_security\" = false",
             "SET LOCAL ROLE proxima_tenant_other",
             "RESET ROLE",
             "SET SESSION AUTHORIZATION other_user",
