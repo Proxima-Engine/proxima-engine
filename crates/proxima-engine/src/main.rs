@@ -12,6 +12,7 @@ use proxima_engine::{
     dashboard,
     metrics::{self, QueryLatencyTracker},
     protocol::SSL_REQUEST_CODE,
+    sql_guard,
     security_breaker::{BreakerConfig, SecurityBreaker},
     session::{establish, BoxedPgStream},
     tenant::TenantTokenVerifier,
@@ -27,7 +28,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Semaphore;
 use tokio::time::timeout;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 async fn deliver_pending_attestations(
     ledger: &AttestationLedger,
@@ -1046,7 +1047,8 @@ async fn handle_connection(
         copy_frontend_messages(
             &mut client_reader,
             &mut upstream_writer,
-            query_latency.clone()
+            query_latency.clone(),
+            session.tenant_context.is_some(),
         ),
         copy_backend_messages(&mut upstream_reader, &mut client_writer, query_latency),
     );
@@ -1170,6 +1172,7 @@ async fn copy_frontend_messages<R, W>(
     reader: &mut R,
     writer: &mut W,
     query_latency: Arc<QueryLatencyTracker>,
+    tenant_enforced: bool,
 ) -> io::Result<u64>
 where
     R: AsyncRead + Unpin,
@@ -1201,6 +1204,18 @@ where
             };
             if pending.len() < total_length {
                 break;
+            }
+            if tenant_enforced && matches!(pending[0], b'Q' | b'P') {
+                let frame = &pending[..total_length];
+                if let Some(sql) = sql_guard::sql_from_frontend_frame(frame) {
+                    if sql_guard::blocks_tenant_session_mutation(sql) {
+                        warn!("blocked SQL that attempts to change tenant-bound PostgreSQL session security state");
+                        return Err(io::Error::new(
+                            io::ErrorKind::PermissionDenied,
+                            "tenant-bound PostgreSQL sessions cannot change database roles or disable row security",
+                        ));
+                    }
+                }
             }
             if matches!(pending[0], b'Q' | b'E') {
                 metrics::global().query_processed();
