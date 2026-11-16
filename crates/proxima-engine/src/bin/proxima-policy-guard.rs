@@ -37,7 +37,7 @@ fn report(rows: &[TableFinding]) -> Value {
         let mut issues: Vec<&str> = Vec::new();
         if !f.rls_enabled { issues.push("rls_disabled"); }
         if f.rls_enabled && !f.rls_forced { issues.push("rls_not_forced"); }
-        if f.owner_bypasses_rls { issues.push("table_owner_bypasses_rls"); }
+        if !f.rls_forced || f.owner_bypasses_rls { issues.push("table_owner_bypasses_rls"); }
         if f.public_select { issues.push("public_select_grant"); }
         if f.rls_enabled && f.policy_count == 0 { issues.push("no_rls_policies"); }
         json!({"schema":f.schema,"table":f.table,"owner":f.owner,
@@ -114,6 +114,11 @@ mod tests {
    assert!(sql.contains("\"tenant_id\" = 'tenant-b'"));
    assert!(sql.contains("FORCE ROW LEVEL SECURITY"));
    assert!(!sql.contains("current_setting"));
+ }
+ #[test] fn flags_non_forced_owner_bypass() {
+   let rows=vec![TableFinding{schema:"public".into(),table:"orders".into(),owner:"app_owner".into(),rls_enabled:true,rls_forced:false,owner_bypasses_rls:false,public_select:false,policy_count:1}];
+   let value=report(&rows);
+   assert!(value["tables"][0]["findings"].as_array().unwrap().iter().any(|v|v=="table_owner_bypasses_rls"));
  }
  #[test] fn rejects_empty_mapping() {
    let spec=json!({"tables":[{"schema":"public","table":"orders","tenant_column":"tenant_id","tenants":[]}]});
