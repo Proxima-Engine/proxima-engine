@@ -9,3 +9,4 @@ pub mod security_breaker;
 pub mod session;
 pub mod tenant;
 pub mod tls;
+pub mod sql_guard;
