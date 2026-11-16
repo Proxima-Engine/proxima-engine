@@ -26,7 +26,7 @@ pub fn blocks_tenant_session_mutation(sql: &str) -> bool {
     }
     for index in 0..tokens.len() {
         let statement_start = index == 0 || at(index - 1, ";");
-        if statement_start && (at(index, "do") || at(index, "call") || at(index, "discard") && at(index + 1, "all")) {
+        if statement_start && (at(index, "do") || at(index, "call") || at(index, "truncate") || at(index, "discard") && at(index + 1, "all")) {
             return true;
         }
         if statement_start && at(index, "reset") && (at(index + 1, "role")
@@ -93,6 +93,7 @@ mod tests {
             "SET row_security = off",
             "SET session_replication_role = replica",
             "DISCARD ALL",
+            "TRUNCATE TABLE public.orders",
         ] {
             assert!(blocks_tenant_session_mutation(sql), "expected block: {sql}");
         }
