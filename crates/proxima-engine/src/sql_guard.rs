@@ -34,11 +34,9 @@ pub fn blocks_tenant_session_mutation(sql: &str) -> bool {
         }
         if at(index, "set") {
             let mut cursor = index + 1;
+            if at(cursor, "session") && at(cursor + 1, "authorization") { return true; }
             if at(cursor, "session") || at(cursor, "local") { cursor += 1; }
-            if at(cursor, "role")
-                || at(cursor, "session") && at(cursor + 1, "authorization") {
-                return true;
-            }
+            if at(cursor, "role") { return true; }
             if (at(cursor, "row_security") && (at(cursor + 1, "=") || at(cursor + 1, "to")) && at(cursor + 2, "off"))
                 || (at(cursor, "session_replication_role") && (at(cursor + 1, "=") || at(cursor + 1, "to")) && at(cursor + 2, "replica")) {
                 return true;
