@@ -53,7 +53,7 @@ pub fn blocks_tenant_startup_options(options: &str) -> bool {
     let tokens: Vec<&str> = options.split_whitespace().collect();
     let mut index = 0;
     while index < tokens.len() {
-        let token = tokens[index].trim_matches(['\'', '"']);
+        let token = tokens[index].trim_matches(|character| character == '\'' || character == '"');
         let assignment = if token == "-c" || token == "--set" {
             index += 1;
             tokens.get(index).copied()
@@ -65,10 +65,10 @@ pub fn blocks_tenant_startup_options(options: &str) -> bool {
             None
         };
         if let Some(assignment) = assignment {
-            let assignment = assignment.trim_matches(['\'', '"']);
+            let assignment = assignment.trim_matches(|character| character == '\'' || character == '"');
             let mut pair = assignment.splitn(2, '=');
             let key = pair.next().unwrap_or("").to_ascii_lowercase();
-            let value = pair.next().unwrap_or("").trim_matches(['\'', '"']).to_ascii_lowercase();
+            let value = pair.next().unwrap_or("").trim_matches(|character| character == '\'' || character == '"').to_ascii_lowercase();
             if key == "role" || key == "session_authorization"
                 || key == "row_security" && value == "off"
                 || key == "session_replication_role" && value == "replica" {
