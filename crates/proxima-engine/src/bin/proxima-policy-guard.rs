@@ -60,6 +60,10 @@ async fn inspect(url: &str) -> Result<Vec<TableFinding>, Box<dyn Error>> {
               OR has_table_privilege(current_user,c.oid,'UPDATE')
               OR has_table_privilege(current_user,c.oid,'DELETE')
               OR has_table_privilege(current_user,c.oid,'TRUNCATE')))
+        OR has_database_privilege(current_user,current_database(),'CREATE')
+        OR EXISTS(SELECT 1 FROM pg_namespace n
+          WHERE n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname NOT LIKE 'pg_%'
+            AND has_schema_privilege(current_user,n.oid,'CREATE'))
     "#, &[]).await?.get(0);
     if unsafe_inspector { return Err("audit login must be read-only and must not be SUPERUSER or BYPASSRLS".into()); }
     let rows = client.query(r#"
