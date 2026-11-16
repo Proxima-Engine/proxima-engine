@@ -165,13 +165,13 @@ BEGIN
                AND EXISTS (SELECT 1 FROM aclexplode(COALESCE(c.relacl,acldefault('r',c.relowner))) acl
                            WHERE acl.grantee<>c.relowner AND acl.privilege_type='TRUNCATE'))
      THEN RAISE EXCEPTION 'Agata Proxima: non-owner TRUNCATE grants bypass RLS'; END IF;
-END
+END;
 $agata_proxima_preflight$;
 "#,schema_literal=literal(schema),table_literal=literal(name),policy_literal=literal(policy),role_array=role_array,role_count=tenants.len());
         out.push_str(&preflight);
         out.push_str(&format!("\nALTER TABLE {target} ENABLE ROW LEVEL SECURITY;\nALTER TABLE {target} FORCE ROW LEVEL SECURITY;\nDROP POLICY IF EXISTS {} ON {target};\nCREATE POLICY {} ON {target} FOR ALL TO {} USING ({predicate}) WITH CHECK ({predicate});\n",ident(policy),ident(policy),roles.join(", ")));
     }
-    out.push_str("\\nCOMMIT;\\n");
+    out.push_str("\nCOMMIT;\n");
     Ok(out)
 }
 #[tokio::main]
