@@ -166,6 +166,11 @@ BEGIN
   IF EXISTS (SELECT 1 FROM pg_policies WHERE schemaname={schema_literal} AND tablename={table_literal}
              AND permissive='PERMISSIVE' AND policyname<>{policy_literal})
      THEN RAISE EXCEPTION 'Agata Proxima: other permissive RLS policies must be reconciled first'; END IF;
+  IF EXISTS (SELECT 1 FROM pg_proc routine JOIN pg_namespace routine_schema ON routine_schema.oid=routine.pronamespace
+             WHERE routine.prosecdef AND routine.prokind IN ('f','p')
+               AND routine_schema.nspname NOT IN ('pg_catalog','information_schema')
+               AND routine_schema.nspname NOT LIKE 'pg_%')
+     THEN RAISE EXCEPTION 'Agata Proxima: SECURITY DEFINER routines require separate review before claiming tenant isolation'; END IF;
   IF EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
              WHERE n.nspname={schema_literal} AND c.relname={table_literal}
                AND EXISTS (SELECT 1 FROM aclexplode(COALESCE(c.relacl,acldefault('r',c.relowner))) acl
