@@ -3,6 +3,7 @@ use crate::protocol::{
     AUTHENTICATION_TAG, AUTH_OK, ERROR_RESPONSE_TAG, READY_FOR_QUERY_TAG,
 };
 use crate::tenant::{TenantContext, TenantTokenVerifier};
+use crate::sql_guard;
 use std::io;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
@@ -169,6 +170,24 @@ fn prepare_startup(
         }
         None => None,
     };
+
+    if tenant_context.is_some() {
+        for (key, value) in &forwarded {
+            let key = key.to_ascii_lowercase();
+            let value = value.trim().to_ascii_lowercase();
+            let blocked = key == "role"
+                || key == "session_authorization"
+                || key == "row_security" && value == "off"
+                || key == "session_replication_role" && value == "replica"
+                || key == "options" && sql_guard::blocks_tenant_startup_options(value.as_str());
+            if blocked {
+                return Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "tenant-bound PostgreSQL startup options cannot change roles or disable row security",
+                ));
+            }
+        }
+    }
 
     if let Some(context) = tenant_context.as_ref() {
         let normalized_tenant_id = context.tenant_id.replace('-', "_");
