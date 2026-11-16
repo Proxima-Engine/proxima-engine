@@ -9,9 +9,9 @@ This tool adds an explicit, read-only catalog audit and deterministic SQL genera
 
 ## Audit
 
-Set PROXIMA_POLICY_AUDIT_DATABASE_URL to a dedicated, read-only PostgreSQL inspection connection. Do not use a superuser as the routine audit identity.
+Set PROXIMA_POLICY_AUDIT_DATABASE_URL to a dedicated, read-only PostgreSQL inspection connection. Do not use a superuser as the routine audit identity. This initial binary currently connects with tokio-postgres NoTls: use it only against loopback or a trusted private network. Do not send database credentials or traffic over an untrusted network. TLS support for this audit connection is not implemented in this first change.
 
-    export PROXIMA_POLICY_AUDIT_DATABASE_URL='postgresql://AUDIT_USER:...@HOST:5432/DB?sslmode=require'
+    export PROXIMA_POLICY_AUDIT_DATABASE_URL='postgresql://AUDIT_USER:...@127.0.0.1:5432/DB?sslmode=disable'
     cargo run -p proxima-engine --bin proxima-policy-guard -- audit
 
 The command emits JSON and exits with status 2 when catalog findings exist. It reports ordinary and partitioned tables visible to the inspection role, RLS enabled/forced state, owner superuser/BYPASSRLS status, PUBLIC SELECT grants, and policy counts. Visibility is limited by the audit role's privileges.
