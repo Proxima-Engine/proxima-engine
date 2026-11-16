@@ -66,7 +66,12 @@ async fn inspect(url: &str) -> Result<Vec<TableFinding>, Box<dyn Error>> {
                EXISTS (SELECT 1 FROM aclexplode(COALESCE(c.relacl, acldefault('r', c.relowner))) a
                        WHERE a.grantee = 0 AND a.privilege_type IN ('INSERT','UPDATE','DELETE','TRUNCATE')),
                EXISTS (SELECT 1 FROM aclexplode(COALESCE(c.relacl, acldefault('r', c.relowner))) a
-                       JOIN pg_roles gr ON gr.oid=a.grantee WHERE gr.rolsuper OR gr.rolbypassrls),
+                       WHERE a.grantee<>0 AND EXISTS(
+                         WITH RECURSIVE granted_roles(role_oid) AS (
+                           SELECT a.grantee UNION SELECT am.roleid FROM pg_auth_members am JOIN granted_roles g ON am.member=g.role_oid
+                         )
+                         SELECT 1 FROM granted_roles g JOIN pg_roles gr ON gr.oid=g.role_oid WHERE gr.rolsuper OR gr.rolbypassrls
+                       )),
                (SELECT count(*) FROM pg_policy p WHERE p.polrelid = c.oid),
                (SELECT count(*) FROM pg_policy p WHERE p.polrelid = c.oid AND p.polpermissive),
                (SELECT count(*) FROM pg_proc routine JOIN pg_namespace routine_schema ON routine_schema.oid=routine.pronamespace
