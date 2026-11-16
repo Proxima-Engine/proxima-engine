@@ -25,14 +25,15 @@ pub fn blocks_tenant_session_mutation(sql: &str) -> bool {
         return true;
     }
     for index in 0..tokens.len() {
-        if at(index, "do") || at(index, "call") || at(index, "discard") && at(index + 1, "all") {
+        let statement_start = index == 0 || at(index - 1, ";");
+        if statement_start && (at(index, "do") || at(index, "call") || at(index, "discard") && at(index + 1, "all")) {
             return true;
         }
-        if at(index, "reset") && (at(index + 1, "role")
+        if statement_start && at(index, "reset") && (at(index + 1, "role")
             || at(index + 1, "session") && at(index + 2, "authorization")) {
             return true;
         }
-        if at(index, "set") {
+        if statement_start && at(index, "set") {
             let mut cursor = index + 1;
             if at(cursor, "session") && at(cursor + 1, "authorization") { return true; }
             if at(cursor, "session") || at(cursor, "local") { cursor += 1; }
@@ -101,6 +102,7 @@ mod tests {
     fn allows_ordinary_queries_and_literals_that_mention_role_commands() {
         assert!(!blocks_tenant_session_mutation("SELECT * FROM public.orders"));
         assert!(!blocks_tenant_session_mutation("SELECT 'SET ROLE other_user'"));
+        assert!(!blocks_tenant_session_mutation("UPDATE public.users SET role = 'operator'"));
         assert!(!blocks_tenant_session_mutation("UPDATE public.orders SET status = 'SET ROLE'"));
     }
 
