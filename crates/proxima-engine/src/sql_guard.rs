@@ -47,6 +47,39 @@ pub fn blocks_tenant_session_mutation(sql: &str) -> bool {
     false
 }
 
+/// Detects startup -c options that could override the tenant-bound role or
+/// disable row-security behavior before the first SQL frame is received.
+pub fn blocks_tenant_startup_options(options: &str) -> bool {
+    let tokens: Vec<&str> = options.split_whitespace().collect();
+    let mut index = 0;
+    while index < tokens.len() {
+        let token = tokens[index].trim_matches(['\'', '"']);
+        let assignment = if token == "-c" || token == "--set" {
+            index += 1;
+            tokens.get(index).copied()
+        } else if let Some(value) = token.strip_prefix("-c") {
+            Some(value)
+        } else if let Some(value) = token.strip_prefix("--") {
+            Some(value)
+        } else {
+            None
+        };
+        if let Some(assignment) = assignment {
+            let assignment = assignment.trim_matches(['\'', '"']);
+            let mut pair = assignment.splitn(2, '=');
+            let key = pair.next().unwrap_or("").to_ascii_lowercase();
+            let value = pair.next().unwrap_or("").trim_matches(['\'', '"']).to_ascii_lowercase();
+            if key == "role" || key == "session_authorization"
+                || key == "row_security" && value == "off"
+                || key == "session_replication_role" && value == "replica" {
+                return true;
+            }
+        }
+        index += 1;
+    }
+    false
+}
+
 /// Extracts SQL text from PostgreSQL simple-query (Q) and Parse (P) frames.
 /// The supplied slice must contain one complete frontend frame.
 pub fn sql_from_frontend_frame(frame: &[u8]) -> Option<&str> {
@@ -105,6 +138,19 @@ mod tests {
         assert!(!blocks_tenant_session_mutation("SELECT 'SET ROLE other_user'"));
         assert!(!blocks_tenant_session_mutation("UPDATE public.users SET role = 'operator'"));
         assert!(!blocks_tenant_session_mutation("UPDATE public.orders SET status = 'SET ROLE'"));
+    }
+
+    #[test]
+    fn blocks_security_sensitive_startup_options() {
+        for options in [
+            "-c role=proxima_tenant_other",
+            "-c session_authorization=other_user",
+            "-c row_security=off",
+            "--session_replication_role=replica",
+        ] {
+            assert!(blocks_tenant_startup_options(options), "expected block: {options}");
+        }
+        assert!(!blocks_tenant_startup_options("-c application_name=my-service -c search_path=public"));
     }
 
     #[test]
