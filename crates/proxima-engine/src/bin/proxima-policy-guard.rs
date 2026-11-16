@@ -54,7 +54,7 @@ async fn inspect(url: &str) -> Result<Vec<TableFinding>, Box<dyn Error>> {
     let rows = client.query(r#"
         SELECT n.nspname, c.relname, pg_get_userbyid(c.relowner),
                c.relrowsecurity, c.relforcerowsecurity,
-               COALESCE(r.rolsuper OR r.rolbypassrls, false),
+               (COALESCE(r.rolsuper OR r.rolbypassrls,false) OR EXISTS(\n                 WITH RECURSIVE owner_roles(role_oid) AS (\n                   SELECT c.relowner UNION SELECT am.roleid FROM pg_auth_members am JOIN owner_roles o ON am.member=o.role_oid\n                 )\n                 SELECT 1 FROM owner_roles o JOIN pg_roles owner_member ON owner_member.oid=o.role_oid\n                 WHERE owner_member.rolsuper OR owner_member.rolbypassrls\n               )),
                EXISTS (SELECT 1 FROM aclexplode(COALESCE(c.relacl, acldefault('r', c.relowner))) a
                        WHERE a.grantee = 0 AND a.privilege_type = 'SELECT'),
                EXISTS (SELECT 1 FROM aclexplode(COALESCE(c.relacl, acldefault('r', c.relowner))) a
@@ -163,6 +163,11 @@ BEGIN
      THEN RAISE EXCEPTION 'Agata Proxima: one or more tenant roles do not exist'; END IF;
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname=owner_name AND (rolsuper OR rolbypassrls))
      THEN RAISE EXCEPTION 'Agata Proxima: table owner bypasses row security'; END IF;
+  IF EXISTS (WITH RECURSIVE owner_roles(role_oid) AS (
+               SELECT oid FROM pg_roles WHERE rolname=owner_name
+               UNION SELECT am.roleid FROM pg_auth_members am JOIN owner_roles o ON am.member=o.role_oid
+             ) SELECT 1 FROM owner_roles o JOIN pg_roles r ON r.oid=o.role_oid WHERE r.rolsuper OR r.rolbypassrls)
+     THEN RAISE EXCEPTION 'Agata Proxima: table owner membership bypasses row security'; END IF;
   IF EXISTS (SELECT 1 FROM pg_policies WHERE schemaname={schema_literal} AND tablename={table_literal}
              AND permissive='PERMISSIVE' AND policyname<>{policy_literal})
      THEN RAISE EXCEPTION 'Agata Proxima: other permissive RLS policies must be reconciled first'; END IF;
