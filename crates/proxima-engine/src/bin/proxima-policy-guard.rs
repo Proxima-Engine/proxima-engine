@@ -54,7 +54,13 @@ async fn inspect(url: &str) -> Result<Vec<TableFinding>, Box<dyn Error>> {
     let rows = client.query(r#"
         SELECT n.nspname, c.relname, pg_get_userbyid(c.relowner),
                c.relrowsecurity, c.relforcerowsecurity,
-               (COALESCE(r.rolsuper OR r.rolbypassrls,false) OR EXISTS(\n                 WITH RECURSIVE owner_roles(role_oid) AS (\n                   SELECT c.relowner UNION SELECT am.roleid FROM pg_auth_members am JOIN owner_roles o ON am.member=o.role_oid\n                 )\n                 SELECT 1 FROM owner_roles o JOIN pg_roles owner_member ON owner_member.oid=o.role_oid\n                 WHERE owner_member.rolsuper OR owner_member.rolbypassrls\n               )),
+               (COALESCE(r.rolsuper OR r.rolbypassrls,false) OR EXISTS(
+                 WITH RECURSIVE owner_roles(role_oid) AS (
+                   SELECT c.relowner UNION SELECT am.roleid FROM pg_auth_members am JOIN owner_roles o ON am.member=o.role_oid
+                 )
+                 SELECT 1 FROM owner_roles o JOIN pg_roles owner_member ON owner_member.oid=o.role_oid
+                 WHERE owner_member.rolsuper OR owner_member.rolbypassrls
+               )),
                EXISTS (SELECT 1 FROM aclexplode(COALESCE(c.relacl, acldefault('r', c.relowner))) a
                        WHERE a.grantee = 0 AND a.privilege_type = 'SELECT'),
                EXISTS (SELECT 1 FROM aclexplode(COALESCE(c.relacl, acldefault('r', c.relowner))) a
