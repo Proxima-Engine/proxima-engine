@@ -52,7 +52,7 @@ pub fn blocks_tenant_session_mutation(sql: &str) -> bool {
 pub fn blocks_tenant_startup_options(options: &str) -> bool {
     let compact: String = options.chars().filter(|character| !character.is_whitespace()).collect::<String>().to_ascii_lowercase();
     if compact.contains("role=") || compact.contains("session_authorization=")
-        || ["off","false","0","no"].iter().any(|value|compact.contains(&format!("row_security={value}"))) || compact.contains("session_replication_role=replica") {
+        || compact.contains("row_security=off") || compact.contains("row_security=false") || compact.contains("row_security=0") || compact.contains("row_security=no") || compact.contains("session_replication_role=replica") {
         return true;
     }
     let tokens: Vec<&str> = options.split_whitespace().collect();
