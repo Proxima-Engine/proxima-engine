@@ -209,10 +209,14 @@ mod tests {
                 database_kind: DatabaseKind::PostgreSql,
                 policy_id: policy.policy_id.clone(),
                 revision: policy.revision,
-                changes: policy.resources.iter().map(|resource| crate::database_adapter::NativePolicyChange {
-                    resource: resource.clone(),
-                    action: "reviewed_change".into(),
-                    definition: serde_json::json!({"kind":"fixture"}),
+                changes: policy.resources.iter().map(|resource| {
+                    let mut resource = resource.clone();
+                    if self.wrong_tenant_key { resource.tenant_key = "account_id".into(); }
+                    crate::database_adapter::NativePolicyChange {
+                        resource,
+                        action: "reviewed_change".into(),
+                        definition: serde_json::json!({"kind":"fixture"}),
+                    }
                 }).collect(),
                 requires_approval: true,
             })
@@ -289,6 +293,14 @@ mod tests {
         let report = coordinator.inspect_and_verify(DatabaseKind::PostgreSql, &request()).await.unwrap();
         assert_eq!(report.access_decision(), AccessDecision::Deny);
         assert!(report.findings.iter().any(|finding| finding.code == "operation_not_verified"));
+    }
+
+    #[test]
+    fn compilation_rejects_a_different_tenant_ownership_key() {
+        let mut registry = AdapterRegistry::default();
+        registry.register(std::sync::Arc::new(FixtureAdapter { omit_read: false, wrong_tenant_key: true })).unwrap();
+        let coordinator = SecurityCoreCoordinator::new(registry);
+        assert_eq!(coordinator.compile(DatabaseKind::PostgreSql, &request().policy), Err(SecurityCoreError::InvalidCompilation));
     }
 
     #[tokio::test]
