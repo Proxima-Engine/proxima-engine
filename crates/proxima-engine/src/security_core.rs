@@ -135,9 +135,9 @@ pub fn adapter_catalog() -> Vec<AdapterDescriptor> {
         AdapterDescriptor {
             kind: DatabaseKind::CockroachDb,
             name: "CockroachDB",
-            maturity: AdapterMaturity::Planned,
-            capabilities: AdapterCapabilities::default(),
-            status_note: "CockroachDB-specific authorization semantics and runtime enforcement require separate implementation and validation.",
+            maturity: AdapterMaturity::InDevelopment,
+            capabilities: AdapterCapabilities { schema_inspection: true, drift_detection: true, ..AdapterCapabilities::default() },
+            status_note: "TLS-verified PostgreSQL-wire discovery inspects non-system tables, views, columns and table grants with bounded catalog fingerprints. CockroachDB-native tenant enforcement, policy deployment, independent semantic probes and runtime admission are not implemented; PostgreSQL RLS behavior is not assumed.",
         },
         AdapterDescriptor {
             kind: DatabaseKind::Redis,
