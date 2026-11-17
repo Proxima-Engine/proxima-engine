@@ -1,5 +1,7 @@
 use serde_json::{json, Value};
-use proxima_engine::security_core::{adapter_catalog, TenantSecurityPolicy, SECURITY_MODEL_VERSION};
+use proxima_engine::security_core::{adapter_catalog, AccessDecision, TenantSecurityPolicy, SECURITY_MODEL_VERSION};
+use proxima_engine::database_adapter::{AdapterError, AdapterFuture, AdapterTarget, DatabaseAdapter, InspectionRequest};
+use proxima_engine::postgres_adapter::{PostgresCatalogAdapter, PostgresConnector};
 use proxima_engine::native_policy_plans::{compile_mongodb_database_boundary, compile_mysql_database_boundary, compile_redis_acl, compile_sql_server};
 use std::{collections::HashSet, env, error::Error, fs, io::BufReader, path::Path, str::FromStr, time::Duration};
 use tokio_postgres::config::SslMode;
@@ -369,6 +371,57 @@ async fn main() -> Result<(),Box<dyn Error>> {
         let value=json!({"schema_version":SECURITY_MODEL_VERSION,"scope":"engine_runtime","adapter_contract":"database_adapter::DatabaseAdapter","adapters":adapter_catalog()});
         println!("{}",serde_json::to_string_pretty(&value)?);
       },
+      Some("inspect-policy") => {
+        let path = args.next().ok_or("usage: proxima-policy-guard inspect-policy <policy.json>")?;
+        let policy: TenantSecurityPolicy = serde_json::from_slice(&fs::read(&path)?)?;
+        policy.validate().map_err(|error| format!("invalid policy: {error:?}"))?;
+        let url = env::var("PROXIMA_POSTGRES_ADAPTER_DATABASE_URL")
+            .map_err(|_| "set PROXIMA_POSTGRES_ADAPTER_DATABASE_URL to a TLS-verified PostgreSQL URL")?;
+        let target_id = env::var("PROXIMA_POSTGRES_ADAPTER_TARGET_ID")
+            .map_err(|_| "set PROXIMA_POSTGRES_ADAPTER_TARGET_ID to the registered non-secret target ID")?;
+        let database_name = env::var("PROXIMA_POSTGRES_ADAPTER_DATABASE_NAME")
+            .map_err(|_| "set PROXIMA_POSTGRES_ADAPTER_DATABASE_NAME to the expected database name")?;
+        let connector_url = url.clone();
+        let connector: PostgresConnector = std::sync::Arc::new(move || {
+            let connector_url = connector_url.clone();
+            Box::pin(async move {
+                let mut config = tokio_postgres::Config::from_str(&connector_url)
+                    .map_err(|error| AdapterError { code: "invalid_postgres_connection_config".into(), detail: error.to_string(), retryable: false })?;
+                config.ssl_mode(SslMode::Require);
+                let tls = audit_tls_connector()
+                    .map_err(|error| AdapterError { code: "postgres_tls_configuration_failed".into(), detail: error.to_string(), retryable: false })?;
+                let (client, connection) = tokio::time::timeout(Duration::from_secs(10), config.connect(tls))
+                    .await
+                    .map_err(|error| AdapterError { code: "postgres_connection_timeout".into(), detail: error.to_string(), retryable: true })?
+                    .map_err(|error| AdapterError { code: "postgres_connection_failed".into(), detail: error.to_string(), retryable: error.is_closed() })?;
+                tokio::spawn(async move {
+                    if let Err(error) = connection.await {
+                        eprintln!("PostgreSQL adapter connection ended: {error}");
+                    }
+                });
+                Ok(client)
+            }) as AdapterFuture<'static, Result<tokio_postgres::Client, AdapterError>>
+        });
+        let adapter = PostgresCatalogAdapter::new(target_id.clone(), database_name, connector)?;
+        let request = InspectionRequest {
+            target: AdapterTarget {
+                target_id,
+                database_name: env::var("PROXIMA_POSTGRES_ADAPTER_DATABASE_NAME")?,
+                namespace: None,
+            },
+            policy,
+        };
+        let snapshot = adapter.inspect(&request).await?;
+        let verification = adapter.verify(&request.policy, &snapshot).await?;
+        let decision = verification.access_decision();
+        println!("{}", serde_json::to_string_pretty(&json!({
+            "adapter": adapter.descriptor(),
+            "snapshot": snapshot,
+            "verification": verification,
+            "access_decision": decision
+        }))?);
+        if decision != AccessDecision::Allow { std::process::exit(2); }
+      },
       Some("audit") => {
         let url=env::var("PROXIMA_POLICY_AUDIT_DATABASE_URL").map_err(|_|"set PROXIMA_POLICY_AUDIT_DATABASE_URL to a read-only inspection URL")?;
         let value=report(&inspect(&url).await?);
@@ -380,7 +433,7 @@ async fn main() -> Result<(),Box<dyn Error>> {
         let spec:Value=serde_json::from_slice(&fs::read(Path::new(&path))?)?;
         print!("{}",generate(&spec)?);
       },
-      _ => return Err("usage: proxima-policy-guard <adapters|audit|generate|validate-policy|compile-plan>".into())
+      _ => return Err("usage: proxima-policy-guard <adapters|audit|generate|validate-policy|compile-plan|inspect-policy>".into())
     }
     Ok(())
 }
