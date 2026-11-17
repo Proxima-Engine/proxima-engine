@@ -18,6 +18,7 @@ fn validate_ident(v: &str, label: &str) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 fn valid_role_name(v: &str) -> bool {
+    if v.is_empty() || v.len()>63 { return false; }
     let mut chars=v.chars();
     matches!(chars.next(),Some(c) if c.is_ascii_alphabetic()||c=='_')
         && chars.all(|c|c.is_ascii_alphanumeric()||c=='_')
