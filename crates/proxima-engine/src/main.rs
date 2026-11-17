@@ -357,6 +357,21 @@ impl PolicyAdmissionClient {
         }
         Ok(())
     }
+
+    async fn authorize_with_metrics(&self, database_name: &str, tenant_id: &str) -> io::Result<()> {
+        let metrics = metrics::global();
+        metrics.policy_admission_checked();
+        match self.authorize(database_name, tenant_id).await {
+            Ok(()) => {
+                metrics.policy_admission_allowed();
+                Ok(())
+            }
+            Err(error) => {
+                metrics.policy_admission_denied();
+                Err(error)
+            }
+        }
+    }
 }
 
 fn attestation_ingest_url_allowed(url: &str, allow_insecure_http: bool) -> bool {
@@ -1230,7 +1245,7 @@ async fn handle_connection(
             "Unauthenticated PostgreSQL protocol requests are disabled when policy admission is required"));
     }
     if let (Some(admission), Some(context)) = (policy_admission, session.tenant_context.as_ref()) {
-        if let Err(error) = admission.authorize(&session.database_name, &context.tenant_id).await {
+        if let Err(error) = admission.authorize_with_metrics(&session.database_name, &context.tenant_id).await {
             let _ = write_startup_error(
                 &mut client,
                 "28000",
@@ -1298,7 +1313,8 @@ async fn handle_connection(
                 tokio::select! {
                     result = &mut copy_future => break result,
                     _ = tokio::time::sleep(std::time::Duration::from_secs(5)) => {
-                        if let Err(error) = admission.authorize(database_name, tenant_id).await {
+                        if let Err(error) = admission.authorize_with_metrics(database_name, tenant_id).await {
+                            metrics::global().policy_admission_session_revoked();
                             error!(peer = %peer, tenant = %tenant_id, %error,
                                 "active PostgreSQL session terminated because tenant policy posture is no longer verified");
                             break Err(error);
