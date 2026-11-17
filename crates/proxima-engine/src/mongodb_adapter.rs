@@ -94,7 +94,6 @@ impl MongoCatalogAdapter {
                 "listCollections": 1,
                 "filter": { "name": &name },
                 "nameOnly": false,
-                "authorizedCollections": true
             }).await.map_err(db_error)?;
             let first_batch = response.get_document("cursor")
                 .and_then(|cursor| cursor.get_array("firstBatch"))
@@ -197,7 +196,7 @@ impl DatabaseAdapter for MongoCatalogAdapter {
                     let attrs = &found.unwrap().attributes;
                     let validator = attrs["options"]["validator"].clone();
                     let properties = validator.get("$jsonSchema").and_then(|schema| schema.get("properties"));
-                    if properties.and_then(|value| value.get(&protected.tenant_key)).is_none() {
+                    if properties.and_then(|value| value.get(protected.tenant_key.as_str())).is_none() {
                         resource_findings.push(finding("tenant_ownership_validator_missing", &protected.resource, "The collection validator does not declare the policy tenant ownership field."));
                     }
                     let required = validator.get("$jsonSchema").and_then(|schema| schema.get("required")).and_then(Value::as_array);
@@ -207,9 +206,12 @@ impl DatabaseAdapter for MongoCatalogAdapter {
                 }
                 resource_findings.push(finding("mongodb_document_isolation_probe_required", &protected.resource, "MongoDB database roles do not automatically enforce tenant ownership for individual documents; independent tenant-scoped document probes are required."));
                 findings.extend(resource_findings.clone());
-                let resource_fingerprint = found.map(|resource| {
-                    digest(&serde_json::to_vec(&resource.attributes).unwrap_or_default())
-                });
+                let resource_fingerprint = if let Some(resource) = found {
+                    Some(digest(&serde_json::to_vec(&resource.attributes)
+                        .map_err(|_| error("fingerprint_serialization_failed", "Could not serialize MongoDB resource metadata."))?))
+                } else {
+                    None
+                };
                 resources.push(ResourceInspection {
                     resource: protected.clone(),
                     completeness: InspectionCompleteness::Incomplete,
