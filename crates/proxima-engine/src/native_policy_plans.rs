@@ -217,6 +217,9 @@ pub fn compile_redis_acl(policy: &TenantSecurityPolicy) -> Result<CompiledPolicy
         if resource.resource.kind != ResourceKind::Keyspace && resource.resource.kind != ResourceKind::Table {
             return Err(error("unsupported_resource_kind", "Redis policy resources must represent a keyspace or logical key collection."));
         }
+        if resource.operations.contains(&Operation::Execute) {
+            return Err(error("unsupported_operation", "Redis script/function execution requires a separately reviewed command and key-access policy; it is not represented by the generic execute operation."));
+        }
         let mut commands: Vec<&str> = Vec::new();
         if resource.operations.contains(&Operation::Read) {
             commands.extend([
@@ -358,6 +361,14 @@ mod tests {
         assert!(!commands.contains(&"+set"));
         assert!(!commands.contains(&"+hset"));
         assert!(!commands.contains(&"+incr"));
+    }
+
+    #[test]
+    fn redis_template_rejects_execute_instead_of_silently_dropping_it() {
+        let mut requested = policy(ResourceKind::Keyspace, "tenant:${tenant_id}:*");
+        requested.resources[0].operations = vec![Operation::Read, Operation::Execute];
+        let error = compile_redis_acl(&requested).unwrap_err();
+        assert_eq!(error.code, "unsupported_operation");
     }
 
     #[test]
