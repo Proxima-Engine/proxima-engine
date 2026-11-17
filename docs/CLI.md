@@ -150,3 +150,22 @@ cargo run -p proxima-engine --bin proxima-policy-guard -- inspect-mongodb-policy
 ```
 
 Both commands return a deny decision until a native document-level enforcement boundary and independent positive/negative tenant probes exist. The URI must not disable TLS or certificate/hostname verification; keep credentials in a protected environment variable.
+
+
+## Native Redis ACL adapter
+
+The Rust adapter requires a rediss:// URI and a registered logical database index. It connects with TLS, confirms the selected database using CLIENT INFO, reads the authenticated ACL user, ACL user rules, key patterns, command rules, ACL categories, server version and keyspace statistics, and fingerprints the observed ACL state. Credential hashes and plaintext-style ACL password tokens are redacted from the returned inventory; the raw ACL rules are hashed for drift detection.
+
+```bash
+PROXIMA_REDIS_ADAPTER_URI='rediss://...' \\
+PROXIMA_REDIS_ADAPTER_TARGET_ID='registered-target-id' \\
+PROXIMA_REDIS_ADAPTER_DATABASE_INDEX='0' \\
+cargo run -p proxima-engine --bin proxima-policy-guard -- discover-redis
+
+PROXIMA_REDIS_ADAPTER_URI='rediss://...' \\
+PROXIMA_REDIS_ADAPTER_TARGET_ID='registered-target-id' \\
+PROXIMA_REDIS_ADAPTER_DATABASE_INDEX='0' \\
+cargo run -p proxima-engine --bin proxima-policy-guard -- inspect-redis-policy policy.json
+```
+
+The inspection principal needs permission to run CLIENT INFO, PING, ACL WHOAMI, ACL LIST, ACL CAT, and INFO. The result remains incomplete and denied: ACL key patterns do not prove that application code consistently uses tenant keys, and keyless commands, scripts, functions and modules need a trusted enforcement layer and adversarial probes. Keep the Redis URI and credentials in a protected environment variable.
