@@ -10,6 +10,7 @@ use crate::database_adapter::{
     InspectionRequest, InspectionSnapshot, ResourceInspection,
 };
 use crate::native_policy_plans::compile_sql_server;
+use crate::tenant_identity::VerifiedTenantIdentity;
 use crate::security_core::{
     AdapterCapabilities, AdapterDescriptor, AdapterMaturity, DatabaseKind,
     InspectionCompleteness, Operation, ResourceKind, ResourceRef, SecurityFinding,
@@ -20,7 +21,73 @@ use sha2::{Digest, Sha256};
 use std::time::Duration;
 use tiberius::{Client, Config, EncryptionLevel};
 use tokio::net::TcpStream;
-use tokio_util::compat::TokioAsyncWriteCompatExt;
+use tokio_util::compat::{Compat, TokioAsyncWriteCompatExt};
+
+/// Escape a value for a SQL Server Unicode string literal.
+fn sql_server_unicode_literal(value: &str, max_bytes: usize) -> Result<String, AdapterError> {
+    if value.trim().is_empty() || value.len() > max_bytes || value.contains('\\0') {
+        return Err(error("invalid_tenant_context", "A tenant context value is empty, too long, or contains NUL."));
+    }
+    Ok(format!("N'{}'", value.replace('\'', "''")))
+}
+
+/// Bind a verified tenant scope to a dedicated SQL Server connection before
+/// forwarding any application statement. The tenant key is marked read-only
+/// for the life of this physical connection; never return that connection to a
+/// pool that can serve another tenant.
+pub async fn bind_verified_tenant_context(
+    client: &mut Client<Compat<TcpStream>>,
+    target: &AdapterTarget,
+    identity: &VerifiedTenantIdentity,
+) -> Result<(), AdapterError> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|_| error("tenant_identity_clock_invalid", "The system clock is before the Unix epoch."))?
+        .as_secs() as i64;
+    if identity.database_kind() != DatabaseKind::SqlServer
+        || identity.target_id() != target.target_id
+        || identity.expires_at_unix() <= now
+        || identity.issued_at_unix() > now
+    {
+        return Err(error("tenant_identity_scope_mismatch", "The verified tenant identity is expired or belongs to a different SQL Server target."));
+    }
+
+    let tenant = sql_server_unicode_literal(identity.tenant_id(), 128)?;
+    let target_id = sql_server_unicode_literal(identity.target_id(), 256)?;
+    let policy_id = sql_server_unicode_literal(identity.policy_id(), 128)?;
+    let policy_revision = identity.policy_revision();
+    let statement = format!(
+        "EXEC sys.sp_set_session_context @key=N'tenant_id', @value={tenant}, @read_only=1; \
+         EXEC sys.sp_set_session_context @key=N'proxima_target_id', @value={target_id}, @read_only=1; \
+         EXEC sys.sp_set_session_context @key=N'proxima_policy_id', @value={policy_id}, @read_only=1; \
+         EXEC sys.sp_set_session_context @key=N'proxima_policy_revision', @value={policy_revision}, @read_only=1; \
+         SELECT CONVERT(nvarchar(128),SESSION_CONTEXT(N'tenant_id')) AS tenant_id, \
+                CONVERT(nvarchar(256),SESSION_CONTEXT(N'proxima_target_id')) AS target_id, \
+                CONVERT(nvarchar(128),SESSION_CONTEXT(N'proxima_policy_id')) AS policy_id, \
+                TRY_CONVERT(bigint,SESSION_CONTEXT(N'proxima_policy_revision')) AS policy_revision;"
+    );
+    let rows = client.simple_query(statement).await.map_err(db_error)?
+        .into_first_result().await.map_err(db_error)?;
+    let row = rows.first().ok_or_else(|| error(
+        "tenant_context_verification_failed",
+        "SQL Server did not return the read-back tenant context.",
+    ))?;
+    let tenant: Option<&str> = row.get("tenant_id");
+    let target_id: Option<&str> = row.get("target_id");
+    let policy_id: Option<&str> = row.get("policy_id");
+    let revision: Option<i64> = row.get("policy_revision");
+    if tenant != Some(identity.tenant_id())
+        || target_id != Some(identity.target_id())
+        || policy_id != Some(identity.policy_id())
+        || revision != i64::try_from(identity.policy_revision()).ok()
+    {
+        return Err(error(
+            "tenant_context_verification_failed",
+            "SQL Server session context did not match the verified tenant, target, and policy revision.",
+        ));
+    }
+    Ok(())
+}
 
 pub struct SqlServerCatalogAdapter {
     target_id: String,
@@ -675,5 +742,17 @@ mod tests {
     fn rejects_invalid_database_target() {
         assert!(SqlServerCatalogAdapter::new("", "app", "Server=localhost;Database=app").is_err());
         assert!(SqlServerCatalogAdapter::new("target", "", "Server=localhost;Database=app").is_err());
+    }
+}
+
+#[cfg(test)]
+mod tenant_context_literal_tests {
+    use super::sql_server_unicode_literal;
+
+    #[test]
+    fn unicode_literals_escape_quotes_and_reject_nul() {
+        assert_eq!(sql_server_unicode_literal("tenant'o", 128).unwrap(), "N'tenant''o'");
+        assert!(sql_server_unicode_literal("x\\0y", 128).is_err());
+        assert!(sql_server_unicode_literal(" ", 128).is_err());
     }
 }
