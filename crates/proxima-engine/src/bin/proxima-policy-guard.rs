@@ -210,6 +210,36 @@ BEGIN
                AND format_type(a.atttypid,a.atttypmod) NOT LIKE 'character(%')
      THEN RAISE EXCEPTION 'Agata Proxima: tenant key type is unsupported'; END IF;
   IF owner_name = ANY({role_array}) THEN RAISE EXCEPTION 'Agata Proxima: tenant runtime roles must not own the protected table'; END IF;
+  IF EXISTS (SELECT 1 FROM pg_inherits partition_edge
+             WHERE partition_edge.inhrelid=(SELECT c.oid FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname={schema_literal} AND c.relname={table_literal})
+                OR partition_edge.inhparent=(SELECT c.oid FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname={schema_literal} AND c.relname={table_literal}))
+     THEN RAISE EXCEPTION 'Agata Proxima: partitioned relations require native child-partition verification before policy generation'; END IF;
+  IF EXISTS (
+       WITH RECURSIVE dependent_views(view_oid) AS (
+         SELECT rewrite.ev_class FROM pg_depend dependency
+         JOIN pg_rewrite rewrite ON dependency.classid='pg_rewrite'::regclass AND dependency.objid=rewrite.oid
+         WHERE dependency.refclassid='pg_class'::regclass
+           AND dependency.refobjid=(SELECT c.oid FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname={schema_literal} AND c.relname={table_literal})
+         UNION
+         SELECT rewrite.ev_class FROM pg_depend dependency
+         JOIN pg_rewrite rewrite ON dependency.classid='pg_rewrite'::regclass AND dependency.objid=rewrite.oid
+         JOIN dependent_views parent_view ON dependency.refobjid=parent_view.view_oid
+         WHERE dependency.refclassid='pg_class'::regclass
+       )
+       SELECT 1 FROM dependent_views dependency
+       JOIN pg_class view_relation ON view_relation.oid=dependency.view_oid
+       JOIN pg_namespace view_namespace ON view_namespace.oid=view_relation.relnamespace
+       WHERE view_relation.relkind IN ('v','m')
+         AND view_namespace.nspname NOT IN ('pg_catalog','information_schema')
+         AND (view_relation.relkind='m' OR NOT COALESCE(view_relation.reloptions @> ARRAY['security_invoker=true'],false))
+     )
+     THEN RAISE EXCEPTION 'Agata Proxima: dependent views must use security_invoker=true and materialized views require separate protection'; END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles tenant_role WHERE tenant_role.rolname=ANY({role_array})
+             AND (has_database_privilege(tenant_role.rolname,current_database(),'CREATE')
+               OR EXISTS(SELECT 1 FROM pg_namespace ns
+                 WHERE ns.nspname NOT IN ('pg_catalog','information_schema') AND ns.nspname NOT LIKE 'pg_%'
+                   AND has_schema_privilege(tenant_role.rolname,ns.oid,'CREATE'))))
+     THEN RAISE EXCEPTION 'Agata Proxima: tenant runtime roles must not have database or schema CREATE privileges'; END IF;
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname=ANY({role_array}) AND (rolsuper OR rolbypassrls OR rolcreaterole OR rolcreatedb OR rolreplication OR NOT rolcanlogin))
      OR (WITH RECURSIVE member_roles(role_oid) AS (
           SELECT oid FROM pg_roles WHERE rolname=ANY({role_array})
