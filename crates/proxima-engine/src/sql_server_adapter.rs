@@ -92,7 +92,7 @@ impl SqlServerCatalogAdapter {
         let mut resources = Vec::new();
 
         let table_rows = client.simple_query(
-            "SELECT s.name AS schema_name,t.name AS object_name,t.object_id,t.temporal_type_desc,t.is_memory_optimized,t.is_filetable,t.is_tracked_by_cdc FROM sys.tables t JOIN sys.schemas s ON s.schema_id=t.schema_id ORDER BY s.name,t.name"
+            "SELECT s.name AS schema_name,t.name AS object_name,t.object_id,COALESCE(USER_NAME(t.principal_id),USER_NAME(s.principal_id)) AS owner_name,t.temporal_type_desc,t.is_memory_optimized,t.is_filetable,t.is_tracked_by_cdc FROM sys.tables t JOIN sys.schemas s ON s.schema_id=t.schema_id ORDER BY s.name,t.name"
         ).await.map_err(db_error)?.into_first_result().await.map_err(db_error)?;
         for row in table_rows {
             let schema = row.get::<&str,_>("schema_name").unwrap_or_default().to_owned();
@@ -104,7 +104,7 @@ impl SqlServerCatalogAdapter {
                 &[&object_id],
             ).await.map_err(db_error)?.into_first_result().await.map_err(db_error)?;
             let permissions = client.query(
-                "SELECT principal.name AS grantee,permission.permission_name,permission.state_desc,permission.minor_id,column_info.name AS column_name FROM sys.database_permissions permission LEFT JOIN sys.database_principals principal ON principal.principal_id=permission.grantee_principal_id LEFT JOIN sys.columns column_info ON column_info.object_id=permission.major_id AND column_info.column_id=permission.minor_id WHERE permission.class_desc='OBJECT_OR_COLUMN' AND permission.major_id=@P1 ORDER BY principal.name,permission.permission_name,permission.minor_id",
+                "SELECT principal.name AS grantee,permission.permission_name,permission.state_desc,CONVERT(int,permission.minor_id) AS minor_id,column_info.name AS column_name FROM sys.database_permissions permission LEFT JOIN sys.database_principals principal ON principal.principal_id=permission.grantee_principal_id LEFT JOIN sys.columns column_info ON column_info.object_id=permission.major_id AND column_info.column_id=permission.minor_id WHERE permission.class_desc='OBJECT_OR_COLUMN' AND permission.major_id=@P1 ORDER BY principal.name,permission.permission_name,permission.minor_id",
                 &[&object_id],
             ).await.map_err(db_error)?.into_first_result().await.map_err(db_error)?;
             let predicates = client.query(
@@ -119,7 +119,7 @@ impl SqlServerCatalogAdapter {
                 namespace: Some(schema),
                 name,
                 kind: ResourceKind::Table,
-                owner: None,
+                owner: row.get::<&str,_>("owner_name").map(str::to_owned),
                 attributes: json!({
                     "temporal_type": row.get::<&str,_>("temporal_type_desc").unwrap_or_default(),
                     "memory_optimized": row.get::<bool,_>("is_memory_optimized").unwrap_or(false),
@@ -158,7 +158,7 @@ impl SqlServerCatalogAdapter {
         }
 
         let view_rows = client.simple_query(
-            "SELECT s.name AS schema_name,v.name AS object_name,v.object_id,v.with_check_option,OBJECTPROPERTY(v.object_id,'IsSchemaBound') AS is_schema_bound,m.definition,USER_NAME(o.principal_id) AS owner_name FROM sys.views v JOIN sys.schemas s ON s.schema_id=v.schema_id JOIN sys.objects o ON o.object_id=v.object_id LEFT JOIN sys.sql_modules m ON m.object_id=v.object_id ORDER BY s.name,v.name"
+            "SELECT s.name AS schema_name,v.name AS object_name,v.object_id,v.with_check_option,CONVERT(bit,OBJECTPROPERTY(v.object_id,'IsSchemaBound')) AS is_schema_bound,m.definition,USER_NAME(o.principal_id) AS owner_name FROM sys.views v JOIN sys.schemas s ON s.schema_id=v.schema_id JOIN sys.objects o ON o.object_id=v.object_id LEFT JOIN sys.sql_modules m ON m.object_id=v.object_id ORDER BY s.name,v.name"
         ).await.map_err(db_error)?.into_first_result().await.map_err(db_error)?;
         for row in view_rows {
             let schema = row.get::<&str,_>("schema_name").unwrap_or_default().to_owned();
@@ -199,10 +199,16 @@ impl SqlServerCatalogAdapter {
         }
 
         let principals = client.simple_query(
-            "SELECT principal.name,principal.type_desc,principal.authentication_type_desc,principal.is_fixed_role,principal.default_schema_name FROM sys.database_principals principal WHERE principal.type NOT IN ('A','R') OR principal.is_fixed_role=1 ORDER BY principal.name"
+            "SELECT principal.name,principal.type_desc,principal.authentication_type_desc,principal.is_fixed_role,principal.default_schema_name FROM sys.database_principals principal WHERE principal.principal_id > 4 ORDER BY principal.name"
         ).await.map_err(db_error)?.into_first_result().await.map_err(db_error)?;
         let role_memberships = client.simple_query(
             "SELECT role_principal.name AS role_name,member_principal.name AS member_name FROM sys.database_role_members membership JOIN sys.database_principals role_principal ON role_principal.principal_id=membership.role_principal_id JOIN sys.database_principals member_principal ON member_principal.principal_id=membership.member_principal_id ORDER BY role_principal.name,member_principal.name"
+        ).await.map_err(db_error)?.into_first_result().await.map_err(db_error)?;
+        let object_permissions = client.simple_query(
+            "SELECT OBJECT_SCHEMA_NAME(permission.major_id) AS schema_name,OBJECT_NAME(permission.major_id) AS object_name,principal.name AS grantee,permission.permission_name,permission.state_desc,CONVERT(int,permission.minor_id) AS minor_id FROM sys.database_permissions permission LEFT JOIN sys.database_principals principal ON principal.principal_id=permission.grantee_principal_id WHERE permission.class_desc='OBJECT_OR_COLUMN' ORDER BY schema_name,object_name,principal.name,permission.permission_name"
+        ).await.map_err(db_error)?.into_first_result().await.map_err(db_error)?;
+        let schema_permissions = client.simple_query(
+            "SELECT schema_info.name AS schema_name,principal.name AS grantee,permission.permission_name,permission.state_desc FROM sys.database_permissions permission JOIN sys.database_principals principal ON principal.principal_id=permission.grantee_principal_id JOIN sys.schemas schema_info ON schema_info.schema_id=permission.major_id WHERE permission.class_desc='SCHEMA' ORDER BY schema_info.name,principal.name,permission.permission_name"
         ).await.map_err(db_error)?.into_first_result().await.map_err(db_error)?;
         let database_permissions = client.simple_query(
             "SELECT principal.name AS grantee,permission.permission_name,permission.state_desc FROM sys.database_permissions permission JOIN sys.database_principals principal ON principal.principal_id=permission.grantee_principal_id WHERE permission.class_desc='DATABASE' ORDER BY principal.name,permission.permission_name"
@@ -226,6 +232,20 @@ impl SqlServerCatalogAdapter {
             "role_memberships": role_memberships.iter().map(|membership| json!({
                 "role": membership.get::<&str,_>("role_name").unwrap_or_default(),
                 "member": membership.get::<&str,_>("member_name").unwrap_or_default()
+            })).collect::<Vec<_>>(),
+            "object_permissions": object_permissions.iter().map(|permission| json!({
+                "schema": permission.get::<&str,_>("schema_name"),
+                "object": permission.get::<&str,_>("object_name"),
+                "grantee": permission.get::<&str,_>("grantee").unwrap_or_default(),
+                "permission": permission.get::<&str,_>("permission_name").unwrap_or_default(),
+                "state": permission.get::<&str,_>("state_desc").unwrap_or_default(),
+                "column_id": permission.get::<i32,_>("minor_id").unwrap_or_default()
+            })).collect::<Vec<_>>(),
+            "schema_permissions": schema_permissions.iter().map(|permission| json!({
+                "schema": permission.get::<&str,_>("schema_name").unwrap_or_default(),
+                "grantee": permission.get::<&str,_>("grantee").unwrap_or_default(),
+                "permission": permission.get::<&str,_>("permission_name").unwrap_or_default(),
+                "state": permission.get::<&str,_>("state_desc").unwrap_or_default()
             })).collect::<Vec<_>>(),
             "database_permissions": database_permissions.iter().map(|permission| json!({
                 "grantee": permission.get::<&str,_>("grantee").unwrap_or_default(),
