@@ -33,6 +33,7 @@ pub enum DatabaseKind {
 pub enum AdapterMaturity {
     InDevelopment,
     Planned,
+    Supported,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
