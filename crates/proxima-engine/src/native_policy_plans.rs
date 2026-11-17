@@ -434,10 +434,12 @@ pub fn compile_oracle_vpd(policy: &TenantSecurityPolicy) -> Result<CompiledPolic
         let suffix = hex::encode(&digest[..8]).to_ascii_uppercase();
         let package = format!("PROXIMA_CTX_{suffix}");
         let policy_name = format!("PROXIMA_POL_{suffix}");
+        let function_name = format!("PROXIMA_VPD_{suffix}");
         let owner_sql = format!("\"{}\"", owner.replace('"', "\"\""));
         let table_sql = format!("\"{}\"", table.replace('"', "\"\""));
         let column_sql = format!("\"{}\"", tenant_column.replace('"', "\"\""));
         let package_sql = format!("{owner_sql}.\"{package}\"");
+        let function_sql = format!("{owner_sql}.\"{function_name}\"");
         let predicate = format!("{column_sql} = SYS_CONTEXT('PROXIMA_TENANT_CTX','TENANT_ID')");
         let statement_types = resource.operations.iter().filter_map(|op| match op {
             Operation::Read => Some("SELECT"),
@@ -455,9 +457,12 @@ pub fn compile_oracle_vpd(policy: &TenantSecurityPolicy) -> Result<CompiledPolic
             ),
             format!("CREATE CONTEXT PROXIMA_TENANT_CTX USING {package_sql};"),
             format!(
-                "BEGIN\n  DBMS_RLS.ADD_POLICY(\n    object_schema => '{}', object_name => '{}', policy_name => '{}',\n    function_schema => '{}', policy_function => '{}.TENANT_PREDICATE',\n    statement_types => '{}', update_check => TRUE, enable => TRUE,\n    policy_type => DBMS_RLS.DYNAMIC);\nEND;",
+                "CREATE OR REPLACE FUNCTION {function_sql}(p_schema IN VARCHAR2, p_object IN VARCHAR2) RETURN VARCHAR2 AUTHID DEFINER IS\nBEGIN\n  IF SYS_CONTEXT('PROXIMA_TENANT_CTX','TENANT_ID') IS NULL THEN RETURN '1=0'; END IF;\n  RETURN '{predicate}';\nEND;"
+            ),
+            format!(
+                "BEGIN\n  DBMS_RLS.ADD_POLICY(\n    object_schema => '{}', object_name => '{}', policy_name => '{}',\n    function_schema => '{}', policy_function => '{}',\n    statement_types => '{}', update_check => TRUE, enable => TRUE,\n    policy_type => DBMS_RLS.DYNAMIC);\nEND;",
                 owner.replace('\'', "''"), table.replace('\'', "''"), policy_name,
-                owner.replace('\'', "''"), package.replace('\'', "''"), statement_types
+                owner.replace('\'', "''"), function_name.replace('\'', "''"), statement_types
             )
         ];
         changes.push(resource_change(resource, "oracle_create_vpd_policy_plan", json!({
