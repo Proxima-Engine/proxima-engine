@@ -193,6 +193,10 @@ BEGIN
      THEN RAISE EXCEPTION 'Agata Proxima: tenant key column does not exist'; END IF;
   IF EXISTS (SELECT 1 FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid JOIN pg_namespace n ON n.oid=c.relnamespace
              WHERE n.nspname={schema_literal} AND c.relname={table_literal} AND a.attname={column_literal}
+               AND a.attnum>0 AND NOT a.attisdropped AND NOT a.attnotnull)
+     THEN RAISE EXCEPTION 'Agata Proxima: tenant key column must be NOT NULL'; END IF;
+  IF EXISTS (SELECT 1 FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid JOIN pg_namespace n ON n.oid=c.relnamespace
+             WHERE n.nspname={schema_literal} AND c.relname={table_literal} AND a.attname={column_literal}
                AND a.attnum>0 AND NOT a.attisdropped
                AND format_type(a.atttypid,a.atttypmod) NOT IN ('text','uuid','integer','bigint','smallint','numeric','citext')
                AND format_type(a.atttypid,a.atttypmod) NOT LIKE 'character varying%'
