@@ -98,6 +98,13 @@ mod tests {
         PolicyEvidenceAuthority::new(vec![11; 32], vec![19; 32]).unwrap()
     }
 
+    fn semantic_checks() -> Vec<EvidenceCheck> {
+        ["read", "create", "update", "delete"].into_iter().flat_map(|operation| [
+            EvidenceCheck { check_id: format!("own_tenant_allow:{operation}"), passed: true, detail: format!("own-tenant {operation} probe passed") },
+            EvidenceCheck { check_id: format!("cross_tenant_deny:{operation}"), passed: true, detail: format!("cross-tenant {operation} probe denied") },
+        ]).collect()
+    }
+
     fn signed_pair(authority: &PolicyEvidenceAuthority) -> (SignedPolicyEvidence, SignedPolicyAdmission) {
         let payload = PolicyEvidencePayload {
             model_version: SECURITY_MODEL_VERSION.into(),
@@ -112,10 +119,7 @@ mod tests {
             verified_operations: vec![Operation::Read, Operation::Create, Operation::Update, Operation::Delete],
             fingerprint: "c".repeat(64),
             observed_at_unix: 1_900_000_000,
-            checks: vec![
-                EvidenceCheck { check_id: "own-tenant-allow".into(), passed: true, detail: "own tenant allowed".into() },
-                EvidenceCheck { check_id: "cross-tenant-deny".into(), passed: true, detail: "other tenant denied".into() },
-            ],
+            checks: semantic_checks(),
         };
         let evidence = authority.sign_evidence(payload).unwrap();
         let admission = authority.issue_admission(&evidence, 1_900_000_001, 30).unwrap();
