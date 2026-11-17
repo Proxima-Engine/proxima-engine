@@ -280,6 +280,19 @@ fn policy_admission_evidence_is_consistent(
 }
 
 #[cfg(test)]
+mod admission_expiry_tests {
+    use super::policy_admission_expiry_is_valid;
+
+    #[test]
+    fn bounds_signed_admission_expiry_without_overflow() {
+        assert!(policy_admission_expiry_is_valid(100, 115));
+        assert!(!policy_admission_expiry_is_valid(100, 116));
+        assert!(!policy_admission_expiry_is_valid(100, 100));
+        assert!(!policy_admission_expiry_is_valid(i64::MAX, i64::MAX));
+    }
+}
+
+#[cfg(test)]
 mod admission_requirement_tests {
     use super::parse_policy_admission_required;
 
@@ -310,6 +323,12 @@ struct PolicyAdmissionClient {
     target_id: String,
     tenant_role_prefix: String,
     signing_key: Vec<u8>,
+}
+
+fn policy_admission_expiry_is_valid(issued_at: i64, expires_at: i64) -> bool {
+    issued_at.checked_add(15).is_some_and(|latest_expiry| {
+        expires_at > issued_at && expires_at <= latest_expiry
+    })
 }
 
 fn parse_policy_admission_required(value: Option<&str>) -> io::Result<bool> {
@@ -444,8 +463,7 @@ impl PolicyAdmissionClient {
             || payload.issued_at > timestamp + 30
             || payload.issued_at < timestamp - 30
             || payload.expires_at <= timestamp
-            || payload.expires_at <= payload.issued_at
-            || payload.expires_at > payload.issued_at + 15
+            || !policy_admission_expiry_is_valid(payload.issued_at, payload.expires_at)
             || payload.decision == "allow" && payload.policy_revision.is_none()
         {
             return Err(io::Error::new(io::ErrorKind::PermissionDenied,
