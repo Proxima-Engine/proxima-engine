@@ -398,6 +398,38 @@ mod tests {
     }
 
     #[test]
+    fn admission_requires_positive_and_negative_probes_for_every_operation() {
+        let authority = authority();
+        let mut payload = evidence_payload();
+        payload.checks.retain(|check| check.check_id != "cross_tenant_deny:delete");
+        let evidence = authority.sign_evidence(payload).unwrap();
+        assert_eq!(
+            authority.issue_admission(&evidence, 1_800_000_010, 30).unwrap_err().code,
+            "evidence_not_admissible"
+        );
+    }
+
+    #[test]
+    fn duplicate_semantic_check_identifiers_are_rejected_before_signing() {
+        let authority = authority();
+        let mut payload = evidence_payload();
+        payload.checks.push(payload.checks[0].clone());
+        assert_eq!(authority.sign_evidence(payload).unwrap_err().code, "duplicate_evidence_check");
+    }
+
+    #[test]
+    fn duplicate_verified_operations_cannot_be_admitted() {
+        let authority = authority();
+        let mut payload = evidence_payload();
+        payload.verified_operations.push(Operation::Read);
+        let evidence = authority.sign_evidence(payload).unwrap();
+        assert_eq!(
+            authority.issue_admission(&evidence, 1_800_000_010, 30).unwrap_err().code,
+            "evidence_not_admissible"
+        );
+    }
+
+    #[test]
     fn short_signing_keys_are_rejected() {
         let result = PolicyEvidenceAuthority::new(vec![1; 16], vec![2; 32]);
         assert!(matches!(result, Err(error) if error.code == "signing_key_too_short"));
