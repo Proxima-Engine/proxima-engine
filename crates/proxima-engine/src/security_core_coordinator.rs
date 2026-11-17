@@ -59,6 +59,7 @@ impl SecurityCoreCoordinator {
         let mut failures = Vec::new();
         if snapshot.completeness != InspectionCompleteness::Complete || snapshot.posture != SecurityPosture::Verified || !snapshot.findings.is_empty() {
             failures.push(SecurityFinding { code: "native_inspection_not_clean".into(), resource: None, detail: "Native inspection is incomplete or reports an unverified posture.".into() });
+            failures.extend(snapshot.findings.iter().cloned());
         }
         let mut seen = HashSet::new();
         for item in &snapshot.resources {
@@ -71,6 +72,7 @@ impl SecurityCoreCoordinator {
             };
             if actual.completeness != InspectionCompleteness::Complete || actual.posture != SecurityPosture::Verified || !actual.findings.is_empty() {
                 failures.push(SecurityFinding { code: "resource_posture_not_verified".into(), resource: Some(required.resource.clone()), detail: "The protected resource is incomplete or has native findings.".into() });
+                failures.extend(actual.findings.iter().cloned());
             }
             for operation in &required.operations {
                 if !actual.verified_operations.contains(operation) {
