@@ -13,3 +13,4 @@ pub mod sql_guard;
 pub mod security_core;
 pub mod database_adapter;
 pub mod native_policy_plans;
+pub mod policy_evidence;
