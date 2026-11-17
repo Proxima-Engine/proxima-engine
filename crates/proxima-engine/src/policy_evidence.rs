@@ -105,7 +105,7 @@ pub struct AdmissionExpectation<'a> {
     pub tenant_id: &'a str,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct PolicyEvidenceAuthority {
     evidence_key: Vec<u8>,
     admission_key: Vec<u8>,
@@ -145,6 +145,9 @@ impl PolicyEvidenceAuthority {
     ) -> Result<SignedPolicyAdmission, EvidenceError> {
         self.verify_evidence(evidence)?;
         validate_admission_eligibility(&evidence.payload)?;
+        if issued_at_unix < evidence.payload.observed_at_unix || issued_at_unix - evidence.payload.observed_at_unix > 60 {
+            return Err(error("evidence_stale", "Policy evidence must be no more than 60 seconds old when admission is issued."));
+        }
         if !(1..=60).contains(&lifetime_seconds) {
             return Err(error("invalid_admission_lifetime", "Runtime admission envelopes must expire within 1 to 60 seconds."));
         }
@@ -241,7 +244,8 @@ fn admission_claims_bytes(admission: &SignedPolicyAdmission) -> Result<Vec<u8>, 
 fn validate_evidence_payload(payload: &PolicyEvidencePayload) -> Result<(), EvidenceError> {
     if payload.model_version != SECURITY_MODEL_VERSION || payload.policy_id.trim().is_empty()
         || payload.policy_revision == 0 || payload.target_id.trim().is_empty()
-        || payload.tenant_id.trim().is_empty() || payload.fingerprint.trim().is_empty()
+        || payload.tenant_id.trim().is_empty() || payload.fingerprint.len() != 64
+        || hex::decode(&payload.fingerprint).map_or(true, |bytes| bytes.len() != 32)
         || payload.observed_at_unix < 0 {
         return Err(error("invalid_evidence_payload", "The policy evidence is missing a required identity, revision, fingerprint or timestamp."));
     }
@@ -310,18 +314,18 @@ mod tests {
     fn admission_is_bound_to_exact_policy_target_and_tenant() {
         let authority = authority();
         let evidence = authority.sign_evidence(evidence_payload()).unwrap();
-        let admission = authority.issue_admission(&evidence, 100, 30).unwrap();
+        let admission = authority.issue_admission(&evidence, 1_800_000_010, 30).unwrap();
         let wrong_tenant = AdmissionExpectation { tenant_id: "tenant-b", ..expected() };
-        assert_eq!(authority.verify_admission(&admission, &evidence, wrong_tenant, 110).unwrap_err().code, "tenant_mismatch");
+        assert_eq!(authority.verify_admission(&admission, &evidence, wrong_tenant, 1_800_000_020).unwrap_err().code, "tenant_mismatch");
     }
 
     #[test]
     fn expired_and_overlong_admissions_are_rejected() {
         let authority = authority();
         let evidence = authority.sign_evidence(evidence_payload()).unwrap();
-        assert_eq!(authority.issue_admission(&evidence, 100, 61).unwrap_err().code, "invalid_admission_lifetime");
+        assert_eq!(authority.issue_admission(&evidence, 1_800_000_010, 61).unwrap_err().code, "invalid_admission_lifetime");
         let admission = authority.issue_admission(&evidence, 100, 30).unwrap();
-        assert_eq!(authority.verify_admission(&admission, &evidence, expected(), 130).unwrap_err().code, "admission_expired");
+        assert_eq!(authority.verify_admission(&admission, &evidence, expected(), 1_800_000_040).unwrap_err().code, "admission_expired");
     }
 
     #[test]
@@ -330,7 +334,7 @@ mod tests {
         let mut payload = evidence_payload();
         payload.inspection = InspectionCompleteness::Incomplete;
         let evidence = authority.sign_evidence(payload).unwrap();
-        assert_eq!(authority.issue_admission(&evidence, 100, 30).unwrap_err().code, "evidence_not_admissible");
+        assert_eq!(authority.issue_admission(&evidence, 1_800_000_010, 30).unwrap_err().code, "evidence_not_admissible");
     }
 
     #[test]
