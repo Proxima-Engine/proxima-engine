@@ -136,3 +136,5 @@ The PostgreSQL discovery snapshot now also includes database/schema ACLs and own
 MongoDB discovery now includes collection index definitions in addition to validators, view pipelines, collection options and effective connection privileges; inventory is bounded to 10,000 collections. It flags broad inspection roles/any-resource privileges and uses bounded connect and server-selection timeouts.
 
 PostgreSQL discovery and policy inspection now include declarative partition parent/child relationships, partition keys and bounds, and each child partition's RLS state, FORCE RLS state and local policy expressions. Inspection flags directly addressable partitions without RLS, without local policies, with RLS not forced, or whose local policy expressions do not visibly reference the registered tenant key.
+
+SQL Server discovery also fingerprints partition schemes/functions/range boundaries, and inspection flags RLS predicate functions or table triggers that execute under an explicit EXECUTE AS principal.
