@@ -122,6 +122,8 @@ The generic `PolicyEvidenceAuthority` in `policy_evidence.rs` remains a separate
 cryptographic library primitive. Its policy-evidence/admission-envelope format
 is not yet the payload used by this PostgreSQL Control Plane admission route.
 
+The Engine Prometheus endpoint also exposes `proxima_engine_policy_admission_checks_total`, `proxima_engine_policy_admission_allowed_total`, `proxima_engine_policy_admission_denied_total`, and `proxima_engine_policy_admission_session_revocations_total` so operators can monitor gate activity and automatic session closure.
+
 ## Scope boundary
 
 This first concrete adapter supports PostgreSQL table and partitioned-table
