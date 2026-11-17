@@ -47,7 +47,7 @@ impl PostgresCatalogAdapter {
         let database_name = database_name.into();
         let tenant_role_prefix = tenant_role_prefix.into();
         if target_id.trim().is_empty() || database_name.trim().is_empty()
-            || target_id.len() > 256 || database_name.len() > 256
+            || target_id.len() > 256 || database_name.len() > 63
             || target_id.contains('\0') || database_name.contains('\0')
         {
             return Err(error("invalid_postgres_target", "A bounded target ID and database name are required."));
