@@ -273,9 +273,19 @@ fn required_semantic_checks(operations: &[Operation]) -> Vec<String> {
 fn validate_evidence_payload(payload: &PolicyEvidencePayload) -> Result<(), EvidenceError> {
     if payload.model_version != SECURITY_MODEL_VERSION || payload.policy_id.trim().is_empty()
         || payload.policy_revision == 0 || payload.target_id.trim().is_empty()
-        || payload.tenant_id.trim().is_empty() || payload.fingerprint.len() != 64
+        || payload.tenant_id.trim().is_empty()
+        || payload.policy_id.len() > 128 || payload.target_id.len() > 256 || payload.tenant_id.len() > 128
+        || payload.policy_id.contains('\\0') || payload.target_id.contains('\\0') || payload.tenant_id.contains('\\0')
+        || payload.fingerprint.len() != 64
         || hex::decode(&payload.fingerprint).map_or(true, |bytes| bytes.len() != 32)
         || payload.observed_at_unix < 0
+        || payload.findings.len() > 256 || payload.verified_operations.len() > 5
+        || payload.findings.iter().any(|finding| finding.code.trim().is_empty()
+            || finding.code.len() > 128 || finding.code.contains('\\0')
+            || finding.detail.len() > 2048 || finding.detail.contains('\\0')
+            || finding.resource.as_ref().is_some_and(|resource| resource.name.len() > 256
+                || resource.name.contains('\\0')
+                || resource.namespace.as_ref().is_some_and(|namespace| namespace.len() > 128 || namespace.contains('\\0'))))
         || payload.checks.len() > 256
         || payload.checks.iter().any(|check| check.check_id.trim().is_empty()
             || check.check_id.len() > 128 || check.check_id.contains('\\0')
