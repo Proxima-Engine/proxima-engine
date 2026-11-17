@@ -39,7 +39,7 @@ impl SqlServerCatalogAdapter {
             return Err(error("invalid_sql_server_target", "A bounded target ID, database name and connection string are required."));
         }
         let normalized = connection_string.to_ascii_lowercase().replace(' ', "");
-        if normalized.contains("trustservercertificate=true") || normalized.contains("encrypt=false") {
+        if ["trustservercertificate=true","trustservercertificate=yes","trustservercertificate=1","encrypt=false","encrypt=no","encrypt=0"].iter().any(|option| normalized.contains(option)) {
             return Err(error("sql_server_tls_verification_required", "SQL Server connections must require encryption and certificate/hostname verification; TrustServerCertificate=true and Encrypt=false are forbidden."));
         }
         Config::from_ado_string(&connection_string)
@@ -199,7 +199,7 @@ impl SqlServerCatalogAdapter {
         }
 
         let principals = client.simple_query(
-            "SELECT principal.name,principal.type_desc,principal.authentication_type_desc,principal.is_fixed_role,principal.default_schema_name FROM sys.database_principals principal WHERE principal.principal_id > 4 ORDER BY principal.name"
+            "SELECT principal.name,principal.type_desc,principal.authentication_type_desc,principal.is_fixed_role,principal.default_schema_name FROM sys.database_principals principal WHERE principal.principal_id = 1 OR principal.principal_id > 4 ORDER BY principal.name"
         ).await.map_err(db_error)?.into_first_result().await.map_err(db_error)?;
         let role_memberships = client.simple_query(
             "SELECT role_principal.name AS role_name,member_principal.name AS member_name FROM sys.database_role_members membership JOIN sys.database_principals role_principal ON role_principal.principal_id=membership.role_principal_id JOIN sys.database_principals member_principal ON member_principal.principal_id=membership.member_principal_id ORDER BY role_principal.name,member_principal.name"
