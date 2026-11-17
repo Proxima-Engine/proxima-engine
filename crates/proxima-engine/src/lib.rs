@@ -17,3 +17,5 @@ pub mod policy_evidence;
 pub mod connection_admission;
 pub mod security_core_coordinator;
 pub mod postgres_adapter;
+
+pub mod mysql_adapter;
