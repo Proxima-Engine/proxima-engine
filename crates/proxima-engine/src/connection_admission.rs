@@ -52,6 +52,15 @@ impl ConnectionAdmissionGate {
         })?;
 
         consumed.retain(|_, (_, expires_at)| *expires_at > now_unix);
+        // Bound memory under admission floods. Reject rather than evicting live
+        // entries: eviction would make a still-valid signed envelope replayable.
+        const MAX_ACTIVE_ADMISSIONS: usize = 100_000;
+        if consumed.len() >= MAX_ACTIVE_ADMISSIONS {
+            return Err(EvidenceError {
+                code: "admission_capacity_exceeded",
+                detail: "The replay registry reached its safety limit; new admissions are denied until entries expire.",
+            });
+        }
         let key = admission.signature.clone();
         if consumed.contains_key(&key) {
             return Err(EvidenceError {
