@@ -99,12 +99,21 @@ mod tests {
     }
 
     fn semantic_checks() -> Vec<EvidenceCheck> {
-        ["read", "create", "update", "delete"].into_iter().flat_map(|operation| [
-            EvidenceCheck { check_id: format!("own_tenant_allow:{operation}"), passed: true, detail: format!("own-tenant {operation} probe passed") },
-            EvidenceCheck { check_id: format!("cross_tenant_deny:{operation}"), passed: true, detail: format!("cross-tenant {operation} probe denied") },
-        ]).collect()
+        ["read", "create", "update", "delete"].into_iter().flat_map(|operation| {
+            let mut checks = vec![
+                EvidenceCheck { check_id: format!("own_tenant_allow:{operation}"), passed: true, detail: format!("own-tenant {operation} probe passed") },
+                EvidenceCheck { check_id: format!("cross_tenant_deny:{operation}"), passed: true, detail: format!("cross-tenant {operation} probe denied") },
+            ];
+            if operation != "read" {
+                checks.push(EvidenceCheck {
+                    check_id: format!("mutation_rollback:{operation}"),
+                    passed: true,
+                    detail: format!("own-tenant {operation} mutation was rolled back"),
+                });
+            }
+            checks
+        }).collect()
     }
-
     fn signed_pair(authority: &PolicyEvidenceAuthority) -> (SignedPolicyEvidence, SignedPolicyAdmission) {
         let payload = PolicyEvidencePayload {
             model_version: SECURITY_MODEL_VERSION.into(),
