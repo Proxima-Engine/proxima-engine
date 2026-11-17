@@ -206,7 +206,10 @@ impl DatabaseAdapter for PostgresCatalogAdapter {
             let relation = format!("{}.{}", quote_ident(schema), quote_ident(&protected.resource.name));
             let tenant_column = quote_ident(&protected.tenant_key);
             let tenant_expression = format!("({tenant_column})::text = current_setting('proxima.tenant_id', true)");
-            let mut statements = Vec::new();
+            let mut statements = vec![
+                format!("ALTER TABLE {relation} ENABLE ROW LEVEL SECURITY"),
+                format!("ALTER TABLE {relation} FORCE ROW LEVEL SECURITY"),
+            ];
             for operation in &protected.operations {
                 let command = match operation {
                     Operation::Read => "SELECT",
@@ -236,6 +239,7 @@ impl DatabaseAdapter for PostgresCatalogAdapter {
                         "Apply only after independent review and explicit approval.",
                         "Enable and FORCE ROW LEVEL SECURITY on the relation.",
                         "Ensure the application role cannot own the table and has no BYPASSRLS or SUPERUSER membership.",
+                        "Ensure each requested command has a reviewed permissive baseline policy; restrictive policies intersect with permissive policies and otherwise deny all rows.",
                         "Set proxima.tenant_id from a cryptographically authenticated tenant context on every transaction.",
                         "Verify every operation with positive own-tenant and negative cross-tenant probes.",
                         "Inspect and protect every directly addressable partition and view."
@@ -263,6 +267,13 @@ impl DatabaseAdapter for PostgresCatalogAdapter {
         snapshot: &'a InspectionSnapshot,
     ) -> AdapterFuture<'a, Result<VerificationReport, AdapterError>> {
         Box::pin(async move {
+            if snapshot.database_kind != DatabaseKind::PostgreSql
+                || snapshot.target.target_id != self.target_id
+                || snapshot.target.database_name != self.database_name
+            {
+                return Err(error("postgres_snapshot_target_mismatch", "The verification snapshot does not belong to this PostgreSQL adapter target."));
+            }
+            _policy.validate().map_err(|_| error("invalid_policy", "The canonical tenant policy failed validation."))?;
             let mut findings = snapshot.findings.clone();
             findings.push(SecurityFinding {
                 code: "independent_tenant_probes_required".into(),
@@ -302,14 +313,15 @@ impl DatabaseAdapter for PostgresCatalogAdapter {
             let fingerprint = sha256(&serde_json::to_vec(&state).map_err(|_| error("fingerprint_serialization_failed", "Could not serialize PostgreSQL catalog state."))?);
             let clock = client.query_one("SELECT to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"')", &[]).await.map_err(db_error)?;
             let observed_at: String = clock.get(0);
+            let detected = previous_fingerprint.is_some_and(|previous| previous != fingerprint.as_str());
             Ok(DriftReport {
                 database_kind: DatabaseKind::PostgreSql,
                 target: target.clone(),
-                detected: previous_fingerprint.is_some_and(|previous| previous != fingerprint),
+                detected,
                 completeness: InspectionCompleteness::Complete,
                 previous_fingerprint: previous_fingerprint.map(str::to_owned),
                 observed_fingerprint: Some(fingerprint),
-                findings: if previous_fingerprint.is_some_and(|previous| previous != fingerprint) {
+                findings: if detected {
                     vec![SecurityFinding {
                         code: "native_catalog_fingerprint_changed".into(),
                         resource: None,
