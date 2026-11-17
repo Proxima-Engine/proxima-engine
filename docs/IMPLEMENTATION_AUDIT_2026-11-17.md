@@ -75,3 +75,12 @@ The concrete Engine PostgreSQL catalog adapter now includes additional native se
 This closes a material blind spot in the earlier relation-only fingerprint: role grants, inherited membership, persistent settings, routine changes, and schema-object changes can alter effective authorization without changing a table's own RLS policy or ACL. The fingerprint is still a drift signal, not semantic proof. It does not promote PostgreSQL to supported, and independent authenticated positive/negative tenant probes, controlled deployment and full local acceptance remain required.
 
 The SQL changes have been committed but were not compiled or executed against PostgreSQL in this session. Validate catalog-query permissions and compatibility against the supported PostgreSQL major versions before accepting the adapter.
+
+
+## 8. Policy-plan hardening — 17 November 2026
+
+The MySQL/MariaDB database-per-tenant grant template now requires a trusted application-host placeholder for both account creation and grants instead of creating a principal reachable from the unrestricted wildcard host. Deployment must bind that placeholder to a narrowly scoped trusted egress identity.
+
+The Redis ACL compiler now derives a narrower command allowlist from the requested read/create/update/delete operations rather than granting the same broad mutating command set for every write operation. Regression tests cover delete-only and create-only plans. The generated plan also explicitly states that Redis ACL command permissions cannot distinguish create-only from update-only behavior for upsert commands; that semantic distinction requires an enforcing gateway or application contract and is not claimed as a Redis-native capability.
+
+These are policy-plan safety improvements only. They do not add native MySQL/MariaDB/Redis connections, catalog inspection, deployment, semantic verification, runtime enforcement or drift monitoring. The tests were authored but not executed in this session.
