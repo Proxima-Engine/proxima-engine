@@ -25,7 +25,7 @@ The local identity is self-issued and only meaningful to your local environment.
 Requirements: Git, Python 3.10+ (for the standard-library bootstrap script), and Docker Compose.
 
 ```bash
-git clone https://github.com/Agata-Proxima/proxima-engine.git
+git clone https://github.com/Proxima-Engine/proxima-engine.git
 cd proxima-engine
 docker compose -f compose.dev.yaml up --build -d
 ```
