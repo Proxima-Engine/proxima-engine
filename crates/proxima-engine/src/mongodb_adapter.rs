@@ -101,6 +101,7 @@ impl MongoCatalogAdapter {
         let collection_inventory_truncated = names.len() > 10_000;
         let names = names.into_iter().take(10_000).collect::<Vec<_>>();
         let mut resources = Vec::with_capacity(names.len());
+        let mut index_inventory_truncated = false;
         for name in names {
             let response = database.run_command(doc! {
                 "listCollections": 1,
@@ -121,10 +122,31 @@ impl MongoCatalogAdapter {
             } else {
                 let index_response = database.run_command(doc! { "listIndexes": &name, "cursor": {} })
                     .await.map_err(db_error)?;
-                let index_batch = index_response.get_document("cursor")
-                    .and_then(|cursor| cursor.get_array("firstBatch"))
+                let cursor = index_response.get_document("cursor")
                     .map_err(|_| error("mongodb_index_discovery_response_invalid", "MongoDB listIndexes returned an invalid cursor response."))?;
-                index_batch.iter().filter_map(Bson::as_document).map(|index| bson_value(index)).collect::<Result<Vec<_>,AdapterError>>()?
+                let first_batch = cursor.get_array("firstBatch")
+                    .map_err(|_| error("mongodb_index_discovery_response_invalid", "MongoDB listIndexes did not return an index batch."))?;
+                let mut indexes = first_batch.iter().filter_map(Bson::as_document)
+                    .map(bson_value).collect::<Result<Vec<_>,AdapterError>>()?;
+                let mut cursor_id = read_cursor_id(cursor);
+                while cursor_id != 0 && indexes.len() < 10_000 {
+                    let next_response = database.run_command(doc! { "getMore": cursor_id, "collection": &name })
+                        .await.map_err(db_error)?;
+                    let next_cursor = next_response.get_document("cursor")
+                        .map_err(|_| error("mongodb_index_discovery_response_invalid", "MongoDB getMore returned an invalid cursor response."))?;
+                    let next_batch = next_cursor.get_array("nextBatch")
+                        .map_err(|_| error("mongodb_index_discovery_response_invalid", "MongoDB getMore did not return an index batch."))?;
+                    for index in next_batch.iter().filter_map(Bson::as_document) {
+                        if indexes.len() >= 10_000 { index_inventory_truncated = true; break; }
+                        indexes.push(bson_value(index)?);
+                    }
+                    cursor_id = read_cursor_id(next_cursor);
+                }
+                if cursor_id != 0 {
+                    index_inventory_truncated = true;
+                    let _ = database.run_command(doc! { "killCursors": &name, "cursors": [cursor_id] }).await;
+                }
+                indexes
             };
             let attributes = json!({
                 "native_type": resource_type,
@@ -148,7 +170,8 @@ impl MongoCatalogAdapter {
             "database": self.database_name,
             "connection_status": bson_value(&connection_status)?,
             "tls_certificate_verification_required": true,
-            "collection_inventory_truncated": collection_inventory_truncated
+            "collection_inventory_truncated": collection_inventory_truncated,
+            "index_inventory_truncated": index_inventory_truncated
         });
         let fingerprint = digest(&serde_json::to_vec(&json!({"target":target_attributes,"resources":resources}))
             .map_err(|_| error("fingerprint_serialization_failed", "Could not serialize MongoDB discovery results."))?);
@@ -171,6 +194,13 @@ impl MongoCatalogAdapter {
                         code: "mongodb_inspection_principal_overprivileged".into(),
                         resource: None,
                         detail: "The authenticated MongoDB principal has broad administrative, any-database or any-resource privileges. Use a dedicated least-privilege inspection identity separate from application tenant principals.".into(),
+                    });
+                }
+                if index_inventory_truncated {
+                    findings.push(SecurityFinding {
+                        code: "mongodb_index_inventory_truncated".into(),
+                        resource: None,
+                        detail: "At least one collection exposed more than 10,000 indexes; the index inventory is truncated.".into(),
                     });
                 }
                 if collection_inventory_truncated {
@@ -336,6 +366,10 @@ impl DatabaseAdapter for MongoCatalogAdapter {
             })
         })
     }
+}
+
+fn read_cursor_id(cursor: &Document) -> i64 {
+    cursor.get_i64("id").or_else(|_| cursor.get_i32("id").map(i64::from)).unwrap_or(0)
 }
 
 fn has_broad_mongodb_privileges(status: &Document) -> bool {
