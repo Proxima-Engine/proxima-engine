@@ -152,7 +152,7 @@ MongoDB tenant-field validation now also rejects validators whose BSON type cons
 - PostgreSQL inspection now evaluates the connected role and its reachable role memberships for SUPERUSER, BYPASSRLS, CREATEROLE, CREATEDB and REPLICATION attributes before catalog access.
 - MySQL/MariaDB inspection now sets subsequent transactions read-only and requires the vendor-specific SELECT statement deadline to be accepted; it no longer silently ignores unsupported timeout settings.
 - SQL Server inspection now rejects sysadmin, database owner/DDL/security/access administration, db_datawriter, and effective database/object mutation privileges before inventory queries.
-- MongoDB catalog operations now have an explicit socket timeout in addition to server-selection and connection timeouts.
+- MongoDB catalog discovery now has bounded server-selection, connection and whole-operation deadlines; the driver does not expose a configurable per-socket timeout in this version.
 - MySQL/MariaDB, MongoDB, Redis, SQL Server and CockroachDB discovery/inspection/drift inventory operations have a bounded sixty-second operation deadline. PostgreSQL retains server-side statement and lock deadlines.
 - These are code changes and regression coverage where present, not executed validation. No Rust build, unit test suite, live database test or migration execution has been run.
 
