@@ -113,7 +113,7 @@ impl SqliteCatalogAdapter {
         let mut connection = self.connect_checked().await?;
         let schema_rows = sqlx::query(
             "SELECT type,name,tbl_name,sql FROM sqlite_master \
-             WHERE type IN ('table','view') AND name NOT LIKE 'sqlite_%' \
+             WHERE type IN ('table','view') AND name NOT GLOB 'sqlite_*' \
              ORDER BY type,name LIMIT 10001"
         ).fetch_all(&mut connection).await.map_err(db_error)?;
         let truncated = schema_rows.len() > 10_000;
