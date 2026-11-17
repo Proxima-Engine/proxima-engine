@@ -29,8 +29,11 @@ pub fn blocks_tenant_session_mutation(sql: &str) -> bool {
         if at(index,"do") || at(index,"call") || at(index,"truncate")
             || at(index,"grant") || at(index,"revoke")
             || at(index,"discard") && at(index+1,"all")
+            || at(index,"comment") && at(index+1,"on")
+            || at(index,"refresh") && at(index+1,"materialized") && at(index+2,"view")
             || at(index,"reset") && (at(index+1,"all") || at(index+1,"role")
-                || at(index+1,"row_security") || at(index+1,"session") && at(index+2,"authorization")) {
+                || at(index+1,"row_security") || at(index+1,"search_path")
+                || at(index+1,"session") && at(index+2,"authorization")) {
             return true;
         }
 
@@ -40,22 +43,16 @@ pub fn blocks_tenant_session_mutation(sql: &str) -> bool {
             if at(cursor,"session") || at(cursor,"local") { cursor+=1; }
             if at(cursor,"session") && at(cursor+1,"authorization") { return true; }
             if at(cursor,"role") || at(cursor,"session_authorization")
-                || at(cursor,"row_security") || at(cursor,"session_replication_role") {
+                || at(cursor,"row_security") || at(cursor,"session_replication_role")
+                || at(cursor,"search_path") {
                 return true;
             }
         }
 
-        if at(index,"alter") && (at(index+1,"table") || at(index+1,"role")
-            || at(index+1,"user") || at(index+1,"policy") || at(index+1,"default")
-            || at(index+1,"function") || at(index+1,"procedure")) {
-            return true;
-        }
-        if at(index,"create") && (at(index+1,"policy") || at(index+1,"role")
-            || at(index+1,"user") || at(index+1,"function") || at(index+1,"procedure")) {
-            return true;
-        }
-        if at(index,"drop") && (at(index+1,"policy") || at(index+1,"role")
-            || at(index+1,"user") || at(index+1,"function") || at(index+1,"procedure")) {
+        // Tenant-bound sessions are not database-administration sessions. Reject
+        // DDL wholesale so CREATE/ALTER/DROP variants cannot introduce views,
+        // routines, rules, triggers, schemas, extensions, or new privilege paths.
+        if at(index,"create") || at(index,"alter") || at(index,"drop") {
             return true;
         }
     }
@@ -69,7 +66,8 @@ pub fn blocks_tenant_startup_options(options: &str) -> bool {
         .filter(|character| !character.is_whitespace() && *character!='\'' && *character!='"')
         .collect::<String>().to_ascii_lowercase();
     if compact.contains("role=") || compact.contains("session_authorization=")
-        || compact.contains("row_security=") || compact.contains("session_replication_role=") {
+        || compact.contains("row_security=") || compact.contains("session_replication_role=")
+        || compact.contains("search_path=") {
         return true;
     }
     let tokens: Vec<&str> = options.split_whitespace().collect();
@@ -138,6 +136,16 @@ mod tests {
             "SELECT pg_catalog.set_config('row_security','off',false)",
             "DO $body$ BEGIN SET ROLE proxima_tenant_other; END $body$",
             "CALL public.change_tenant_role()",
+            "SET search_path = public",
+            "SET LOCAL search_path TO public",
+            "RESET search_path",
+            "CREATE VIEW public.exposed_orders AS SELECT * FROM public.orders",
+            "CREATE OR REPLACE VIEW public.exposed_orders AS SELECT * FROM public.orders",
+            "CREATE MATERIALIZED VIEW public.exposed_orders AS SELECT * FROM public.orders",
+            "ALTER VIEW public.exposed_orders SET (security_invoker = false)",
+            "DROP VIEW public.exposed_orders",
+            "REFRESH MATERIALIZED VIEW public.exposed_orders",
+            "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO PUBLIC",
             "ALTER TABLE public.orders DISABLE ROW LEVEL SECURITY",
             "ALTER TABLE public.orders NO FORCE ROW LEVEL SECURITY",
             "CREATE POLICY broad_access ON public.orders USING (true)",
@@ -174,7 +182,8 @@ mod tests {
         ] {
             assert!(blocks_tenant_startup_options(options),"expected block: {options}");
         }
-        assert!(!blocks_tenant_startup_options("-c application_name=my-service -c search_path=public"));
+        assert!(blocks_tenant_startup_options("-c search_path=public"));
+        assert!(!blocks_tenant_startup_options("-c application_name=my-service"));
     }
 
     #[test]
