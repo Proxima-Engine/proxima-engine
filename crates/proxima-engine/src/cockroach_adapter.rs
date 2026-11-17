@@ -164,7 +164,11 @@ impl CockroachCatalogAdapter {
                 detail: "The inventory exceeded 10,000 relations; discovery is incomplete and cannot be used as a clean baseline.".into(),
             });
         }
-        let fingerprint = digest(&serde_json::to_vec(&state).map_err(|_| error("cockroach_fingerprint_failed", "Catalog state could not be serialized."))?);
+        let server_version: String = client.query_one("SELECT version()", &[]).await.map_err(db_error)?.get(0);
+        let fingerprint = digest(&serde_json::to_vec(&json!({
+            "server_version": server_version,
+            "resources": state
+        })).map_err(|_| error("cockroach_fingerprint_failed", "Catalog state could not be serialized."))?);
         let observed_at: String = client.query_one(
             "SELECT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"')", &[]
         ).await.map_err(db_error)?.get(0);
@@ -172,7 +176,7 @@ impl CockroachCatalogAdapter {
             database_kind: DatabaseKind::CockroachDb,
             target: request.target.clone(),
             completeness,
-            target_attributes: json!({ "server_version": client.query_one("SELECT version()", &[]).await.map_err(db_error)?.get::<_, String>(0) }),
+            target_attributes: json!({ "server_version": server_version }),
             resources,
             findings,
             fingerprint: Some(fingerprint),
