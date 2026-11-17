@@ -110,7 +110,23 @@ Redirect output to a file for review, for example `proxima-policy-guard compile-
 
 The Rust adapter exposes read-only MySQL-protocol discovery and catalog inspection for a registered database target. It requires a `mysql://` connection URL whose server certificate and hostname can be verified; TLS identity verification is mandatory. The adapter reads `information_schema` tables, columns, routines, table privileges and schema privileges, and computes a catalog fingerprint for drift comparison. It deliberately reports catalog visibility as incomplete because MySQL/MariaDB metadata visibility is privilege-filtered.
 
-The adapter can be constructed by an Engine integration with `MySqlCatalogAdapter::new(target_id, database_name, connection_url, DatabaseKind::MySql)` or `DatabaseKind::MariaDb`. It does not apply DDL, create users, switch roles, or authorize traffic. Its existing database-per-tenant plan compiler remains review-only until a trusted protocol gateway binds tenant identity to isolated database principals and independent positive/negative probes prove the boundary.
+The adapter can be constructed by an Engine integration with `MySqlCatalogAdapter::new(target_id, database_name, connection_url, DatabaseKind::MySql)` or `DatabaseKind::MariaDb`. It captures table/view columns, constraints, indexes, triggers, view definitions/security mode, routine metadata and routine privileges, as well as authenticated-account grants. It does not apply DDL, create users, switch roles, or authorize traffic. Its existing database-per-tenant plan compiler remains review-only until a trusted protocol gateway binds tenant identity to isolated database principals and independent positive/negative probes prove the boundary.
+
+Use the native discovery commands with the same registered-target variables for either database family:
+
+```bash
+PROXIMA_MYSQL_ADAPTER_DATABASE_URL='mysql://...' \
+PROXIMA_MYSQL_ADAPTER_TARGET_ID='registered-target-id' \
+PROXIMA_MYSQL_ADAPTER_DATABASE_NAME='application_db' \
+cargo run -p proxima-engine --bin proxima-policy-guard -- discover-mysql
+
+PROXIMA_MYSQL_ADAPTER_DATABASE_URL='mysql://...' \
+PROXIMA_MYSQL_ADAPTER_TARGET_ID='registered-target-id' \
+PROXIMA_MYSQL_ADAPTER_DATABASE_NAME='application_db' \
+cargo run -p proxima-engine --bin proxima-policy-guard -- discover-mariadb
+```
+
+For policy inspection, use `inspect-mysql-policy policy.json` or `inspect-mariadb-policy policy.json`. These commands always retain a deny decision because the adapter has no trusted tenant-to-database runtime principal binding and cannot prove document/row isolation from metadata alone. Keep the connection URL in a protected environment variable; do not place credentials in source control or command history.
 
 
 ## Native MongoDB adapter
