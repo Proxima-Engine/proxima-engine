@@ -187,7 +187,7 @@ Inspection checks tenant columns and nullability, enabled FILTER/BLOCK predicate
 
 ## Native CockroachDB catalog discovery
 
-CockroachDB discovery uses the PostgreSQL wire protocol with TLS certificate verification, but a separate CockroachDB adapter and explicit server-identity check. It inventories non-system tables and views, columns, and table grants from the target database. The inventory is bounded to 10,000 relations; exceeding that limit marks discovery incomplete. It fingerprints the discovered catalog for drift comparison.
+CockroachDB discovery uses the PostgreSQL wire protocol with TLS certificate verification, but a separate CockroachDB adapter and explicit server-identity check. It inventories non-system tables and views, columns, and table grants from the target database. The inventory is bounded to 10,000 relations and is always marked incomplete because database/schema ACLs, role memberships, ownership and effective inherited privileges are not yet inventoried. It fingerprints the visible catalog for drift comparison.
 
 The adapter does not assume PostgreSQL row-level security semantics and does not generate or deploy policies. Its descriptor exposes schema inspection and drift detection only; verification always denies until CockroachDB-specific tenant authorization, trusted identity binding and independent cross-tenant probes exist.
 
