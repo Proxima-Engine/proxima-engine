@@ -38,6 +38,7 @@ impl ElasticsearchCatalogAdapter {
         if target_id.trim().is_empty() || target_id.len() > 256 || target_id.contains('\0')
             || index_pattern.trim().is_empty() || index_pattern.len() > 255
             || index_pattern.contains('\0') || index_pattern.contains('/') || index_pattern.contains('\\')
+            || !index_pattern.bytes().all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'-' | b'_' | b'.' | b'*'))
         {
             return Err(error("invalid_elasticsearch_target", "A bounded target ID and index pattern are required."));
         }
@@ -45,7 +46,7 @@ impl ElasticsearchCatalogAdapter {
             .map_err(|_| error("invalid_elasticsearch_endpoint", "The Elasticsearch endpoint URL could not be parsed."))?;
         if endpoint.scheme() != "https" || endpoint.host_str().is_none()
             || !endpoint.username().is_empty() || endpoint.password().is_some()
-            || endpoint.query().is_some() || endpoint.fragment().is_some()
+            || endpoint.query().is_some() || endpoint.fragment().is_some() || endpoint.path() != "/"
         {
             return Err(error("elasticsearch_tls_required", "Elasticsearch/OpenSearch requires an HTTPS endpoint with no embedded credentials, query parameters or fragment."));
         }
@@ -100,7 +101,7 @@ impl ElasticsearchCatalogAdapter {
 
     async fn get_optional_json(&self, url: Url) -> Result<Option<Value>, AdapterError> {
         let response = self.client.get(url).send().await.map_err(http_error)?;
-        if response.status().as_u16() == 404 { return Ok(None); }
+        if matches!(response.status().as_u16(), 401 | 403 | 404) { return Ok(None); }
         if !response.status().is_success() {
             return Err(AdapterError {
                 code: "elasticsearch_security_api_rejected".into(),
@@ -143,14 +144,17 @@ impl ElasticsearchCatalogAdapter {
             let mapping = self.get_json(self.url_for(&[index, "_mapping"])?).await?;
             let settings = self.get_json(self.url_for(&[index, "_settings"])?).await?;
             let aliases = self.get_optional_json(self.url_for(&[index, "_alias"])?).await?.unwrap_or_else(|| json!({}));
+            let mapping_value = mapping.get(index).cloned().unwrap_or_else(|| mapping.clone());
+            let settings_value = settings.get(index).cloned().unwrap_or_else(|| settings.clone());
+            let aliases_value = aliases.get(index).cloned().unwrap_or_else(|| aliases.clone());
             let attributes = json!({
                 "health": row.get("health").cloned().unwrap_or(Value::Null),
                 "status": row.get("status").cloned().unwrap_or(Value::Null),
                 "document_count": row.get("docs.count").cloned().unwrap_or(Value::Null),
                 "store_size": row.get("store.size").cloned().unwrap_or(Value::Null),
-                "mapping": mapping.get(index).cloned().unwrap_or(mapping),
-                "settings": settings.get(index).cloned().unwrap_or(settings),
-                "aliases": aliases.get(index).cloned().unwrap_or(aliases)
+                "mapping": mapping_value,
+                "settings": settings_value,
+                "aliases": aliases_value
             });
             resources.push(DiscoveredResource {
                 namespace: None,
@@ -251,7 +255,8 @@ impl DatabaseAdapter for ElasticsearchCatalogAdapter {
             let mut findings = discovery.findings.clone();
             let mut inspected = Vec::new();
             for required in &request.policy.resources {
-                let resource = discovery.resources.iter().find(|resource| resource.name == required.resource.name && resource.kind == required.resource.kind);
+                let resource = discovery.resources.iter().find(|resource| resource.name == required.resource.name
+                    && resource.kind == required.resource.kind && required.resource.namespace.is_none());
                 let Some(resource) = resource else {
                     findings.push(finding("elasticsearch_required_index_missing", &required.resource, "The protected index was not present in the visible index inventory."));
                     continue;
@@ -347,7 +352,7 @@ impl DatabaseAdapter for ElasticsearchCatalogAdapter {
 }
 
 fn mapping_field_type(mapping: &Value, field: &str) -> Option<String> {
-    let mut current = mapping;
+    let mut current = mapping.get("mappings").unwrap_or(mapping);
     for part in field.split('.') {
         current = current.get("properties")?.get(part)?;
     }
