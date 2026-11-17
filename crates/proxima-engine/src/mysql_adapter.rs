@@ -171,9 +171,16 @@ impl MySqlCatalogAdapter {
         Ok(DiscoverySnapshot {
             database_kind: self.kind,
             target: request.target.clone(),
-            completeness: InspectionCompleteness::Complete,
+            // information_schema visibility is privilege-filtered. Without a
+            // separately attested inventory principal/metadata scope, absence
+            // from this result cannot prove that a resource does not exist.
+            completeness: InspectionCompleteness::Incomplete,
             resources,
-            findings: Vec::new(),
+            findings: vec![SecurityFinding {
+                code: "mysql_catalog_visibility_not_proven".into(),
+                resource: None,
+                detail: "MySQL/MariaDB information_schema visibility is privilege-filtered; this inventory is limited to objects visible to the authenticated account and cannot certify full database coverage.".into(),
+            }],
             fingerprint: Some(fingerprint),
             observed_at,
         })
@@ -247,7 +254,7 @@ impl DatabaseAdapter for MySqlCatalogAdapter {
                 findings.extend(resource_findings.clone());
                 resources.push(ResourceInspection {
                     resource: protected.clone(),
-                    completeness: InspectionCompleteness::Complete,
+                    completeness: InspectionCompleteness::Incomplete,
                     posture: SecurityPosture::NeedsAttention,
                     verified_operations: Vec::new(),
                     findings: resource_findings,
