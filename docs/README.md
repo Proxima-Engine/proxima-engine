@@ -8,6 +8,7 @@ This is the complete technical guide to the public Rust data plane. Choose a tas
 - **[Architecture](ARCHITECTURE.md)** — understand the request lifecycle, tenant identity, role routing, and system boundaries.
 - **[Proxima Security Core](SECURITY_CORE.md)** — database-neutral policy contract, adapter maturity and fail-closed acceptance requirements.
 - **[Multi-database policy plans](MULTI_DATABASE_POLICY_PLANS.md)** — SQL Server, MySQL, MariaDB, MongoDB and Redis native policy templates, required isolation models and current limitations.
+- **[Implementation audit](IMPLEMENTATION_AUDIT_2026-11-17.md)** — current implementation status, test limitations and remaining production/merge gates.
 - **[Tenant isolation](TENANT_ISOLATION.md)** — configure tenant roles and RLS, issue signed context, and run positive and negative access tests.
 - **[Engineering case study](ENGINEERING_CASE_STUDY.md)** — review executed PgBouncer, RLS, 1,000-identity, signed-token, and recovery validation.
 - **[Developer security walkthrough](DEVELOPER_SECURITY_DEMO.md)** — reproduce the tenant-access scenarios and review the recorded PgBouncer evidence.
