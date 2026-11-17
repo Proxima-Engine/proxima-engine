@@ -361,6 +361,17 @@ impl MySqlCatalogAdapter {
             observed_at,
         })
     }
+
+    async fn discover_bounded(&self, request: &DiscoveryRequest) -> Result<DiscoverySnapshot, AdapterError> {
+        tokio::time::timeout(std::time::Duration::from_secs(60), self.discover_inner(request))
+            .await
+            .map_err(|_| AdapterError {
+                code: "mysql_catalog_timeout".into(),
+                detail: "MySQL/MariaDB catalog discovery exceeded the sixty-second operation deadline.".into(),
+                retryable: true,
+            })?
+    }
+
 }
 
 impl DatabaseAdapter for MySqlCatalogAdapter {
@@ -380,7 +391,7 @@ impl DatabaseAdapter for MySqlCatalogAdapter {
     }
 
     fn discover<'a>(&'a self, request: &'a DiscoveryRequest) -> AdapterFuture<'a, Result<DiscoverySnapshot, AdapterError>> {
-        Box::pin(async move { self.discover_inner(request).await })
+        Box::pin(async move { self.discover_bounded(request).await })
     }
 
     fn inspect<'a>(&'a self, request: &'a InspectionRequest) -> AdapterFuture<'a, Result<InspectionSnapshot, AdapterError>> {
@@ -388,7 +399,7 @@ impl DatabaseAdapter for MySqlCatalogAdapter {
             self.validate_target(&request.target)?;
             request.policy.validate().map_err(|_| error("invalid_policy", "The canonical tenant policy failed validation."))?;
             let _compiled_plan = self.compile_policy(&request.policy)?;
-            let discovery = self.discover_inner(&DiscoveryRequest { target: request.target.clone(), namespace: None }).await?;
+            let discovery = self.discover_bounded(&DiscoveryRequest { target: request.target.clone(), namespace: None }).await?;
             let mut resources = Vec::with_capacity(request.policy.resources.len());
             let mut findings = discovery.findings.clone();
             for protected in &request.policy.resources {
@@ -510,7 +521,7 @@ impl DatabaseAdapter for MySqlCatalogAdapter {
             if previous_fingerprint.is_some_and(|value| value.len() != 64 || hex::decode(value).map_or(true, |bytes| bytes.len() != 32)) {
                 return Err(error("invalid_previous_fingerprint", "The previous catalog fingerprint must be a 32-byte hexadecimal SHA-256 digest."));
             }
-            let snapshot = self.discover_inner(&DiscoveryRequest { target: target.clone(), namespace: None }).await?;
+            let snapshot = self.discover_bounded(&DiscoveryRequest { target: target.clone(), namespace: None }).await?;
             Ok(DriftReport {
                 database_kind: self.kind,
                 target: target.clone(),
