@@ -1241,6 +1241,8 @@ async fn handle_connection(
         establish(client, upstream, verifier, tenant_role_prefix).await?;
 
     if policy_admission.is_some() && session.tenant_context.is_none() {
+        metrics::global().policy_admission_checked();
+        metrics::global().policy_admission_denied();
         return Err(io::Error::new(io::ErrorKind::PermissionDenied,
             "Unauthenticated PostgreSQL protocol requests are disabled when policy admission is required"));
     }
