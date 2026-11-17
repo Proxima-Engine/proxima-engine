@@ -171,6 +171,17 @@ impl CockroachCatalogAdapter {
             observed_at,
         })
     }
+
+    async fn discover_bounded(&self, request: &DiscoveryRequest) -> Result<DiscoverySnapshot, AdapterError> {
+        tokio::time::timeout(std::time::Duration::from_secs(60), self.discover_inner(request))
+            .await
+            .map_err(|_| AdapterError {
+                code: "cockroach_catalog_timeout".into(),
+                detail: "CockroachDB catalog discovery exceeded the sixty-second operation deadline.".into(),
+                retryable: true,
+            })?
+    }
+
 }
 
 impl DatabaseAdapter for CockroachCatalogAdapter {
@@ -185,13 +196,13 @@ impl DatabaseAdapter for CockroachCatalogAdapter {
     }
 
     fn discover<'a>(&'a self, request: &'a DiscoveryRequest) -> AdapterFuture<'a, Result<DiscoverySnapshot, AdapterError>> {
-        Box::pin(async move { self.discover_inner(request).await })
+        Box::pin(async move { self.discover_bounded(request).await })
     }
 
     fn inspect<'a>(&'a self, request: &'a InspectionRequest) -> AdapterFuture<'a, Result<InspectionSnapshot, AdapterError>> {
         Box::pin(async move {
             request.policy.validate().map_err(|_| error("invalid_policy", "The canonical tenant policy failed validation."))?;
-            let discovery = self.discover_inner(&DiscoveryRequest { target: request.target.clone(), namespace: None }).await?;
+            let discovery = self.discover_bounded(&DiscoveryRequest { target: request.target.clone(), namespace: None }).await?;
             let mut findings = discovery.findings.clone();
             let mut inspected = Vec::new();
             for required in &request.policy.resources {
@@ -277,7 +288,7 @@ impl DatabaseAdapter for CockroachCatalogAdapter {
             if previous_fingerprint.is_some_and(|value| value.len() != 64 || hex::decode(value).map_or(true, |decoded| decoded.len() != 32)) {
                 return Err(error("invalid_previous_fingerprint", "The previous fingerprint must be a 32-byte hexadecimal SHA-256 digest."));
             }
-            let snapshot = self.discover_inner(&DiscoveryRequest { target: target.clone(), namespace: None }).await?;
+            let snapshot = self.discover_bounded(&DiscoveryRequest { target: target.clone(), namespace: None }).await?;
             let detected = previous_fingerprint.is_some_and(|previous| Some(previous) != snapshot.fingerprint.as_deref());
             Ok(DriftReport {
                 database_kind: DatabaseKind::CockroachDb,
