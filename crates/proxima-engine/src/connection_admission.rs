@@ -79,7 +79,7 @@ impl ConnectionAdmissionGate {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::policy_evidence::{EvidenceCheck, PolicyEvidenceAuthority};
+    use crate::policy_evidence::{EvidenceCheck, PolicyEvidenceAuthority, PolicyEvidencePayload};
     use crate::security_core::{
         DatabaseKind, InspectionCompleteness, Operation, SecurityFinding, SecurityPosture,
         SECURITY_MODEL_VERSION,
