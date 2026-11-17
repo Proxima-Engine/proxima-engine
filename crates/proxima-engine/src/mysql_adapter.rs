@@ -100,8 +100,10 @@ impl MySqlCatalogAdapter {
         let mut connection = self.connect_checked().await?;
         let table_rows = sqlx::query(
             "SELECT TABLE_SCHEMA,TABLE_NAME,TABLE_TYPE,ENGINE,ROW_FORMAT,CREATE_OPTIONS \
-             FROM information_schema.TABLES WHERE TABLE_SCHEMA=? ORDER BY TABLE_NAME"
+             FROM information_schema.TABLES WHERE TABLE_SCHEMA=? ORDER BY TABLE_NAME LIMIT 10001"
         ).bind(&self.database_name).fetch_all(&mut connection).await.map_err(db_error)?;
+        let table_inventory_truncated = table_rows.len() > 10_000;
+        let table_rows = table_rows.into_iter().take(10_000).collect::<Vec<_>>();
         let mut resources = Vec::with_capacity(table_rows.len());
         for row in table_rows {
             let schema: String = row.try_get("TABLE_SCHEMA").map_err(db_error)?;
@@ -216,8 +218,10 @@ impl MySqlCatalogAdapter {
         }
         let routine_rows = sqlx::query(
             "SELECT ROUTINE_SCHEMA,ROUTINE_NAME,ROUTINE_TYPE,DEFINER,SECURITY_TYPE,SQL_DATA_ACCESS,IS_DETERMINISTIC,SQL_MODE,ROUTINE_DEFINITION \
-             FROM information_schema.ROUTINES WHERE ROUTINE_SCHEMA=? ORDER BY ROUTINE_NAME,ROUTINE_TYPE"
+             FROM information_schema.ROUTINES WHERE ROUTINE_SCHEMA=? ORDER BY ROUTINE_NAME,ROUTINE_TYPE LIMIT 10001"
         ).bind(&self.database_name).fetch_all(&mut connection).await.map_err(db_error)?;
+        let routine_inventory_truncated = routine_rows.len() > 10_000;
+        let routine_rows = routine_rows.into_iter().take(10_000).collect::<Vec<_>>();
         for row in routine_rows {
             let routine_type: String = row.try_get("ROUTINE_TYPE").map_err(db_error)?;
             resources.push(DiscoveredResource {
@@ -292,6 +296,13 @@ impl MySqlCatalogAdapter {
                     resource: None,
                     detail: "MySQL/MariaDB information_schema visibility is privilege-filtered; this inventory is limited to objects visible to the authenticated account and cannot certify full database coverage.".into(),
                 }];
+                if table_inventory_truncated || routine_inventory_truncated {
+                    findings.push(SecurityFinding {
+                        code: "mysql_catalog_inventory_truncated".into(),
+                        resource: None,
+                        detail: "The visible catalog exceeded the 10,000-table or 10,000-routine safety bound; discovery is truncated and cannot be treated as a complete inventory.".into(),
+                    });
+                }
                 if elevated_inspection_account {
                     findings.push(SecurityFinding {
                         code: "mysql_inspection_account_overprivileged".into(),
