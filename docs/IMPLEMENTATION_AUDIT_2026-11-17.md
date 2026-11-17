@@ -155,3 +155,11 @@ MongoDB tenant-field validation now also rejects validators whose BSON type cons
 - MongoDB catalog operations now have an explicit socket timeout in addition to server-selection and connection timeouts.
 - MySQL/MariaDB, MongoDB, Redis, SQL Server and CockroachDB discovery/inspection/drift inventory operations have a bounded sixty-second operation deadline. PostgreSQL retains server-side statement and lock deadlines.
 - These are code changes and regression coverage where present, not executed validation. No Rust build, unit test suite, live database test or migration execution has been run.
+
+
+## SQLite file-isolation discovery adapter added after the initial audit
+
+- Added a SQLx SQLite read-only adapter that refuses in-memory databases and attached databases, validates the connected main file against a registered absolute path, disables trusted schema execution, and applies bounded busy/operation deadlines.
+- Discovery inventories tables/views, columns, indexes and index columns, foreign keys, triggers, schema definitions, journal mode, file/directory permissions and WAL/SHM sidecar permission bits where visible.
+- The adapter is marked `in_development` with schema-inspection and drift-detection capabilities only. SQLite has no native per-tenant users or RLS; policy compilation and semantic verification are explicitly denied.
+- File-per-tenant selection, complete cross-platform OS ACL verification (including Windows), independent cross-tenant file-access probes, runtime admission and signed evidence remain unimplemented. No Rust build, tests or live SQLite acceptance were run.
