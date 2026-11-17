@@ -114,6 +114,34 @@ impl MySqlCatalogAdapter {
                 "SELECT GRANTEE,PRIVILEGE_TYPE,IS_GRANTABLE \
                  FROM information_schema.SCHEMA_PRIVILEGES WHERE TABLE_SCHEMA=? ORDER BY GRANTEE,PRIVILEGE_TYPE"
             ).bind(&schema).fetch_all(&mut connection).await.map_err(db_error)?;
+            let constraints = sqlx::query(
+                "SELECT tc.CONSTRAINT_NAME,tc.CONSTRAINT_TYPE,tc.ENFORCED,kcu.COLUMN_NAME,kcu.REFERENCED_TABLE_SCHEMA,kcu.REFERENCED_TABLE_NAME,kcu.REFERENCED_COLUMN_NAME \
+                 FROM information_schema.TABLE_CONSTRAINTS tc \
+                 LEFT JOIN information_schema.KEY_COLUMN_USAGE kcu ON kcu.CONSTRAINT_SCHEMA=tc.CONSTRAINT_SCHEMA AND kcu.TABLE_NAME=tc.TABLE_NAME AND kcu.CONSTRAINT_NAME=tc.CONSTRAINT_NAME \
+                 WHERE tc.TABLE_SCHEMA=? AND tc.TABLE_NAME=? ORDER BY tc.CONSTRAINT_NAME,kcu.ORDINAL_POSITION"
+            ).bind(&schema).bind(&name).fetch_all(&mut connection).await.map_err(db_error)?;
+            let indexes = sqlx::query(
+                "SELECT INDEX_NAME,NON_UNIQUE,SEQ_IN_INDEX,COLUMN_NAME,INDEX_TYPE \
+                 FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=? AND TABLE_NAME=? ORDER BY INDEX_NAME,SEQ_IN_INDEX"
+            ).bind(&schema).bind(&name).fetch_all(&mut connection).await.map_err(db_error)?;
+            let triggers = sqlx::query(
+                "SELECT TRIGGER_NAME,EVENT_MANIPULATION,ACTION_TIMING,ACTION_STATEMENT,DEFINER,SQL_MODE \
+                 FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA=? AND EVENT_OBJECT_TABLE=? ORDER BY TRIGGER_NAME"
+            ).bind(&schema).bind(&name).fetch_all(&mut connection).await.map_err(db_error)?;
+            let kind = if table_type.eq_ignore_ascii_case("VIEW") { ResourceKind::View } else { ResourceKind::Table };
+            let view_metadata = if kind == ResourceKind::View {
+                let view = sqlx::query(
+                    "SELECT VIEW_DEFINITION,CHECK_OPTION,IS_UPDATABLE,DEFINER,SECURITY_TYPE \
+                     FROM information_schema.VIEWS WHERE TABLE_SCHEMA=? AND TABLE_NAME=?"
+                ).bind(&schema).bind(&name).fetch_optional(&mut connection).await.map_err(db_error)?;
+                view.map(|row| Ok(json!({
+                    "definition": row.try_get::<Option<String>,_>("VIEW_DEFINITION").map_err(db_error)?,
+                    "check_option": row.try_get::<String,_>("CHECK_OPTION").map_err(db_error)?,
+                    "is_updatable": row.try_get::<String,_>("IS_UPDATABLE").map_err(db_error)?,
+                    "definer": row.try_get::<String,_>("DEFINER").map_err(db_error)?,
+                    "security_type": row.try_get::<String,_>("SECURITY_TYPE").map_err(db_error)?
+                }))).transpose()?
+            } else { None };
             let kind = if table_type.eq_ignore_ascii_case("VIEW") { ResourceKind::View } else { ResourceKind::Table };
             let attributes = json!({
                 "table_type": table_type,
@@ -136,7 +164,32 @@ impl MySqlCatalogAdapter {
                     "grantee": grant.try_get::<String,_>("GRANTEE").map_err(db_error)?,
                     "privilege": grant.try_get::<String,_>("PRIVILEGE_TYPE").map_err(db_error)?,
                     "grantable": grant.try_get::<String,_>("IS_GRANTABLE").map_err(db_error)?
-                }))).collect::<Result<Vec<_>,AdapterError>>()?
+                }))).collect::<Result<Vec<_>,AdapterError>>()?,
+                "constraints": constraints.iter().map(|item| Ok(json!({
+                    "name": item.try_get::<String,_>("CONSTRAINT_NAME").map_err(db_error)?,
+                    "type": item.try_get::<String,_>("CONSTRAINT_TYPE").map_err(db_error)?,
+                    "enforced": item.try_get::<Option<String>,_>("ENFORCED").map_err(db_error)?,
+                    "column": item.try_get::<Option<String>,_>("COLUMN_NAME").map_err(db_error)?,
+                    "referenced_schema": item.try_get::<Option<String>,_>("REFERENCED_TABLE_SCHEMA").map_err(db_error)?,
+                    "referenced_table": item.try_get::<Option<String>,_>("REFERENCED_TABLE_NAME").map_err(db_error)?,
+                    "referenced_column": item.try_get::<Option<String>,_>("REFERENCED_COLUMN_NAME").map_err(db_error)?
+                }))).collect::<Result<Vec<_>,AdapterError>>()?,
+                "indexes": indexes.iter().map(|item| Ok(json!({
+                    "name": item.try_get::<String,_>("INDEX_NAME").map_err(db_error)?,
+                    "non_unique": item.try_get::<i64,_>("NON_UNIQUE").map_err(db_error)?,
+                    "sequence": item.try_get::<i64,_>("SEQ_IN_INDEX").map_err(db_error)?,
+                    "column": item.try_get::<Option<String>,_>("COLUMN_NAME").map_err(db_error)?,
+                    "type": item.try_get::<String,_>("INDEX_TYPE").map_err(db_error)?
+                }))).collect::<Result<Vec<_>,AdapterError>>()?,
+                "triggers": triggers.iter().map(|item| Ok(json!({
+                    "name": item.try_get::<String,_>("TRIGGER_NAME").map_err(db_error)?,
+                    "event": item.try_get::<String,_>("EVENT_MANIPULATION").map_err(db_error)?,
+                    "timing": item.try_get::<String,_>("ACTION_TIMING").map_err(db_error)?,
+                    "statement": item.try_get::<String,_>("ACTION_STATEMENT").map_err(db_error)?,
+                    "definer": item.try_get::<String,_>("DEFINER").map_err(db_error)?,
+                    "sql_mode": item.try_get::<String,_>("SQL_MODE").map_err(db_error)?
+                }))).collect::<Result<Vec<_>,AdapterError>>()?,
+                "view": view_metadata
             });
             resources.push(DiscoveredResource {
                 namespace: Some(schema),
@@ -168,11 +221,23 @@ impl MySqlCatalogAdapter {
             .fetch_one(&mut connection).await.map_err(db_error)?;
         let grants = sqlx::query("SHOW GRANTS FOR CURRENT_USER")
             .fetch_all(&mut connection).await.map_err(db_error)?;
+        let routine_privileges = sqlx::query(
+            "SELECT GRANTEE,ROUTINE_SCHEMA,ROUTINE_NAME,ROUTINE_TYPE,PRIVILEGE_TYPE,IS_GRANTABLE \
+             FROM information_schema.ROUTINE_PRIVILEGES WHERE ROUTINE_SCHEMA=? ORDER BY ROUTINE_NAME,GRANTEE,PRIVILEGE_TYPE"
+        ).bind(&self.database_name).fetch_all(&mut connection).await.map_err(db_error)?;
         let target_attributes = json!({
             "database": target_row.try_get::<Option<String>,_>("database_name").map_err(db_error)?,
             "authenticated_account": target_row.try_get::<String,_>("authenticated_account").map_err(db_error)?,
             "server_version": target_row.try_get::<String,_>("server_version").map_err(db_error)?,
             "authenticated_account_grants": grants.iter().map(|row| row.try_get::<String,usize>(0).map_err(db_error)).collect::<Result<Vec<_>,AdapterError>>()?,
+            "routine_privileges": routine_privileges.iter().map(|grant| Ok(json!({
+                "grantee": grant.try_get::<String,_>("GRANTEE").map_err(db_error)?,
+                "routine_schema": grant.try_get::<String,_>("ROUTINE_SCHEMA").map_err(db_error)?,
+                "routine": grant.try_get::<String,_>("ROUTINE_NAME").map_err(db_error)?,
+                "routine_type": grant.try_get::<String,_>("ROUTINE_TYPE").map_err(db_error)?,
+                "privilege": grant.try_get::<String,_>("PRIVILEGE_TYPE").map_err(db_error)?,
+                "grantable": grant.try_get::<String,_>("IS_GRANTABLE").map_err(db_error)?
+            }))).collect::<Result<Vec<_>,AdapterError>>()?,
             "tls_identity_verification_required": true
         });
         let fingerprint = digest(&serde_json::to_vec(&json!({"target":target_attributes,"resources":resources}))
