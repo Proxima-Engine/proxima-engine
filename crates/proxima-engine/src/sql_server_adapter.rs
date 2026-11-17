@@ -448,7 +448,7 @@ impl DatabaseAdapter for SqlServerCatalogAdapter {
                     .filter_map(|predicate| predicate["definition"].as_str().and_then(predicate_function_name))
                     .collect::<Vec<_>>();
                 let predicate_functions = discovery.resources.iter().filter(|resource| {
-                    resource.kind == ResourceKind::Function && predicate_function_names.iter().any(|name| name == &resource.name)
+                    resource.kind == ResourceKind::Function && predicate_function_names.iter().any(|name| name.eq_ignore_ascii_case(&resource.name))
                 }).collect::<Vec<_>>();
                 if !predicates.is_empty() && predicate_functions.is_empty() {
                     resource_findings.push(finding("sql_server_predicate_function_definition_unavailable", &protected.resource, "The RLS predicate function definition was not visible in the catalog; its tenant identity source cannot be inspected."));
