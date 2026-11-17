@@ -102,6 +102,7 @@ impl MongoCatalogAdapter {
         let names = names.into_iter().take(10_000).collect::<Vec<_>>();
         let mut resources = Vec::with_capacity(names.len());
         let mut index_inventory_truncated = false;
+        let mut total_index_count = 0usize;
         for name in names {
             let response = database.run_command(doc! {
                 "listCollections": 1,
@@ -128,8 +129,9 @@ impl MongoCatalogAdapter {
                     .map_err(|_| error("mongodb_index_discovery_response_invalid", "MongoDB listIndexes did not return an index batch."))?;
                 let mut indexes = first_batch.iter().filter_map(Bson::as_document)
                     .map(bson_value).collect::<Result<Vec<_>,AdapterError>>()?;
+                total_index_count = total_index_count.saturating_add(indexes.len());
                 let mut cursor_id = read_cursor_id(cursor);
-                while cursor_id != 0 && indexes.len() < 10_000 {
+                while cursor_id != 0 && indexes.len() < 10_000 && total_index_count < 100_000 {
                     let next_response = database.run_command(doc! { "getMore": cursor_id, "collection": &name })
                         .await.map_err(db_error)?;
                     let next_cursor = next_response.get_document("cursor")
@@ -137,8 +139,9 @@ impl MongoCatalogAdapter {
                     let next_batch = next_cursor.get_array("nextBatch")
                         .map_err(|_| error("mongodb_index_discovery_response_invalid", "MongoDB getMore did not return an index batch."))?;
                     for index in next_batch.iter().filter_map(Bson::as_document) {
-                        if indexes.len() >= 10_000 { index_inventory_truncated = true; break; }
+                        if indexes.len() >= 10_000 || total_index_count >= 100_000 { index_inventory_truncated = true; break; }
                         indexes.push(bson_value(index)?);
+                        total_index_count = total_index_count.saturating_add(1);
                     }
                     cursor_id = read_cursor_id(next_cursor);
                 }
@@ -171,7 +174,8 @@ impl MongoCatalogAdapter {
             "connection_status": bson_value(&connection_status)?,
             "tls_certificate_verification_required": true,
             "collection_inventory_truncated": collection_inventory_truncated,
-            "index_inventory_truncated": index_inventory_truncated
+            "index_inventory_truncated": index_inventory_truncated,
+            "index_count": total_index_count
         });
         let fingerprint = digest(&serde_json::to_vec(&json!({"target":target_attributes,"resources":resources}))
             .map_err(|_| error("fingerprint_serialization_failed", "Could not serialize MongoDB discovery results."))?);
