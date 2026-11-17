@@ -71,6 +71,10 @@ impl MySqlCatalogAdapter {
             MySqlConnection::connect_with(&options),
         ).await.map_err(|_| error("mysql_connection_timeout", "The MySQL TLS connection exceeded the ten-second connection deadline."))?
             .map_err(db_error)?;
+        // MySQL and MariaDB expose different session-level statement timeout variables.
+        // Attempt both; the unsupported variable is harmlessly ignored.
+        let _ = sqlx::query("SET SESSION MAX_EXECUTION_TIME=10000").execute(&mut connection).await;
+        let _ = sqlx::query("SET SESSION max_statement_time=10").execute(&mut connection).await;
         let row = sqlx::query("SELECT DATABASE() AS database_name, CURRENT_USER() AS authenticated_account")
             .fetch_one(&mut connection).await.map_err(db_error)?;
         let database: Option<String> = row.try_get("database_name").map_err(db_error)?;
