@@ -202,3 +202,24 @@ cargo run -p proxima-engine --bin proxima-policy-guard -- discover-cockroachdb p
 ```
 
 The connector uses the same verified root-store configuration as PostgreSQL discovery. Credentials must remain in a protected environment variable; discovery is read-only and does not authorize application traffic.
+
+
+## Native SQLite file-isolation discovery
+
+The SQLite adapter opens a persistent database file read-only, disables trusted schema execution for the inspection connection, rejects attached databases and verifies that the connected main database resolves to the registered absolute file path. It inventories tables/views, columns, indexes and indexed columns, foreign keys, triggers, schema definitions, journal mode and filesystem permissions for the database file, containing directory and any WAL/SHM sidecars.
+
+SQLite has no native database users or row-level security. The adapter therefore does not generate SQL tenant policies or claim that a tenant key column provides isolation. A real tenant boundary requires a trusted file-per-tenant selector, exclusive OS-level file and directory permissions, and independent cross-tenant file-access probes. Windows ACL inspection is not yet implemented, so Windows discovery remains denied.
+
+```bash
+PROXIMA_SQLITE_ADAPTER_DATABASE_PATH='/absolute/path/to/tenant.db' \
+PROXIMA_SQLITE_ADAPTER_DATABASE_URI='sqlite:///absolute/path/to/tenant.db' \
+PROXIMA_SQLITE_ADAPTER_TARGET_ID='registered-target-id' \
+cargo run -p proxima-engine --bin proxima-policy-guard -- discover-sqlite
+
+PROXIMA_SQLITE_ADAPTER_DATABASE_PATH='/absolute/path/to/tenant.db' \
+PROXIMA_SQLITE_ADAPTER_DATABASE_URI='sqlite:///absolute/path/to/tenant.db' \
+PROXIMA_SQLITE_ADAPTER_TARGET_ID='registered-target-id' \
+cargo run -p proxima-engine --bin proxima-policy-guard -- inspect-sqlite-policy policy.json
+```
+
+The inspection URI must point to the same file as the absolute registered path. Both commands are read-only; policy inspection returns deny because native tenant authorization and file-selection enforcement are not implemented.
