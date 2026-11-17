@@ -223,10 +223,16 @@ impl MySqlCatalogAdapter {
         let routine_inventory_truncated = routine_rows.len() > 10_000;
         let routine_rows = routine_rows.into_iter().take(10_000).collect::<Vec<_>>();
         for row in routine_rows {
+            let routine_schema: String = row.try_get("ROUTINE_SCHEMA").map_err(db_error)?;
+            let routine_name: String = row.try_get("ROUTINE_NAME").map_err(db_error)?;
             let routine_type: String = row.try_get("ROUTINE_TYPE").map_err(db_error)?;
+            let parameters = sqlx::query(
+                "SELECT PARAMETER_NAME,ORDINAL_POSITION,PARAMETER_MODE,DATA_TYPE \
+                 FROM information_schema.PARAMETERS WHERE SPECIFIC_SCHEMA=? AND SPECIFIC_NAME=? ORDER BY ORDINAL_POSITION"
+            ).bind(&routine_schema).bind(&routine_name).fetch_all(&mut connection).await.map_err(db_error)?;
             resources.push(DiscoveredResource {
-                namespace: Some(row.try_get("ROUTINE_SCHEMA").map_err(db_error)?),
-                name: row.try_get("ROUTINE_NAME").map_err(db_error)?,
+                namespace: Some(routine_schema),
+                name: routine_name,
                 kind: if routine_type.eq_ignore_ascii_case("PROCEDURE") { ResourceKind::Procedure } else { ResourceKind::Function },
                 owner: Some(row.try_get("DEFINER").map_err(db_error)?),
                 attributes: json!({
@@ -235,7 +241,13 @@ impl MySqlCatalogAdapter {
                     "sql_data_access": row.try_get::<String,_>("SQL_DATA_ACCESS").map_err(db_error)?,
                     "is_deterministic": row.try_get::<String,_>("IS_DETERMINISTIC").map_err(db_error)?,
                     "sql_mode": row.try_get::<String,_>("SQL_MODE").map_err(db_error)?,
-                    "definition": row.try_get::<Option<String>,_>("ROUTINE_DEFINITION").map_err(db_error)?
+                    "definition": row.try_get::<Option<String>,_>("ROUTINE_DEFINITION").map_err(db_error)?,
+                    "parameters": parameters.iter().map(|parameter| Ok(json!({
+                        "name": parameter.try_get::<Option<String>,_>("PARAMETER_NAME").map_err(db_error)?,
+                        "position": parameter.try_get::<Option<i64>,_>("ORDINAL_POSITION").map_err(db_error)?,
+                        "mode": parameter.try_get::<Option<String>,_>("PARAMETER_MODE").map_err(db_error)?,
+                        "data_type": parameter.try_get::<Option<String>,_>("DATA_TYPE").map_err(db_error)?
+                    }))).collect::<Result<Vec<_>,AdapterError>>()?
                 }),
             });
         }
@@ -383,13 +395,24 @@ impl DatabaseAdapter for MySqlCatalogAdapter {
                 if found.attributes["security_type"].as_str().is_some_and(|value| value.eq_ignore_ascii_case("DEFINER")) {
                     resource_findings.push(finding("mysql_definer_routine_requires_review", &protected.resource, "This stored routine executes with definer privileges and requires explicit tenant-boundary review."));
                 }
-                let columns = found.attributes["columns"].as_array().cloned().unwrap_or_default();
-                let tenant_column = columns.iter().find(|column| column["name"].as_str() == Some(protected.tenant_key.as_str()));
-                match tenant_column {
-                    None => resource_findings.push(finding("tenant_ownership_column_missing", &protected.resource, "The policy tenant key does not exist on this table.")),
-                    Some(column) if column["nullable"].as_str() != Some("NO") =>
-                        resource_findings.push(finding("tenant_ownership_column_nullable", &protected.resource, "The policy tenant key allows NULL values.")),
-                    _ => {}
+                if matches!(protected.resource.kind, ResourceKind::Table | ResourceKind::View) {
+                    let columns = found.attributes["columns"].as_array().cloned().unwrap_or_default();
+                    let tenant_column = columns.iter().find(|column| column["name"].as_str() == Some(protected.tenant_key.as_str()));
+                    match tenant_column {
+                        None => resource_findings.push(finding("tenant_ownership_column_missing", &protected.resource, "The policy tenant key does not exist on this table or view.")),
+                        Some(column) if column["nullable"].as_str() != Some("NO") =>
+                            resource_findings.push(finding("tenant_ownership_column_nullable", &protected.resource, "The policy tenant key allows NULL values.")),
+                        _ => {}
+                    }
+                } else {
+                    let parameters = found.attributes["parameters"].as_array().cloned().unwrap_or_default();
+                    let tenant_parameter = parameters.iter().find(|parameter| {
+                        parameter["name"].as_str() == Some(protected.tenant_key.as_str())
+                            && matches!(parameter["mode"].as_str(), Some("IN" | "INOUT"))
+                    });
+                    if tenant_parameter.is_none() {
+                        resource_findings.push(finding("mysql_tenant_identity_parameter_missing", &protected.resource, "The routine does not expose the configured tenant identity as an IN or INOUT parameter."));
+                    }
                 }
                 resource_findings.push(finding("mysql_database_per_tenant_probe_required", &protected.resource, "MySQL has no native row-level security. Separate database grants must be tested with independent tenant principals before isolation can be verified."));
                 let resource_fingerprint = digest(&serde_json::to_vec(&found.attributes)
