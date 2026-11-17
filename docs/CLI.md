@@ -223,3 +223,26 @@ cargo run -p proxima-engine --bin proxima-policy-guard -- inspect-sqlite-policy 
 ```
 
 The inspection URI must point to the same file as the absolute registered path. Both commands are read-only; policy inspection returns deny because native tenant authorization and file-selection enforcement are not implemented.
+
+
+## Native Elasticsearch / OpenSearch discovery
+
+The search-cluster adapter requires HTTPS and an explicit Authorization value supplied separately from the endpoint URL. It disables redirects, applies connection/request deadlines, confirms the root cluster identity, inventories indices matching the registered pattern, and retrieves mappings, settings and aliases. It also reads Elasticsearch security roles/users or OpenSearch Security plugin roles, role mappings and internal users when the inspection principal has permission. User password/hash/token fields are stripped before evidence serialization.
+
+The adapter is discovery-only. A tenant field in an index mapping does not isolate documents. Native DLS/FLS role definitions, authenticated tenant-principal binding, policy deployment and independent positive/negative document probes are still required.
+
+```bash
+PROXIMA_ELASTICSEARCH_ADAPTER_ENDPOINT='https://search.example.com:9200' \
+PROXIMA_ELASTICSEARCH_ADAPTER_INDEX_PATTERN='tenant-*' \
+PROXIMA_ELASTICSEARCH_ADAPTER_TARGET_ID='registered-target-id' \
+PROXIMA_ELASTICSEARCH_ADAPTER_AUTHORIZATION='ApiKey ...' \
+cargo run -p proxima-engine --bin proxima-policy-guard -- discover-elasticsearch
+
+PROXIMA_ELASTICSEARCH_ADAPTER_ENDPOINT='https://search.example.com:9200' \
+PROXIMA_ELASTICSEARCH_ADAPTER_INDEX_PATTERN='tenant-*' \
+PROXIMA_ELASTICSEARCH_ADAPTER_TARGET_ID='registered-target-id' \
+PROXIMA_ELASTICSEARCH_ADAPTER_AUTHORIZATION='ApiKey ...' \
+cargo run -p proxima-engine --bin proxima-policy-guard -- inspect-elasticsearch-policy policy.json
+```
+
+Do not put API keys, bearer tokens or Basic credentials in the endpoint URL, source control or command history. Use a protected environment/secret manager. If the security catalog endpoints return 401/403/404, discovery reports the security inventory as incomplete and policy inspection remains denied.
