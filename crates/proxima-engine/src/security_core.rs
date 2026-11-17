@@ -144,7 +144,7 @@ pub fn adapter_catalog() -> Vec<AdapterDescriptor> {
             name: "Redis",
             maturity: AdapterMaturity::InDevelopment,
             capabilities: AdapterCapabilities { policy_generation: true, ..AdapterCapabilities::default() },
-            status_note: "Reviewable tenant-prefixed ACL templates derive a narrower command allowlist from requested operations; Redis ACLs cannot distinguish create-only from update-only upsert semantics. Native ACL inspection, trusted principal selection, runtime enforcement and drift verification are not implemented.",
+            status_note: "TLS-verified Redis ACL user, key-pattern, command-rule and keyspace metadata discovery with fingerprint drift comparison are implemented. Tenant identity binding, keyless-command mediation, independent semantic probes, controlled ACL deployment and runtime admission are not implemented; ACLs cannot distinguish create-only from update-only upsert semantics.",
         },
         AdapterDescriptor {
             kind: DatabaseKind::VaultDb,
