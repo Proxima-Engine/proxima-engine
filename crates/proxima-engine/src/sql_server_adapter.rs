@@ -111,6 +111,22 @@ impl SqlServerCatalogAdapter {
                 "SELECT principal.name AS grantee,permission.permission_name,permission.state_desc,CONVERT(int,permission.minor_id) AS minor_id,column_info.name AS column_name FROM sys.database_permissions permission LEFT JOIN sys.database_principals principal ON principal.principal_id=permission.grantee_principal_id LEFT JOIN sys.columns column_info ON column_info.object_id=permission.major_id AND column_info.column_id=permission.minor_id WHERE permission.class_desc='OBJECT_OR_COLUMN' AND permission.major_id=@P1 ORDER BY principal.name,permission.permission_name,permission.minor_id",
                 &[&object_id],
             ).await.map_err(db_error)?.into_first_result().await.map_err(db_error)?;
+            let indexes = client.query(
+                "SELECT index_info.name,index_info.type_desc,index_info.is_unique,index_info.is_primary_key,index_info.is_unique_constraint,index_info.is_disabled,index_info.has_filter,index_info.filter_definition,index_column.key_ordinal,index_column.is_included_column,column_info.name AS column_name FROM sys.indexes index_info LEFT JOIN sys.index_columns index_column ON index_column.object_id=index_info.object_id AND index_column.index_id=index_info.index_id LEFT JOIN sys.columns column_info ON column_info.object_id=index_column.object_id AND column_info.column_id=index_column.column_id WHERE index_info.object_id=@P1 AND index_info.index_id > 0 ORDER BY index_info.index_id,index_column.key_ordinal,index_column.index_column_id",
+                &[&object_id],
+            ).await.map_err(db_error)?.into_first_result().await.map_err(db_error)?;
+            let foreign_keys = client.query(
+                "SELECT fk.name,fk.is_disabled,fk.is_not_trusted,fk.delete_referential_action_desc,fk.update_referential_action_desc,parent_column.name AS parent_column,OBJECT_SCHEMA_NAME(fkc.referenced_object_id) AS referenced_schema,OBJECT_NAME(fkc.referenced_object_id) AS referenced_table,referenced_column.name AS referenced_column FROM sys.foreign_keys fk JOIN sys.foreign_key_columns fkc ON fkc.constraint_object_id=fk.object_id JOIN sys.columns parent_column ON parent_column.object_id=fkc.parent_object_id AND parent_column.column_id=fkc.parent_column_id JOIN sys.columns referenced_column ON referenced_column.object_id=fkc.referenced_object_id AND referenced_column.column_id=fkc.referenced_column_id WHERE fk.parent_object_id=@P1 ORDER BY fk.name,fkc.constraint_column_id",
+                &[&object_id],
+            ).await.map_err(db_error)?.into_first_result().await.map_err(db_error)?;
+            let check_constraints = client.query(
+                "SELECT name,definition,is_disabled,is_not_trusted FROM sys.check_constraints WHERE parent_object_id=@P1 ORDER BY name",
+                &[&object_id],
+            ).await.map_err(db_error)?.into_first_result().await.map_err(db_error)?;
+            let default_constraints = client.query(
+                "SELECT name,definition,parent_column_id FROM sys.default_constraints WHERE parent_object_id=@P1 ORDER BY name",
+                &[&object_id],
+            ).await.map_err(db_error)?.into_first_result().await.map_err(db_error)?;
             let predicates = client.query(
                 "SELECT policy.name AS policy_name,policy.is_enabled,policy.is_schema_bound,predicate.predicate_type_desc,predicate.operation_desc,predicate.predicate_definition FROM sys.security_policies policy JOIN sys.security_predicates predicate ON predicate.object_id=policy.object_id WHERE predicate.target_object_id=@P1 ORDER BY policy.name,predicate.operation_desc",
                 &[&object_id],
@@ -135,6 +151,41 @@ impl SqlServerCatalogAdapter {
                         "nullable": column.get::<bool,_>("is_nullable").unwrap_or(true),
                         "computed": column.get::<bool,_>("is_computed").unwrap_or(false),
                         "identity": column.get::<bool,_>("is_identity").unwrap_or(false)
+                    })).collect::<Vec<_>>(),
+                    "indexes": indexes.iter().map(|index| json!({
+                        "name": index.get::<&str,_>("name").unwrap_or_default(),
+                        "type": index.get::<&str,_>("type_desc").unwrap_or_default(),
+                        "unique": index.get::<bool,_>("is_unique").unwrap_or(false),
+                        "primary_key": index.get::<bool,_>("is_primary_key").unwrap_or(false),
+                        "unique_constraint": index.get::<bool,_>("is_unique_constraint").unwrap_or(false),
+                        "disabled": index.get::<bool,_>("is_disabled").unwrap_or(false),
+                        "has_filter": index.get::<bool,_>("has_filter").unwrap_or(false),
+                        "filter": index.get::<&str,_>("filter_definition"),
+                        "key_ordinal": index.get::<i32,_>("key_ordinal"),
+                        "included": index.get::<bool,_>("is_included_column").unwrap_or(false),
+                        "column": index.get::<&str,_>("column_name")
+                    })).collect::<Vec<_>>(),
+                    "foreign_keys": foreign_keys.iter().map(|foreign_key| json!({
+                        "name": foreign_key.get::<&str,_>("name").unwrap_or_default(),
+                        "disabled": foreign_key.get::<bool,_>("is_disabled").unwrap_or(false),
+                        "not_trusted": foreign_key.get::<bool,_>("is_not_trusted").unwrap_or(false),
+                        "on_delete": foreign_key.get::<&str,_>("delete_referential_action_desc").unwrap_or_default(),
+                        "on_update": foreign_key.get::<&str,_>("update_referential_action_desc").unwrap_or_default(),
+                        "parent_column": foreign_key.get::<&str,_>("parent_column"),
+                        "referenced_schema": foreign_key.get::<&str,_>("referenced_schema"),
+                        "referenced_table": foreign_key.get::<&str,_>("referenced_table"),
+                        "referenced_column": foreign_key.get::<&str,_>("referenced_column")
+                    })).collect::<Vec<_>>(),
+                    "check_constraints": check_constraints.iter().map(|constraint| json!({
+                        "name": constraint.get::<&str,_>("name").unwrap_or_default(),
+                        "definition": constraint.get::<&str,_>("definition"),
+                        "disabled": constraint.get::<bool,_>("is_disabled").unwrap_or(false),
+                        "not_trusted": constraint.get::<bool,_>("is_not_trusted").unwrap_or(false)
+                    })).collect::<Vec<_>>(),
+                    "default_constraints": default_constraints.iter().map(|constraint| json!({
+                        "name": constraint.get::<&str,_>("name").unwrap_or_default(),
+                        "definition": constraint.get::<&str,_>("definition"),
+                        "column_id": constraint.get::<i32,_>("parent_column_id").unwrap_or_default()
                     })).collect::<Vec<_>>(),
                     "permissions": permissions.iter().map(|permission| json!({
                         "grantee": permission.get::<&str,_>("grantee").unwrap_or_default(),
@@ -202,6 +253,10 @@ impl SqlServerCatalogAdapter {
             });
         }
 
+        let database_options_rows = client.simple_query(
+            "SELECT database_info.name,owner.name AS owner_name,database_info.is_trustworthy_on,database_info.is_db_chaining_on,database_info.is_read_committed_snapshot_on,database_info.compatibility_level,database_info.containment_desc FROM sys.databases database_info LEFT JOIN sys.server_principals owner ON owner.sid=database_info.owner_sid WHERE database_info.database_id=DB_ID()"
+        ).await.map_err(db_error)?.into_first_result().await.map_err(db_error)?;
+        let database_options = database_options_rows.first();
         let principals = client.simple_query(
             "SELECT principal.name,principal.type_desc,principal.authentication_type_desc,principal.is_fixed_role,principal.default_schema_name FROM sys.database_principals principal WHERE principal.principal_id = 1 OR principal.principal_id > 4 ORDER BY principal.name"
         ).await.map_err(db_error)?.into_first_result().await.map_err(db_error)?;
@@ -257,6 +312,14 @@ impl SqlServerCatalogAdapter {
                 "permission": permission.get::<&str,_>("permission_name").unwrap_or_default(),
                 "state": permission.get::<&str,_>("state_desc").unwrap_or_default()
             })).collect::<Vec<_>>(),
+            "database_options": database_options.map(|row| json!({
+                "owner": row.get::<&str,_>("owner_name"),
+                "trustworthy": row.get::<bool,_>("is_trustworthy_on").unwrap_or(false),
+                "database_chaining": row.get::<bool,_>("is_db_chaining_on").unwrap_or(false),
+                "read_committed_snapshot": row.get::<bool,_>("is_read_committed_snapshot_on").unwrap_or(false),
+                "compatibility_level": row.get::<i32,_>("compatibility_level").unwrap_or_default(),
+                "containment": row.get::<&str,_>("containment_desc").unwrap_or_default()
+            })),
             "encrypted_transport_required": true
         });
         let fingerprint = digest(&serde_json::to_vec(&json!({"target":target_attributes,"resources":resources}))
@@ -267,6 +330,20 @@ impl SqlServerCatalogAdapter {
                 code: "sql_server_catalog_visibility_incomplete".into(),
                 resource: None,
                 detail: "The inspection principal lacks database VIEW DEFINITION and is not sysadmin; catalog visibility may be filtered.".into(),
+            });
+        }
+        if database_options.is_some_and(|row| row.get::<bool,_>("is_trustworthy_on").unwrap_or(false)) {
+            findings.push(SecurityFinding {
+                code: "sql_server_database_trustworthy_enabled".into(),
+                resource: None,
+                detail: "The database TRUSTWORTHY option is enabled; review ownership and module execution paths for privilege escalation risk.".into(),
+            });
+        }
+        if database_options.is_some_and(|row| row.get::<bool,_>("is_db_chaining_on").unwrap_or(false)) {
+            findings.push(SecurityFinding {
+                code: "sql_server_database_chaining_enabled".into(),
+                resource: None,
+                detail: "Cross-database ownership chaining is enabled and requires explicit review of cross-database privilege paths.".into(),
             });
         }
         if is_sysadmin {
