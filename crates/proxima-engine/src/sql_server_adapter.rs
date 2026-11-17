@@ -488,7 +488,8 @@ impl DatabaseAdapter for SqlServerCatalogAdapter {
                             && schema.as_deref().is_none_or(|schema| resource.namespace.as_deref().is_some_and(|actual| actual.eq_ignore_ascii_case(schema)))
                     })
                 }).collect::<Vec<_>>();
-                if !predicates.is_empty() && predicate_functions.is_empty() {
+                let predicate_definitions_visible = predicate_functions.iter().any(|function| function.attributes["definition"].as_str().is_some());
+                if !predicates.is_empty() && (predicate_functions.is_empty() || !predicate_definitions_visible) {
                     resource_findings.push(finding("sql_server_predicate_function_definition_unavailable", &protected.resource, "The RLS predicate function definition was not visible in the catalog; its tenant identity source cannot be inspected."));
                 } else if !predicate_functions.is_empty() && !predicate_functions.iter().any(|function| {
                     function.attributes["definition"].as_str().is_some_and(|definition| definition.to_ascii_uppercase().contains("SESSION_CONTEXT"))
