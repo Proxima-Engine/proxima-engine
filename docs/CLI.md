@@ -16,6 +16,17 @@ On Windows PowerShell, use the same commands with `python`. On Unix-like systems
 
 ## Commands
 
+The Rust Policy Guard binary also exposes the adapter maturity catalog:
+
+```bash
+cargo run -p proxima-engine --bin proxima-policy-guard -- adapters
+```
+
+The `adapters` command prints the versioned Proxima Security Core catalog. PostgreSQL is marked `in_development`; MySQL, MariaDB, Microsoft SQL Server, MongoDB and CockroachDB are marked `planned` with no enabled capabilities. A planned entry is not a supported database integration.
+
+The PostgreSQL `audit` command is a catalog posture inspection, not a semantic policy verifier. Its JSON deliberately reports `security_posture: unknown` and `access_decision: deny`, even when it finds no catalog findings. A zero exit code means the inspection completed without catalog findings; it does not certify tenant isolation.
+
+
 | Command | Purpose |
 |---|---|
 | `init` | Generate local node identity and tenant-signing credentials in `.proxima-dev/` |
