@@ -316,6 +316,39 @@ mod tests {
         assert!(CockroachCatalogAdapter::new("target", "", connector).is_err());
     }
 
+    #[tokio::test]
+    async fn rejects_a_different_registered_target_before_connecting() {
+        let connector: CockroachConnector = Arc::new(|| Box::pin(async {
+            Err(error("connector_must_not_run", "target validation should fail first"))
+        }));
+        let adapter = CockroachCatalogAdapter::new("target-a", "app", connector).unwrap();
+        let request = DiscoveryRequest {
+            target: AdapterTarget { target_id: "target-b".into(), database_name: "app".into(), namespace: None },
+            namespace: None,
+        };
+        assert_eq!(adapter.discover(&request).await.unwrap_err().code, "cockroach_target_mismatch");
+    }
+
+    #[test]
+    fn policy_compilation_is_disabled_until_native_controls_exist() {
+        let connector: CockroachConnector = Arc::new(|| Box::pin(async {
+            Err(error("not_connected", "test connector"))
+        }));
+        let adapter = CockroachCatalogAdapter::new("target", "app", connector).unwrap();
+        let policy = TenantSecurityPolicy {
+            schema_version: SECURITY_MODEL_VERSION.into(),
+            policy_id: "policy".into(),
+            revision: 1,
+            tenant_identity_claim: "tenant_id".into(),
+            resources: vec![crate::security_core::ProtectedResource {
+                resource: ResourceRef { namespace: Some("public".into()), name: "records".into(), kind: ResourceKind::Table },
+                tenant_key: "tenant_id".into(),
+                operations: vec![crate::security_core::Operation::Read],
+            }],
+        };
+        assert_eq!(adapter.compile_policy(&policy).unwrap_err().code, "cockroach_policy_compilation_unavailable");
+    }
+
     #[test]
     fn descriptor_claims_discovery_only() {
         let connector: CockroachConnector = Arc::new(|| Box::pin(async {
