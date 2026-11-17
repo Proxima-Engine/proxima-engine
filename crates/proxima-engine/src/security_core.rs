@@ -99,10 +99,10 @@ pub fn adapter_catalog() -> Vec<AdapterDescriptor> {
                 policy_generation: true,
                 controlled_policy_deployment: false,
                 drift_detection: false,
-                runtime_fail_closed_admission: false,
-                signed_security_evidence: false,
+                runtime_fail_closed_admission: true,
+                signed_security_evidence: true,
             },
-            status_note: "Existing PostgreSQL Engine and Cloud work is being consolidated under the common security contract; full semantic verification and runtime fail-closed admission still require acceptance.",
+            status_note: "PostgreSQL protocol startup and active sessions can require fresh signed Control Plane admission; signed per-registration admission evidence is persisted. Independent positive/negative semantic verification and Engine-native deployment remain incomplete.",
         },
         AdapterDescriptor {
             kind: DatabaseKind::MySql,
