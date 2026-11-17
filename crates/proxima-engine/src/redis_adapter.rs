@@ -144,8 +144,17 @@ impl RedisCatalogAdapter {
             "resource_inventory_truncated": resource_inventory_truncated,
             "tls_certificate_and_hostname_verification_required": true
         });
-        let fingerprint = digest(&serde_json::to_vec(&json!({"database_index":self.database_index,"target":target_attributes,"resources":resources}))
-            .map_err(|_| error("fingerprint_serialization_failed", "Could not serialize Redis discovery results."))?);
+        // Exclude volatile INFO server uptime/client metrics and INFO keyspace key counts.
+        // Fingerprint only ACL/identity/version state relevant to authorization posture.
+        let fingerprint = digest(&serde_json::to_vec(&json!({
+            "database_index": self.database_index,
+            "authenticated_acl_user": whoami,
+            "server_version": info_field(&server_info, "redis_version").unwrap_or_else(|| "unknown".into()),
+            "acl_users": sanitized_acl,
+            "acl_categories": categories,
+            "acl_rule_fingerprint": acl_digest,
+            "resources": resources
+        })).map_err(|_| error("fingerprint_serialization_failed", "Could not serialize Redis discovery results."))?);
         let mut findings = vec![SecurityFinding {
             code: "redis_keyspace_inventory_is_acl_scoped".into(),
             resource: None,
