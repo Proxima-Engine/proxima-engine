@@ -1,12 +1,12 @@
 use serde_json::{json, Value};
-use std::{env, error::Error, fs, io::BufReader, path::Path, str::FromStr, time::Duration};
+use std::{collections::HashSet, env, error::Error, fs, io::BufReader, path::Path, str::FromStr, time::Duration};
 use tokio_postgres::config::SslMode;
 use tokio_postgres_rustls::MakeRustlsConnect;
 
 struct TableFinding {
     schema: String, table: String, owner: String,
     rls_enabled: bool, rls_forced: bool, owner_bypasses_rls: bool,
-    public_select: bool, public_write_or_truncate: bool, bypass_role_grant: bool,
+    public_select: bool, public_write_or_truncate: bool, truncate_grant: bool, bypass_role_grant: bool,
     policy_count: i64, permissive_policy_count: i64, security_definer_routines: i64,
 }
 fn ident(v: &str) -> String { format!("\"{}\"", v.replace('"', "\"\"")) }
@@ -80,6 +80,7 @@ async fn inspect(url: &str) -> Result<Vec<TableFinding>, Box<dyn Error>> {
                        WHERE a.grantee = 0 AND a.privilege_type = 'SELECT'),
                EXISTS (SELECT 1 FROM aclexplode(COALESCE(c.relacl, acldefault('r', c.relowner))) a
                        WHERE a.grantee = 0 AND a.privilege_type IN ('INSERT','UPDATE','DELETE','TRUNCATE')),
+               (EXISTS (SELECT 1 FROM pg_roles grantee WHERE grantee.rolname<>pg_get_userbyid(c.relowner) AND has_table_privilege(grantee.rolname,c.oid,'TRUNCATE')) OR EXISTS (SELECT 1 FROM aclexplode(COALESCE(c.relacl,acldefault('r',c.relowner))) acl WHERE acl.grantee=0 AND acl.privilege_type='TRUNCATE')),
                EXISTS (SELECT 1 FROM aclexplode(COALESCE(c.relacl, acldefault('r', c.relowner))) a
                        WHERE a.grantee<>0 AND EXISTS(
                          WITH RECURSIVE granted_roles(role_oid) AS (
@@ -103,8 +104,8 @@ async fn inspect(url: &str) -> Result<Vec<TableFinding>, Box<dyn Error>> {
     Ok(rows.into_iter().map(|r| TableFinding {
         schema:r.get(0), table:r.get(1), owner:r.get(2), rls_enabled:r.get(3),
         rls_forced:r.get(4), owner_bypasses_rls:r.get(5), public_select:r.get(6),
-        public_write_or_truncate:r.get(7), bypass_role_grant:r.get(8),
-        policy_count:r.get(9), permissive_policy_count:r.get(10), security_definer_routines:r.get(11)
+        public_write_or_truncate:r.get(7), truncate_grant:r.get(8), bypass_role_grant:r.get(9),
+        policy_count:r.get(10), permissive_policy_count:r.get(11), security_definer_routines:r.get(12)
     }).collect())
 }
 fn report(rows: &[TableFinding]) -> Value {
@@ -115,6 +116,7 @@ fn report(rows: &[TableFinding]) -> Value {
         if !f.rls_forced || f.owner_bypasses_rls { issues.push("table_owner_bypasses_rls"); }
         if f.public_select { issues.push("public_select_grant"); }
         if f.public_write_or_truncate { issues.push("public_write_or_truncate_grant"); }
+        if f.truncate_grant { issues.push("non_owner_truncate_grant"); }
         if f.bypass_role_grant { issues.push("bypassrls_or_superuser_role_has_table_grant"); }
         if f.rls_enabled && f.policy_count == 0 { issues.push("no_rls_policies"); }
         if f.permissive_policy_count > 1 { issues.push("multiple_permissive_policies_require_review"); }
@@ -122,7 +124,7 @@ fn report(rows: &[TableFinding]) -> Value {
         json!({"schema":f.schema,"table":f.table,"owner":f.owner,
           "rls_enabled":f.rls_enabled,"rls_forced":f.rls_forced,
           "owner_bypasses_rls":f.owner_bypasses_rls,"public_select":f.public_select,
-          "public_write_or_truncate":f.public_write_or_truncate,"bypass_role_grant":f.bypass_role_grant,
+          "public_write_or_truncate":f.public_write_or_truncate,"truncate_grant":f.truncate_grant,"bypass_role_grant":f.bypass_role_grant,
           "policy_count":f.policy_count,"permissive_policy_count":f.permissive_policy_count,
           "security_definer_routines":f.security_definer_routines,"findings":issues})
     }).collect();
@@ -148,8 +150,14 @@ fn generate(spec: &Value) -> Result<String, Box<dyn Error>> {
         let name=t["table"].as_str().ok_or("table required")?;
         let column=t["tenant_column"].as_str().ok_or("tenant_column required")?;
         let policy=t["policy_name"].as_str().unwrap_or("proxima_tenant_isolation");
-        if [schema,name,column,policy].iter().any(|value|value.is_empty()||value.len()>63) {
-            return Err(format!("{schema}.{name}: PostgreSQL identifiers must contain 1-63 bytes").into());
+        for (value,label) in [(schema,"schema"),(name,"table"),(column,"tenant column"),(policy,"policy name")] {
+            validate_ident(value,label)?;
+        }
+        if schema=="pg_catalog" || schema=="information_schema" || schema.starts_with("pg_toast") || schema.starts_with("pg_temp") {
+            return Err(format!("{schema}.{name}: system and temporary schemas cannot be managed").into());
+        }
+        if !seen_tables.insert((schema.to_owned(),name.to_owned())) {
+            return Err(format!("{schema}.{name}: duplicate table mapping in policy spec").into());
         }
         let tenants=t["tenants"].as_array().ok_or("tenants array required")?;
         if tenants.is_empty() || tenants.len()>100 { return Err(format!("{schema}.{name}: tenant mappings must contain 1-100 entries").into()); }
@@ -159,8 +167,7 @@ fn generate(spec: &Value) -> Result<String, Box<dyn Error>> {
         for tenant in tenants {
             let id=tenant["tenant_id"].as_str().ok_or("tenant_id required")?;
             let role=tenant["role"].as_str().ok_or("role required")?;
-            if id.is_empty()||id.len()>256||role.is_empty()||role.len()>63
-                || !role.bytes().all(|b|b.is_ascii_alphanumeric()||b==b'_')
+            if id.is_empty()||id.len()>256||id.contains('\\0')||!valid_role_name(role)
                 || !tenant_ids.insert(id)||!role_names.insert(role) {
                 return Err(format!("{schema}.{name}: invalid or duplicate tenant-to-role mapping").into());
             }
@@ -179,6 +186,17 @@ BEGIN
   FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
   WHERE n.nspname={schema_literal} AND c.relname={table_literal} AND c.relkind IN ('r','p');
   IF owner_name IS NULL THEN RAISE EXCEPTION 'Agata Proxima: target table does not exist'; END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid JOIN pg_namespace n ON n.oid=c.relnamespace
+                 WHERE n.nspname={schema_literal} AND c.relname={table_literal} AND a.attname={column_literal}
+                   AND a.attnum>0 AND NOT a.attisdropped)
+     THEN RAISE EXCEPTION 'Agata Proxima: tenant key column does not exist'; END IF;
+  IF EXISTS (SELECT 1 FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid JOIN pg_namespace n ON n.oid=c.relnamespace
+             WHERE n.nspname={schema_literal} AND c.relname={table_literal} AND a.attname={column_literal}
+               AND a.attnum>0 AND NOT a.attisdropped
+               AND format_type(a.atttypid,a.atttypmod) NOT IN ('text','uuid','integer','bigint','smallint','numeric','citext')
+               AND format_type(a.atttypid,a.atttypmod) NOT LIKE 'character varying%'
+               AND format_type(a.atttypid,a.atttypmod) NOT LIKE 'character(%')
+     THEN RAISE EXCEPTION 'Agata Proxima: tenant key type is unsupported'; END IF;
   IF owner_name = ANY({role_array}) THEN RAISE EXCEPTION 'Agata Proxima: tenant runtime roles must not own the protected table'; END IF;
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname=ANY({role_array}) AND (rolsuper OR rolbypassrls))
      OR (WITH RECURSIVE member_roles(role_oid) AS (
@@ -206,8 +224,8 @@ BEGIN
      THEN RAISE EXCEPTION 'Agata Proxima: SECURITY DEFINER routines require separate review before claiming tenant isolation'; END IF;
   IF EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
              WHERE n.nspname={schema_literal} AND c.relname={table_literal}
-               AND EXISTS (SELECT 1 FROM aclexplode(COALESCE(c.relacl,acldefault('r',c.relowner))) acl
-                           WHERE acl.grantee<>c.relowner AND acl.privilege_type='TRUNCATE'))
+               AND EXISTS (SELECT 1 FROM pg_roles grantee
+                           WHERE grantee.rolname<>owner_name AND has_table_privilege(grantee.rolname,c.oid,'TRUNCATE')))
      THEN RAISE EXCEPTION 'Agata Proxima: non-owner TRUNCATE grants bypass RLS'; END IF;
   IF EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
              WHERE n.nspname={schema_literal} AND c.relname={table_literal}
@@ -230,7 +248,7 @@ BEGIN
      THEN RAISE EXCEPTION 'Agata Proxima: a table grantee can bypass row security'; END IF;
 END;
 $agata_proxima_preflight$;
-"#,schema_literal=literal(schema),table_literal=literal(name),policy_literal=literal(policy),role_array=role_array,role_count=tenants.len());
+"#,schema_literal=literal(schema),table_literal=literal(name),column_literal=literal(column),policy_literal=literal(policy),role_array=role_array,role_count=tenants.len());
         out.push_str(&preflight);
         out.push_str(&format!("\nALTER TABLE {target} ENABLE ROW LEVEL SECURITY;\nALTER TABLE {target} FORCE ROW LEVEL SECURITY;\nCREATE POLICY {} ON {target} FOR ALL TO {} USING ({predicate}) WITH CHECK ({predicate});\n",ident(policy),roles.join(", ")));
     }
@@ -278,7 +296,7 @@ mod tests {
    assert!(sql.contains("policy name already exists"));
  }
  #[test] fn flags_non_forced_owner_bypass() {
-   let rows=vec![TableFinding{schema:"public".into(),table:"orders".into(),owner:"app_owner".into(),rls_enabled:true,rls_forced:false,owner_bypasses_rls:false,public_select:false,public_write_or_truncate:false,bypass_role_grant:false,policy_count:1,permissive_policy_count:1,security_definer_routines:0}];
+   let rows=vec![TableFinding{schema:"public".into(),table:"orders".into(),owner:"app_owner".into(),rls_enabled:true,rls_forced:false,owner_bypasses_rls:false,public_select:false,public_write_or_truncate:false,truncate_grant:false,bypass_role_grant:false,policy_count:1,permissive_policy_count:1,security_definer_routines:0}];
    let value=report(&rows);
    assert!(value["tables"][0]["findings"].as_array().unwrap().iter().any(|v|v=="table_owner_bypasses_rls"));
  }
