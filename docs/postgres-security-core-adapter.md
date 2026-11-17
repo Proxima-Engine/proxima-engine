@@ -77,14 +77,19 @@ tenant connection, configure:
 
 When the endpoint is configured, every tenant-bound PostgreSQL startup performs
 a signed request bound to the node, registered target, requested database,
-verified tenant ID, and Engine role prefix. The Control Plane returns a
-node-key-signed decision with a 15-second expiry. The Engine verifies the
-signature and every binding before relaying the established session. An
+verified tenant ID, Engine role prefix, and a fresh random request ID. The
+Control Plane returns a node-key-signed decision with a 15-second expiry and
+per-registration evidence covering catalog fingerprint freshness, persisted
+tenant-role binding, revision verification, and latest drift observations.
+The exact signed payload is persisted in the Control Plane with a SHA-256
+digest and a unique `(node_id, request_id)` constraint. The Engine verifies
+the signature and every binding, including the one-time request ID, before
+relaying the established session. Replayed request IDs are rejected. An
 unreachable service, invalid signature, expired response, unknown policy,
 unapplied revision, stale schema fingerprint, drift flag, or non-protected
 verification denies the connection.
 
-The Control Plane refreshes PostgreSQL catalog fingerprints every 30 seconds.
+The Control Plane runs its PostgreSQL catalog and revision verification monitor every 30 seconds.
 The admission endpoint denies when the last fingerprint check is older than
 90 seconds. Every registration on the target that maps to the requested tenant
 must be enabled and have its latest revision applied and verified as protected;
@@ -93,13 +98,26 @@ Control Plane also checks that tenant roles have no access to unregistered
 application tables. A tenant with no registered protected resources is denied
 when admission is enabled.
 
-The Engine rechecks active tenant sessions every five seconds. Decisions are
-shared through a bounded five-second per-tenant cache, so multiple sessions
-for the same tenant do not each generate a Control Plane request. If posture
-becomes unknown, unsafe, stale, or unreachable, the Engine closes affected
-sessions instead of allowing them to continue. The PostgreSQL startup
+The Engine rechecks active tenant sessions every five seconds. Each recheck
+uses a new request ID and obtains a new signed decision; no allow decision is
+reused across connections or rechecks. If posture becomes unknown, unsafe,
+stale, or unreachable, the Engine closes affected sessions instead of allowing
+them to continue. The PostgreSQL startup
 `ReadyForQuery` message is withheld until the first signed admission succeeds,
 so a denied connection is never reported as ready to the client.
+
+## Signed evidence boundary
+
+The hosted admission endpoint persists each node-key-signed decision, its
+one-time request ID, per-registration verification checks, SHA-256 payload
+digest, and signature for 90 days. The dashboard exposes the latest 100
+decisions per target. This proves which Control Plane posture decision was
+issued to a node and what checks informed it; it is not a substitute for
+independent positive and cross-tenant negative data-plane probes.
+
+The generic `PolicyEvidenceAuthority` in `policy_evidence.rs` remains a separate
+cryptographic library primitive. Its policy-evidence/admission-envelope format
+is not yet the payload used by this PostgreSQL Control Plane admission route.
 
 ## Scope boundary
 
