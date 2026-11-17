@@ -74,16 +74,25 @@ impl PostgresCatalogAdapter {
         client.batch_execute("SET default_transaction_read_only = on; SET statement_timeout = '10s'; SET lock_timeout = '2s'; SET search_path = pg_catalog, pg_temp;")
             .await.map_err(db_error)?;
         let row = client.query_one(
-            "SELECT current_database(), current_user, r.rolsuper, r.rolbypassrls, r.rolcreaterole, r.rolcreatedb, r.rolreplication FROM pg_catalog.pg_roles r WHERE r.rolname=current_user",
+            "WITH RECURSIVE effective_roles(role_oid) AS (\
+               SELECT oid FROM pg_catalog.pg_roles WHERE rolname=current_user \
+               UNION \
+               SELECT membership.roleid FROM pg_catalog.pg_auth_members membership \
+               JOIN effective_roles inherited ON membership.member=inherited.role_oid \
+             ) \
+             SELECT current_database(), EXISTS( \
+               SELECT 1 FROM effective_roles inherited \
+               JOIN pg_catalog.pg_roles role ON role.oid=inherited.role_oid \
+               WHERE role.rolsuper OR role.rolbypassrls OR role.rolcreaterole OR role.rolcreatedb OR role.rolreplication \
+             )",
             &[],
         ).await.map_err(db_error)?;
         let actual_database: String = row.get(0);
         if actual_database != self.database_name {
             return Err(error("postgres_database_mismatch", "The authenticated connection reached a different database."));
         }
-        let elevated = (2..7).any(|index| row.get::<_, bool>(index));
-        if elevated {
-            return Err(error("unsafe_inspection_role", "The inspection role must not be SUPERUSER, BYPASSRLS, CREATEROLE, CREATEDB or REPLICATION."));
+        if row.get::<_, bool>(1) {
+            return Err(error("unsafe_inspection_role", "The inspection role or any role it can inherit/set must not be SUPERUSER, BYPASSRLS, CREATEROLE, CREATEDB or REPLICATION."));
         }
         let unsafe_privileges: bool = client.query_one(
             "SELECT has_database_privilege(current_user,current_database(),'CREATE') OR EXISTS (SELECT 1 FROM pg_catalog.pg_namespace n WHERE n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname NOT LIKE 'pg_%' AND has_schema_privilege(current_user,n.oid,'CREATE')) OR EXISTS (SELECT 1 FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE c.relkind IN ('r','p','v','m') AND n.nspname NOT IN ('pg_catalog','information_schema') AND (has_table_privilege(current_user,c.oid,'INSERT') OR has_table_privilege(current_user,c.oid,'UPDATE') OR has_table_privilege(current_user,c.oid,'DELETE') OR has_table_privilege(current_user,c.oid,'TRUNCATE')))",
