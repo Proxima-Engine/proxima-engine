@@ -7,7 +7,7 @@
 <p align="center">Agata Proxima defines a common tenant-security contract. Proxima Engine currently implements the PostgreSQL wire-protocol adapter, verifying signed tenant context and binding each accepted session to a tenant-specific PostgreSQL role. Other native database adapters are planned, not yet supported.</p>
 
 <p align="center">
-  <a href="https://github.com/Agata-Proxima/proxima-engine/actions/workflows/ci.yml">Continuous integration</a> ·
+  <a href="https://github.com/Proxima-Engine/proxima-engine/actions/workflows/ci.yml">Continuous integration</a> ·
   <a href="LICENSE">MIT license for covered Engine source</a> ·
   <a href="https://agataproxima.com">Website</a> ·
   <a href="https://discord.gg/xsYSuDMzg">Discord</a> ·
@@ -80,7 +80,7 @@ Proxima Engine extends an existing PostgreSQL deployment: it verifies tenant con
 Requirements: Git and Docker with Compose.
 
 ```bash
-git clone https://github.com/Agata-Proxima/proxima-engine.git
+git clone https://github.com/Proxima-Engine/proxima-engine.git
 cd proxima-engine
 docker compose -f compose.dev.yaml up --build -d
 ```
