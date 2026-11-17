@@ -166,6 +166,7 @@ pub fn adapter_catalog() -> Vec<AdapterDescriptor> {
 pub enum ResourceKind {
     Table,
     View,
+    Sequence,
     Collection,
     Procedure,
     Function,
