@@ -46,11 +46,17 @@ impl MongoCatalogAdapter {
         {
             return Err(error("invalid_mongodb_target", "A bounded target ID, database name and connection URI are required."));
         }
-        let tls_enabled = uri.starts_with("mongodb+srv://") || uri.contains("tls=true") || uri.contains("ssl=true");
-        if !tls_enabled || uri.contains("tlsinsecure=true")
-            || uri.contains("tlsallowinvalidcertificates=true")
-            || uri.contains("tlsallowinvalidhostnames=true")
-        {
+        let parameters: Vec<(&str, &str)> = uri.split_once('?').map(|(_, query)| {
+            query.split('&').filter_map(|part| part.split_once('=')).collect()
+        }).unwrap_or_default();
+        let parameter_is_true = |key: &str| parameters.iter().any(|(name, value)| *name == key && *value == "true");
+        let parameter_is_false = |key: &str| parameters.iter().any(|(name, value)| *name == key && *value == "false");
+        let tls_enabled = uri.starts_with("mongodb+srv://") || parameter_is_true("tls") || parameter_is_true("ssl");
+        let tls_disabled = parameter_is_false("tls") || parameter_is_false("ssl");
+        let insecure_tls = parameter_is_true("tlsinsecure")
+            || parameter_is_true("tlsallowinvalidcertificates")
+            || parameter_is_true("tlsallowinvalidhostnames");
+        if !tls_enabled || tls_disabled || insecure_tls {
             return Err(error("mongodb_tls_verification_required", "MongoDB connections must use TLS with certificate and hostname verification; insecure TLS options are forbidden."));
         }
         Ok(Self { target_id, database_name, connection_uri })
@@ -309,5 +315,34 @@ fn db_error(_error: mongodb::error::Error) -> AdapterError {
         code: "mongodb_catalog_operation_failed".into(),
         detail: "The authenticated MongoDB catalog operation failed.".into(),
         retryable: true,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn requires_verified_tls_for_mongodb_connections() {
+        assert!(MongoCatalogAdapter::new("target", "app", "mongodb://localhost/app").is_err());
+        assert!(MongoCatalogAdapter::new("target", "app", "mongodb://localhost/app?tls=false").is_err());
+        assert!(MongoCatalogAdapter::new("target", "app", "mongodb://localhost/app?tls=true&tlsInsecure=true").is_err());
+        assert!(MongoCatalogAdapter::new("target", "app", "mongodb://localhost/app?tls=true").is_ok());
+        assert!(MongoCatalogAdapter::new("target", "app", "mongodb+srv://cluster.example/app").is_ok());
+    }
+
+    #[test]
+    fn descriptor_exposes_inventory_but_not_document_enforcement() {
+        let adapter = MongoCatalogAdapter::new("target", "app", "mongodb://localhost/app?tls=true").unwrap();
+        let descriptor = adapter.descriptor();
+        assert_eq!(descriptor.maturity, AdapterMaturity::InDevelopment);
+        assert!(descriptor.capabilities.schema_inspection);
+        assert!(descriptor.capabilities.policy_generation);
+        assert!(descriptor.capabilities.drift_detection);
+        assert!(!descriptor.capabilities.tenant_identity_enforcement);
+        assert!(!descriptor.capabilities.policy_semantic_verification);
+        assert!(!descriptor.capabilities.controlled_policy_deployment);
+        assert!(!descriptor.capabilities.runtime_fail_closed_admission);
+        assert!(!descriptor.capabilities.signed_security_evidence);
     }
 }
