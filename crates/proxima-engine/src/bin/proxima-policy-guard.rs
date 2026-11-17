@@ -1,6 +1,6 @@
 use serde_json::{json, Value};
 use proxima_engine::security_core::{adapter_catalog, AccessDecision, TenantSecurityPolicy, SECURITY_MODEL_VERSION};
-use proxima_engine::database_adapter::{AdapterError, AdapterFuture, AdapterTarget, DatabaseAdapter, InspectionRequest};
+use proxima_engine::database_adapter::{AdapterError, AdapterFuture, AdapterTarget, DatabaseAdapter, DiscoveryRequest, InspectionRequest};
 use proxima_engine::postgres_adapter::{PostgresCatalogAdapter, PostgresConnector};
 use proxima_engine::native_policy_plans::{compile_mongodb_database_boundary, compile_mysql_database_boundary, compile_redis_acl, compile_sql_server};
 use std::{collections::HashSet, env, error::Error, fs, io::BufReader, path::Path, str::FromStr, time::Duration};
@@ -380,6 +380,50 @@ async fn main() -> Result<(),Box<dyn Error>> {
         let value=json!({"schema_version":SECURITY_MODEL_VERSION,"scope":"engine_runtime","adapter_contract":"database_adapter::DatabaseAdapter","adapters":adapter_catalog()});
         println!("{}",serde_json::to_string_pretty(&value)?);
       },
+      Some("discover-postgres") => {
+        let namespace = args.next();
+        if args.next().is_some() { return Err("usage: proxima-policy-guard discover-postgres [schema]".into()); }
+        let url = env::var("PROXIMA_POSTGRES_ADAPTER_DATABASE_URL")
+            .map_err(|_| "set PROXIMA_POSTGRES_ADAPTER_DATABASE_URL to a TLS-verified PostgreSQL URL")?;
+        let target_id = env::var("PROXIMA_POSTGRES_ADAPTER_TARGET_ID")
+            .map_err(|_| "set PROXIMA_POSTGRES_ADAPTER_TARGET_ID to the registered non-secret target ID")?;
+        let database_name = env::var("PROXIMA_POSTGRES_ADAPTER_DATABASE_NAME")
+            .map_err(|_| "set PROXIMA_POSTGRES_ADAPTER_DATABASE_NAME to the expected database name")?;
+        let tenant_role_prefix = env::var("PROXIMA_TENANT_ROLE_PREFIX")
+            .map_err(|_| "set PROXIMA_TENANT_ROLE_PREFIX to the Engine's tenant role prefix")?;
+        let connector_url = url.clone();
+        let connector: PostgresConnector = std::sync::Arc::new(move || {
+            let connector_url = connector_url.clone();
+            Box::pin(async move {
+                let mut config = tokio_postgres::Config::from_str(&connector_url)
+                    .map_err(|error| AdapterError { code: "invalid_postgres_connection_config".into(), detail: error.to_string(), retryable: false })?;
+                config.ssl_mode(SslMode::Require);
+                let tls = audit_tls_connector()
+                    .map_err(|error| AdapterError { code: "postgres_tls_configuration_failed".into(), detail: error.to_string(), retryable: false })?;
+                let (client, connection) = tokio::time::timeout(Duration::from_secs(10), config.connect(tls))
+                    .await
+                    .map_err(|error| AdapterError { code: "postgres_connection_timeout".into(), detail: error.to_string(), retryable: true })?
+                    .map_err(|error| AdapterError { code: "postgres_connection_failed".into(), detail: error.to_string(), retryable: error.is_closed() })?;
+                tokio::spawn(async move {
+                    if let Err(error) = connection.await {
+                        eprintln!("PostgreSQL discovery connection ended: {error}");
+                    }
+                });
+                Ok(client)
+            }) as AdapterFuture<'static, Result<tokio_postgres::Client, AdapterError>>
+        });
+        let adapter = PostgresCatalogAdapter::new(target_id.clone(), database_name.clone(), tenant_role_prefix, connector)?;
+        let snapshot = adapter.discover(&DiscoveryRequest {
+            target: AdapterTarget { target_id, database_name, namespace: None },
+            namespace,
+        }).await?;
+        println!("{}", serde_json::to_string_pretty(&json!({
+            "adapter": adapter.descriptor(),
+            "discovery": snapshot,
+            "access_decision": "deny",
+            "note": "Discovery inventories native resources. It does not certify tenant isolation or authorize traffic."
+        }))?);
+      },
       Some("inspect-policy") => {
         let path = args.next().ok_or("usage: proxima-policy-guard inspect-policy <policy.json>")?;
         let policy: TenantSecurityPolicy = serde_json::from_slice(&fs::read(&path)?)?;
@@ -444,7 +488,7 @@ async fn main() -> Result<(),Box<dyn Error>> {
         let spec:Value=serde_json::from_slice(&fs::read(Path::new(&path))?)?;
         print!("{}",generate(&spec)?);
       },
-      _ => return Err("usage: proxima-policy-guard <adapters|audit|generate|validate-policy|compile-plan|inspect-policy>".into())
+      _ => return Err("usage: proxima-policy-guard <adapters|audit|generate|validate-policy|compile-plan|discover-postgres|inspect-policy>".into())
     }
     Ok(())
 }
