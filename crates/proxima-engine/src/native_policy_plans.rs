@@ -216,13 +216,29 @@ pub fn compile_redis_acl(policy: &TenantSecurityPolicy) -> Result<CompiledPolicy
                 "+scard", "+smembers", "+sismember", "+zrange", "+zscore", "+zcard", "+xrange", "+xlen"
             ]);
         }
-        if resource.operations.iter().any(|op| matches!(op, Operation::Create | Operation::Update | Operation::Delete)) {
+        if resource.operations.contains(&Operation::Create) {
+            // Redis writes are frequently upserts. These commands are
+            // restricted to the tenant key pattern, but ACLs cannot enforce
+            // NX/XX or distinguish creation from replacement.
             commands.extend([
-                "+set", "+mset", "+del", "+unlink", "+expire", "+pexpire", "+persist", "+incr", "+decr",
-                "+hset", "+hdel", "+lpush", "+rpush", "+lpop", "+rpop", "+sadd", "+srem",
-                "+zadd", "+zrem", "+xadd", "+xdel"
+                "+set", "+mset", "+hset", "+lpush", "+rpush", "+sadd",
+                "+zadd", "+xadd"
             ]);
         }
+        if resource.operations.contains(&Operation::Update) {
+            commands.extend([
+                "+set", "+mset", "+expire", "+pexpire", "+persist", "+incr",
+                "+decr", "+hset", "+lpush", "+rpush", "+sadd", "+zadd", "+xadd"
+            ]);
+        }
+        if resource.operations.contains(&Operation::Delete) {
+            commands.extend([
+                "+del", "+unlink", "+hdel", "+lpop", "+rpop", "+srem",
+                "+zrem", "+xdel"
+            ]);
+        }
+        commands.sort_unstable();
+        commands.dedup();
         if commands.is_empty() {
             return Err(error("empty_privilege_set", "No supported Redis command category was requested."));
         }
@@ -242,6 +258,7 @@ pub fn compile_redis_acl(policy: &TenantSecurityPolicy) -> Result<CompiledPolicy
                 "The trusted gateway must authenticate the tenant and select the matching Redis ACL user.",
                 "Every key must follow the tenant key pattern; unscoped keys and keyless commands need separate policy review.",
                 "This template is a database ACL boundary, not proof of command-level isolation for every Redis module or server version.",
+                "Redis ACLs cannot distinguish create-only from update-only semantics for upsert commands such as SET, HSET, SADD and ZADD; an enforcing gateway or application contract must enforce those distinctions.",
                 "ACL users, selectors, key patterns, channels, scripts, functions, modules and replication/admin commands require native inspection."
             ]
         })));
@@ -295,6 +312,33 @@ mod tests {
     fn mongodb_template_does_not_claim_document_level_security() {
         let compiled = compile_mongodb_database_boundary(&policy(ResourceKind::Collection, "tenant_id")).unwrap();
         assert_eq!(compiled.changes[0].definition["shared_collection_document_level_isolation"], false);
+    }
+
+    #[test]
+    fn redis_delete_only_policy_does_not_grant_write_or_update_commands() {
+        let mut delete_policy = policy(ResourceKind::Keyspace, "tenant:${tenant_id}:*");
+        delete_policy.resources[0].operations = vec![Operation::Delete];
+        let compiled = compile_redis_acl(&delete_policy).unwrap();
+        let acl = compiled.changes[0].definition["acl_template"].as_array().unwrap();
+        let commands = acl.iter().filter_map(|value| value.as_str()).collect::<Vec<_>>();
+        assert!(commands.contains(&"+del"));
+        assert!(commands.contains(&"+unlink"));
+        assert!(!commands.contains(&"+set"));
+        assert!(!commands.contains(&"+hset"));
+        assert!(!commands.contains(&"+incr"));
+    }
+
+    #[test]
+    fn redis_create_policy_documents_upsert_semantic_limit() {
+        let mut create_policy = policy(ResourceKind::Keyspace, "tenant:${tenant_id}:*");
+        create_policy.resources[0].operations = vec![Operation::Create];
+        let compiled = compile_redis_acl(&create_policy).unwrap();
+        let acl = compiled.changes[0].definition["acl_template"].as_array().unwrap();
+        let commands = acl.iter().filter_map(|value| value.as_str()).collect::<Vec<_>>();
+        assert!(commands.contains(&"+set"));
+        assert!(!commands.contains(&"+del"));
+        assert!(compiled.changes[0].definition["limitations"].as_array().unwrap().iter()
+            .any(|value| value.as_str().unwrap_or("").contains("cannot distinguish create-only from update-only")));
     }
 
     #[test]
