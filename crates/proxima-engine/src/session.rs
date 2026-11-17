@@ -296,6 +296,7 @@ async fn broker_startup_authentication(
             .0;
 
         if message.tag == ERROR_RESPONSE_TAG {
+            client.write_all(&frame).await?;
             return Err(io::Error::new(
                 io::ErrorKind::PermissionDenied,
                 "PostgreSQL authentication/startup failed",
