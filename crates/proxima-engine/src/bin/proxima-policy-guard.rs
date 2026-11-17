@@ -259,6 +259,7 @@ BEGIN
                     OR lower(setting) LIKE 'row_security=false%'
                     OR lower(setting) LIKE 'row_security=0%'
                     OR lower(setting) LIKE 'row_security=no%'
+                    OR lower(setting) LIKE 'search_path=%'
                     OR lower(setting) LIKE 'session_replication_role=replica%'))
      THEN RAISE EXCEPTION 'Agata Proxima: tenant role/database defaults can change security state'; END IF;
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname=owner_name AND (rolsuper OR rolbypassrls OR rolcreaterole OR rolcreatedb OR rolreplication))
