@@ -146,7 +146,7 @@ The maximum lifetime is 900 seconds (15 minutes). The Engine records used nonces
 
 ## 8. CI workflow
 
-The [Rust CI workflow](https://github.com/Agata-Proxima/proxima-engine/actions/workflows/ci.yml) runs on pushes to `main` and pull requests targeting `main`. It provisions PostgreSQL 17, runs the Python CLI tests, executes `cargo test -p proxima-engine`, builds the release binary, runs the two-tenant acceptance script, builds the Docker image, and runs the PgBouncer tenant-pool integration test.
+The [Rust CI workflow](https://github.com/Proxima-Engine/proxima-engine/actions/workflows/ci.yml) runs on pushes to `main` and pull requests targeting `main`. It provisions PostgreSQL 17, runs the Python CLI tests, executes `cargo test -p proxima-engine`, builds the release binary, runs the two-tenant acceptance script, builds the Docker image, and runs the PgBouncer tenant-pool integration test.
 
 A green workflow run is direct evidence that those configured checks passed for its commit. For deployment acceptance, also verify the target environment's TLS, database roles/RLS, network policy, persistence, and recovery procedures.
 
