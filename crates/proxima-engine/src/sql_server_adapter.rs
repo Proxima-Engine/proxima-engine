@@ -25,7 +25,7 @@ use tokio_util::compat::{Compat, TokioAsyncWriteCompatExt};
 
 /// Escape a value for a SQL Server Unicode string literal.
 fn sql_server_unicode_literal(value: &str, max_bytes: usize) -> Result<String, AdapterError> {
-    if value.trim().is_empty() || value.len() > max_bytes || value.contains('\\0') {
+    if value.trim().is_empty() || value.len() > max_bytes || value.chars().any(|character| character == char::from(0)) {
         return Err(error("invalid_tenant_context", "A tenant context value is empty, too long, or contains NUL."));
     }
     Ok(format!("N'{}'", value.replace('\'', "''")))
@@ -752,7 +752,8 @@ mod tenant_context_literal_tests {
     #[test]
     fn unicode_literals_escape_quotes_and_reject_nul() {
         assert_eq!(sql_server_unicode_literal("tenant'o", 128).unwrap(), "N'tenant''o'");
-        assert!(sql_server_unicode_literal("x\\0y", 128).is_err());
+        let nul_value = format!("x{}y", char::from(0));
+        assert!(sql_server_unicode_literal(&nul_value, 128).is_err());
         assert!(sql_server_unicode_literal(" ", 128).is_err());
     }
 }
