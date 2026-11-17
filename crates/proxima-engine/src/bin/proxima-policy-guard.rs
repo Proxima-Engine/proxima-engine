@@ -382,14 +382,15 @@ mod tests {
  }
  #[test] fn generator_uses_role_bound_identity() {
    let spec=json!({"tables":[{"schema":"public","table":"orders","tenant_column":"tenant_id","tenants":[
-     {"tenant_id":"tenant-a","role":"proxima_tenant_a"},{"tenant_id":"tenant-b","role":"proxima_tenant_b"}]}]});
+     {"tenant_id":"tenant-a","role":"proxima_tenant_tenant_a"},{"tenant_id":"tenant-b","role":"proxima_tenant_tenant_b"}]}]});
    let sql=generate(&spec).unwrap();
-   assert!(sql.contains("current_user = 'proxima_tenant_a'"));
+   assert!(sql.contains("current_user = 'proxima_tenant_tenant_a'"));
    assert!(sql.contains("\"tenant_id\" = 'tenant-b'"));
    assert!(sql.contains("FORCE ROW LEVEL SECURITY"));
    assert!(sql.contains("other permissive RLS policies must be reconciled first"));
    assert!(sql.contains("BEGIN;"));
    assert!(sql.contains("COMMIT;"));
+   assert!(sql.contains("Required PROXIMA_TENANT_ROLE_PREFIX: proxima_tenant_"));
    assert!(!sql.contains("current_setting"));
    assert!(!sql.contains("DROP POLICY"));
    assert!(sql.contains("policy name already exists"));
