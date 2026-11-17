@@ -184,6 +184,7 @@ struct NodePolicyStatusRequestCanonical<'a> {
     domain: &'static str,
     node_id: &'a str,
     timestamp: i64,
+    request_id: &'a str,
     target_id: &'a str,
     database_name: &'a str,
     tenant_id: &'a str,
@@ -194,6 +195,7 @@ struct NodePolicyStatusRequestCanonical<'a> {
 struct NodePolicyStatusPayload {
     node_id: String,
     request_timestamp: i64,
+    request_id: String,
     target_id: String,
     database_name: String,
     tenant_id: String,
@@ -214,14 +216,6 @@ struct SignedNodePolicyStatus {
 /// PostgreSQL posture. A signed response is bound to this node, target,
 /// database, tenant, request timestamp and a 15-second expiry.
 #[derive(Clone)]
-struct CachedPolicyDecision {
-    checked_at: i64,
-    expires_at: i64,
-    allow: bool,
-    reason: String,
-}
-
-#[derive(Clone)]
 struct PolicyAdmissionClient {
     client: reqwest::Client,
     url: String,
@@ -229,7 +223,6 @@ struct PolicyAdmissionClient {
     target_id: String,
     tenant_role_prefix: String,
     signing_key: Vec<u8>,
-    cache: Arc<std::sync::Mutex<std::collections::HashMap<(String, String), CachedPolicyDecision>>>,
 }
 
 impl PolicyAdmissionClient {
@@ -273,7 +266,6 @@ impl PolicyAdmissionClient {
             client, url, node_id, target_id,
             tenant_role_prefix: tenant_role_prefix.to_owned(),
             signing_key,
-            cache: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         }))
     }
 
@@ -288,23 +280,15 @@ impl PolicyAdmissionClient {
             .duration_since(std::time::UNIX_EPOCH)
             .map_err(|error| io::Error::new(io::ErrorKind::PermissionDenied, error.to_string()))?
             .as_secs() as i64;
-        let cache_key = (database_name.to_owned(), tenant_id.to_owned());
-        if let Ok(cache) = self.cache.lock() {
-            if let Some(cached) = cache.get(&cache_key) {
-                if timestamp < cached.expires_at && timestamp < cached.checked_at + 5 {
-                    return if cached.allow {
-                        Ok(())
-                    } else {
-                        Err(io::Error::new(io::ErrorKind::PermissionDenied,
-                            format!("Tenant policy admission denied: {}", cached.reason)))
-                    };
-                }
-            }
-        }
+        // A fresh unpredictable request ID makes every signed decision
+        // single-request scoped; an earlier allow response cannot be replayed
+        // for another PostgreSQL connection or a later recheck.
+        let request_id = uuid::Uuid::new_v4().to_string();
         let canonical = NodePolicyStatusRequestCanonical {
             domain: "proxima-node-policy-status-request-v1",
             node_id: &self.node_id,
             timestamp,
+            request_id: &request_id,
             target_id: &self.target_id,
             database_name,
             tenant_id,
@@ -321,6 +305,7 @@ impl PolicyAdmissionClient {
             .json(&serde_json::json!({
                 "node_id": self.node_id,
                 "timestamp": timestamp,
+                "request_id": request_id,
                 "target_id": self.target_id,
                 "database_name": database_name,
                 "tenant_id": tenant_id,
@@ -339,6 +324,7 @@ impl PolicyAdmissionClient {
         let payload = &signed.payload;
         if payload.node_id != self.node_id
             || payload.request_timestamp != timestamp
+            || payload.request_id != request_id
             || payload.target_id != self.target_id
             || payload.database_name != database_name
             || payload.tenant_id != tenant_id
@@ -362,17 +348,6 @@ impl PolicyAdmissionClient {
         verifier.verify_slice(&signature)
             .map_err(|_| io::Error::new(io::ErrorKind::PermissionDenied, "Policy admission signature verification failed"))?;
         let allow = payload.decision == "allow";
-        if let Ok(mut cache) = self.cache.lock() {
-            cache.retain(|_, cached| cached.expires_at > timestamp);
-            if cache.len() < 100_000 || cache.contains_key(&cache_key) {
-                cache.insert(cache_key, CachedPolicyDecision {
-                    checked_at: timestamp,
-                    expires_at: payload.expires_at,
-                    allow,
-                    reason: payload.reason.clone(),
-                });
-            }
-        }
         if !allow {
             return Err(io::Error::new(io::ErrorKind::PermissionDenied,
                 format!("Tenant policy admission denied: {}", payload.reason)));
