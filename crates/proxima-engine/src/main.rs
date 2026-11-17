@@ -213,6 +213,62 @@ struct SignedNodePolicyStatus {
     signature: String,
 }
 
+fn policy_admission_evidence_is_consistent(
+    payload: &NodePolicyStatusPayload,
+    target_id: &str,
+    database_name: &str,
+    tenant_id: &str,
+) -> bool {
+    let evidence = &payload.evidence;
+    if evidence.get("schema_version").and_then(serde_json::Value::as_str)
+        != Some("proxima.postgresql.policy-admission-evidence.v1")
+        || evidence.get("target_id").and_then(serde_json::Value::as_str) != Some(target_id)
+        || evidence.get("database_name").and_then(serde_json::Value::as_str) != Some(database_name)
+        || evidence.get("tenant_id").and_then(serde_json::Value::as_str) != Some(tenant_id)
+        || evidence.get("decision").and_then(serde_json::Value::as_str) != Some(payload.decision.as_str())
+        || evidence.get("reason").and_then(serde_json::Value::as_str) != Some(payload.reason.as_str())
+        || evidence.get("observed_at").and_then(serde_json::Value::as_i64).is_none()
+    {
+        return false;
+    }
+    let Some(checks) = evidence.get("checks").and_then(serde_json::Value::as_array) else {
+        return false;
+    };
+    if payload.decision != "allow" {
+        return payload.decision == "deny";
+    }
+    if checks.is_empty() || payload.policy_revision.is_none() {
+        return false;
+    }
+    let mut maximum_revision = None;
+    for check in checks {
+        let revision = check.get("revision_version")
+            .and_then(serde_json::Value::as_i64)
+            .and_then(|value| i32::try_from(value).ok());
+        maximum_revision = match (maximum_revision, revision) {
+            (Some(current), Some(value)) => Some(current.max(value)),
+            (None, Some(value)) => Some(value),
+            _ => return false,
+        };
+        let protected = check.get("protected").and_then(serde_json::Value::as_bool) == Some(true)
+            && check.get("registration_enabled").and_then(serde_json::Value::as_bool) == Some(true)
+            && check.get("connection_status").and_then(serde_json::Value::as_str) == Some("reachable")
+            && check.get("schema_drift_detected").and_then(serde_json::Value::as_bool) == Some(false)
+            && check.get("schema_fingerprint").and_then(serde_json::Value::as_str).is_some_and(|value| !value.is_empty())
+            && check.get("fingerprint_fresh").and_then(serde_json::Value::as_bool) == Some(true)
+            && check.get("tenant_role_prefix_matches").and_then(serde_json::Value::as_bool) == Some(true)
+            && check.get("tenant_role_binding_valid").and_then(serde_json::Value::as_bool) == Some(true)
+            && check.get("revision_id").and_then(serde_json::Value::as_str).is_some()
+            && check.get("verification").and_then(|value| value.get("state")).and_then(serde_json::Value::as_str) == Some("protected")
+            && check.get("latest_drift_state").and_then(serde_json::Value::as_str) == Some("protected")
+            && check.get("drift_event_fresh").and_then(serde_json::Value::as_bool) == Some(true);
+        if !protected {
+            return false;
+        }
+    }
+    payload.policy_revision == maximum_revision
+}
+
 /// Per-connection fail-closed check against the Control Plane's latest verified
 /// PostgreSQL posture. Every response is bound to a fresh one-time request ID,
 /// node, target, database and tenant; it includes signed per-registration
@@ -350,6 +406,10 @@ impl PolicyAdmissionClient {
         verifier.update(&payload_bytes);
         verifier.verify_slice(&signature)
             .map_err(|_| io::Error::new(io::ErrorKind::PermissionDenied, "Policy admission signature verification failed"))?;
+        if !policy_admission_evidence_is_consistent(payload, &self.target_id, database_name, tenant_id) {
+            return Err(io::Error::new(io::ErrorKind::PermissionDenied,
+                "Signed policy admission evidence is incomplete or bound to a different tenant posture"));
+        }
         let allow = payload.decision == "allow";
         if !allow {
             return Err(io::Error::new(io::ErrorKind::PermissionDenied,
@@ -1675,3 +1735,83 @@ mod node_heartbeat_signature_tests {
     }
 
 }
+#[cfg(test)]
+mod policy_admission_evidence_tests {
+    use super::{policy_admission_evidence_is_consistent, NodePolicyStatusPayload};
+    use serde_json::json;
+
+    fn payload(decision: &str, checks: serde_json::Value) -> NodePolicyStatusPayload {
+        NodePolicyStatusPayload {
+            node_id: "node-1".into(),
+            request_timestamp: 1_800_000_000,
+            request_id: "request-1".into(),
+            target_id: "target-1".into(),
+            database_name: "app".into(),
+            tenant_id: "tenant-a".into(),
+            decision: decision.into(),
+            policy_revision: if decision == "allow" { Some(7) } else { None },
+            reason: if decision == "allow" { "verified".into() } else { "policy_not_verified".into() },
+            evidence: json!({
+                "schema_version": "proxima.postgresql.policy-admission-evidence.v1",
+                "target_id": "target-1",
+                "database_name": "app",
+                "tenant_id": "tenant-a",
+                "observed_at": 1_800_000_000,
+                "decision": decision,
+                "reason": if decision == "allow" { "verified" } else { "policy_not_verified" },
+                "checks": checks
+            }),
+            issued_at: 1_800_000_000,
+            expires_at: 1_800_000_015,
+        }
+    }
+
+    fn protected_check() -> serde_json::Value {
+        json!({
+            "revision_id": "revision-1",
+            "revision_version": 7,
+            "registration_enabled": true,
+            "connection_status": "reachable",
+            "schema_drift_detected": false,
+            "schema_fingerprint": "fingerprint",
+            "fingerprint_fresh": true,
+            "tenant_role_prefix_matches": true,
+            "tenant_role_binding_valid": true,
+            "verification": {"state": "protected"},
+            "latest_drift_state": "protected",
+            "drift_event_fresh": true,
+            "protected": true
+        })
+    }
+
+    #[test]
+    fn allow_requires_complete_matching_protected_evidence() {
+        let value = payload("allow", json!([protected_check()]));
+        assert!(policy_admission_evidence_is_consistent(&value, "target-1", "app", "tenant-a"));
+    }
+
+    #[test]
+    fn allow_rejects_empty_or_unprotected_checks() {
+        let empty = payload("allow", json!([]));
+        let mut blocked = protected_check();
+        blocked["tenant_role_binding_valid"] = json!(false);
+        let blocked = payload("allow", json!([blocked]));
+        assert!(!policy_admission_evidence_is_consistent(&empty, "target-1", "app", "tenant-a"));
+        assert!(!policy_admission_evidence_is_consistent(&blocked, "target-1", "app", "tenant-a"));
+    }
+
+    #[test]
+    fn evidence_is_bound_to_target_database_and_tenant() {
+        let value = payload("allow", json!([protected_check()]));
+        assert!(!policy_admission_evidence_is_consistent(&value, "other-target", "app", "tenant-a"));
+        assert!(!policy_admission_evidence_is_consistent(&value, "target-1", "other-db", "tenant-a"));
+        assert!(!policy_admission_evidence_is_consistent(&value, "target-1", "app", "tenant-b"));
+    }
+
+    #[test]
+    fn deny_evidence_may_have_no_registration_checks() {
+        let value = payload("deny", json!([]));
+        assert!(policy_admission_evidence_is_consistent(&value, "target-1", "app", "tenant-a"));
+    }
+}
+
