@@ -24,3 +24,5 @@ pub mod mongodb_adapter;
 pub mod redis_adapter;
 
 pub mod sql_server_adapter;
+
+pub mod cockroach_adapter;
