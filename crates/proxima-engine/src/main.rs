@@ -632,6 +632,12 @@ async fn main() -> io::Result<()> {
         .transpose()
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.to_string()))?;
 
+    let policy_admission = PolicyAdmissionClient::from_env(&config_tenant_role_prefix)?;
+    if policy_admission.is_some() && verifier.is_none() {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput,
+            "Signed policy admission requires PROXIMA_TENANT_SIGNING_KEY and mandatory tenant-token verification"));
+    }
+
     let client_acceptor = client_acceptor(&config)?;
     let upstream_connector = upstream_connector(&config)?;
 
@@ -934,6 +940,7 @@ async fn main() -> io::Result<()> {
             if let Some(probe_listener) = probe_listener {
                 let probe_upstream = config.upstream_addr.clone();
                 let probe_verifier = verifier.clone();
+                let probe_policy_admission = policy_admission.clone();
                 let probe_role_prefix = config_tenant_role_prefix.clone();
                 let probe_connect_timeout = config.upstream_connect_timeout;
                 let probe_client_tls_timeout = config.tls_handshake_timeout;
@@ -972,6 +979,7 @@ async fn main() -> io::Result<()> {
                                 peer,
                                 &upstream,
                                 verifier.as_ref(),
+                                probe_policy_admission.as_deref(),
                                 &role_prefix,
                                 probe_connect_timeout,
                                 None,
@@ -1048,6 +1056,7 @@ async fn main() -> io::Result<()> {
                 let security_event_client = security_event_client.clone();
                 let upstream = config.upstream_addr.clone();
                 let verifier = verifier.clone();
+                let policy_admission = policy_admission.clone();
                 let tenant_role_prefix = config_tenant_role_prefix.clone();
                 let upstream_connect_timeout = config.upstream_connect_timeout;
                 let client_acceptor = client_acceptor.clone();
@@ -1065,6 +1074,7 @@ async fn main() -> io::Result<()> {
                         peer,
                         &upstream,
                         verifier.as_ref(),
+                        policy_admission.as_deref(),
                         &tenant_role_prefix,
                         upstream_connect_timeout,
                         client_acceptor.as_ref(),
@@ -1117,6 +1127,7 @@ async fn handle_connection(
     peer: std::net::SocketAddr,
     upstream_addr: &str,
     verifier: Option<&TenantTokenVerifier>,
+    policy_admission: Option<&PolicyAdmissionClient>,
     tenant_role_prefix: &str,
     upstream_connect_timeout: std::time::Duration,
     client_acceptor: Option<&tokio_rustls::TlsAcceptor>,
@@ -1177,6 +1188,10 @@ async fn handle_connection(
 
     let (client, upstream, session) =
         establish(client, upstream, verifier, tenant_role_prefix).await?;
+
+    if let (Some(admission), Some(context)) = (policy_admission, session.tenant_context.as_ref()) {
+        admission.authorize(&session.database_name, &context.tenant_id).await?;
+    }
 
     if let Some(context) = session.tenant_context.as_ref().filter(|c| c.emergency) {
         let node_id = std::env::var("PROXIMA_NODE_ID").unwrap_or_default();
