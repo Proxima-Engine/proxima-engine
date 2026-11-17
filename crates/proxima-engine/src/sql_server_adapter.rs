@@ -190,7 +190,6 @@ impl SqlServerCatalogAdapter {
                     "partitions": partition_metadata.iter().map(|partition| json!({
                         "index_id": partition.get::<i32,_>("index_id").unwrap_or_default(),
                         "partition_number": partition.get::<i32,_>("partition_number").unwrap_or_default(),
-                        "rows": partition.get::<i64,_>("rows").unwrap_or_default(),
                         "compression": partition.get::<&str,_>("data_compression_desc").unwrap_or_default(),
                         "data_space": partition.get::<&str,_>("data_space_name").unwrap_or_default(),
                         "partition_scheme": partition.get::<&str,_>("partition_scheme"),
