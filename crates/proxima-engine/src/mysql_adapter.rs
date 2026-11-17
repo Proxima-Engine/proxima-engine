@@ -50,6 +50,8 @@ impl MySqlCatalogAdapter {
         if !matches!(kind, DatabaseKind::MySql | DatabaseKind::MariaDb) {
             return Err(error("invalid_mysql_adapter_kind", "The MySQL wire adapter only accepts MySQL or MariaDB targets."));
         }
+        MySqlConnectOptions::from_str(&connection_url)
+            .map_err(|_| error("invalid_mysql_connection_config", "The MySQL connection URL could not be parsed."))?;
         Ok(Self { target_id, database_name, connection_url, kind })
     }
 
@@ -504,6 +506,12 @@ mod tests {
         assert!(!descriptor.capabilities.controlled_policy_deployment);
         assert!(!descriptor.capabilities.runtime_fail_closed_admission);
         assert!(!descriptor.capabilities.signed_security_evidence);
+    }
+
+    #[test]
+    fn rejects_invalid_connection_urls_before_network_access() {
+        assert!(MySqlCatalogAdapter::new("target", "app", "not-a-mysql-url", DatabaseKind::MySql).is_err());
+        assert!(MySqlCatalogAdapter::new("target", "app", "postgres://localhost/app", DatabaseKind::MySql).is_err());
     }
 
     #[test]
