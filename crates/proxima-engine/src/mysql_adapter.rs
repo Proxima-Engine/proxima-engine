@@ -528,6 +528,46 @@ mod tests {
         ]));
     }
 
+    #[tokio::test]
+    async fn discovery_rejects_a_different_registered_target_before_connecting() {
+        let adapter = MySqlCatalogAdapter::new("target-a", "app", "mysql://localhost/app", DatabaseKind::MySql).unwrap();
+        let request = DiscoveryRequest {
+            target: AdapterTarget { target_id: "target-b".into(), database_name: "app".into(), namespace: None },
+            namespace: None,
+        };
+        assert_eq!(adapter.discover(&request).await.unwrap_err().code, "mysql_target_mismatch");
+    }
+
+    #[tokio::test]
+    async fn verification_never_allows_catalog_only_mysql_evidence() {
+        use crate::security_core::{ProtectedResource, ResourceRef};
+        let adapter = MySqlCatalogAdapter::new("target", "app", "mysql://localhost/app", DatabaseKind::MySql).unwrap();
+        let policy = TenantSecurityPolicy {
+            schema_version: SECURITY_MODEL_VERSION.into(),
+            policy_id: "tenant-policy".into(),
+            revision: 1,
+            tenant_identity_claim: "tenant_id".into(),
+            resources: vec![ProtectedResource {
+                resource: ResourceRef { namespace: Some("app".into()), name: "records".into(), kind: ResourceKind::Table },
+                tenant_key: "tenant_id".into(),
+                operations: vec![Operation::Read],
+            }],
+        };
+        let snapshot = InspectionSnapshot {
+            database_kind: DatabaseKind::MySql,
+            target: AdapterTarget { target_id: "target".into(), database_name: "app".into(), namespace: None },
+            completeness: InspectionCompleteness::Complete,
+            posture: SecurityPosture::Verified,
+            resources: Vec::new(),
+            findings: Vec::new(),
+            fingerprint: Some("a".repeat(64)),
+            observed_at: "2026-11-17T00:00:00Z".into(),
+        };
+        let report = adapter.verify(&policy, &snapshot).await.unwrap();
+        assert_eq!(report.posture, SecurityPosture::Blocked);
+        assert!(!report.findings.is_empty());
+    }
+
     #[test]
     fn rejects_unbounded_or_empty_target_configuration() {
         assert!(MySqlCatalogAdapter::new("", "app", "mysql://localhost/app", DatabaseKind::MySql).is_err());
