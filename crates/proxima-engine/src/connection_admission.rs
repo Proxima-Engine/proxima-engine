@@ -151,6 +151,9 @@ mod tests {
         DatabaseKind, InspectionCompleteness, Operation, SecurityFinding, SecurityPosture,
         SECURITY_MODEL_VERSION,
     };
+    use crate::tenant_identity::{
+        TenantIdentityAuthority, TenantIdentityClaims, TenantIdentityExpectation,
+    };
 
     fn authority() -> PolicyEvidenceAuthority {
         PolicyEvidenceAuthority::new(vec![11; 32], vec![19; 32]).unwrap()
@@ -195,6 +198,53 @@ mod tests {
 
     fn expected() -> AdmissionExpectation<'static> {
         AdmissionExpectation { database_kind: DatabaseKind::PostgreSql, policy_id: "tenant-boundary", policy_revision: 3, target_id: "prod-db", tenant_id: "tenant-a" }
+    }
+
+    #[test]
+    fn scoped_identity_and_admission_are_consumed_atomically() {
+        let admission_authority = authority();
+        let identity_authority = TenantIdentityAuthority::new(vec![31; 32]).unwrap();
+        let gate = ConnectionAdmissionGate::new();
+        let (evidence, first_admission) = signed_pair(&admission_authority);
+        let identity_claims = TenantIdentityClaims {
+            schema_version: "proxima.tenant-identity.v1".into(),
+            tenant_id: "tenant-a".into(),
+            principal_id: "app-service".into(),
+            target_id: "prod-db".into(),
+            database_kind: DatabaseKind::PostgreSql,
+            policy_id: "tenant-boundary".into(),
+            policy_revision: 3,
+            request_id: "550e8400-e29b-41d4-a716-446655440000".into(),
+            issued_at_unix: 1_900_000_001,
+            expires_at_unix: 1_900_000_030,
+        };
+        let token = identity_authority.sign(&identity_claims, 1_900_000_001).unwrap();
+        let expected = TenantIdentityExpectation {
+            tenant_id: "tenant-a",
+            principal_id: "app-service",
+            target_id: "prod-db",
+            database_kind: DatabaseKind::PostgreSql,
+            policy_id: "tenant-boundary",
+            policy_revision: 3,
+        };
+        let verified = identity_authority.verify(&token, expected, 1_900_000_002).unwrap();
+        assert_eq!(
+            gate.consume_for_identity(
+                &admission_authority, &first_admission, &evidence, &verified,
+                "conn-1", 1_900_000_002,
+            ),
+            Ok(AccessDecision::Allow),
+        );
+
+        let second_admission = admission_authority.issue_admission(&evidence, 1_900_000_004, 30).unwrap();
+        let verified_again = identity_authority.verify(&token, expected, 1_900_000_005).unwrap();
+        assert_eq!(
+            gate.consume_for_identity(
+                &admission_authority, &second_admission, &evidence, &verified_again,
+                "conn-2", 1_900_000_005,
+            ).unwrap_err().code,
+            "admission_replay_detected",
+        );
     }
 
     #[test]
