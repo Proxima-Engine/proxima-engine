@@ -2,7 +2,7 @@
 
 This release adds reviewable native policy-plan generation for SQL Server, MySQL, MariaDB, MongoDB and Redis. These are early adapter-development capabilities, not production database integrations.
 
-The compilers live in `crates/proxima-engine/src/native_policy_plans.rs`. They accept the shared `proxima.security.v1` policy model and return `CompiledPolicy` values with native, reviewable changes. They do not open database connections, execute DDL, provision credentials, inspect live catalogs, verify effective permissions, detect drift, or admit runtime traffic.
+The compilers live in `crates/proxima-engine/src/native_policy_plans.rs` and are exposed through `proxima-policy-guard compile-plan <database> <policy.json>`. They accept the shared `proxima.security.v1` policy model and return `CompiledPolicy` values with native, reviewable changes. They do not open database connections, execute DDL, provision credentials, inspect live catalogs, verify effective permissions, detect drift, or admit runtime traffic.
 
 ## Current compiler behavior
 
