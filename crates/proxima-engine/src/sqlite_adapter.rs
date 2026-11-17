@@ -219,7 +219,16 @@ impl SqliteCatalogAdapter {
         let file_metadata = std::fs::metadata(&self.database_path)
             .map_err(|_| error("sqlite_file_metadata_unavailable", "The SQLite database file metadata could not be read."))?;
         let parent_metadata = self.database_path.parent().and_then(|path| std::fs::metadata(path).ok());
-        let filesystem = filesystem_permissions(&file_metadata, parent_metadata.as_ref());
+        let wal_path = PathBuf::from(format!("{}-wal", self.database_path.display()));
+        let shm_path = PathBuf::from(format!("{}-shm", self.database_path.display()));
+        let wal_metadata = std::fs::metadata(wal_path).ok();
+        let shm_metadata = std::fs::metadata(shm_path).ok();
+        let filesystem = filesystem_permissions(
+            &file_metadata,
+            parent_metadata.as_ref(),
+            wal_metadata.as_ref(),
+            shm_metadata.as_ref(),
+        );
         if filesystem.unsafe_permissions {
             findings.push(SecurityFinding {
                 code: "sqlite_filesystem_permissions_too_broad".into(),
@@ -399,25 +408,46 @@ struct FilesystemPermissions {
     unsafe_permissions: bool,
     file_mode: Option<u32>,
     parent_mode: Option<u32>,
+    wal_mode: Option<u32>,
+    shm_mode: Option<u32>,
 }
 
-fn filesystem_permissions(file: &std::fs::Metadata, parent: Option<&std::fs::Metadata>) -> FilesystemPermissions {
+fn filesystem_permissions(
+    file: &std::fs::Metadata,
+    parent: Option<&std::fs::Metadata>,
+    wal: Option<&std::fs::Metadata>,
+    shm: Option<&std::fs::Metadata>,
+) -> FilesystemPermissions {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         let file_mode = file.permissions().mode() & 0o777;
         let parent_mode = parent.map(|metadata| metadata.permissions().mode() & 0o777);
+        let wal_mode = wal.map(|metadata| metadata.permissions().mode() & 0o777);
+        let shm_mode = shm.map(|metadata| metadata.permissions().mode() & 0o777);
+        let sidecar_is_unsafe = wal_mode.into_iter().chain(shm_mode).any(|mode| (mode & 0o077) != 0);
         FilesystemPermissions {
             assessed: true,
-            unsafe_permissions: (file_mode & 0o077) != 0 || parent_mode.map_or(true, |mode| (mode & 0o077) != 0),
+            unsafe_permissions: (file_mode & 0o077) != 0
+                || parent_mode.map_or(true, |mode| (mode & 0o077) != 0)
+                || sidecar_is_unsafe,
             file_mode: Some(file_mode),
             parent_mode,
+            wal_mode,
+            shm_mode,
         }
     }
     #[cfg(not(unix))]
     {
-        let _ = (file, parent);
-        FilesystemPermissions { assessed: false, unsafe_permissions: true, file_mode: None, parent_mode: None }
+        let _ = (file, parent, wal, shm);
+        FilesystemPermissions {
+            assessed: false,
+            unsafe_permissions: true,
+            file_mode: None,
+            parent_mode: None,
+            wal_mode: None,
+            shm_mode: None,
+        }
     }
 }
 
