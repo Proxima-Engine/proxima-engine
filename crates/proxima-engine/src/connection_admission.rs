@@ -9,8 +9,19 @@ use crate::policy_evidence::{
     SignedPolicyAdmission, SignedPolicyEvidence,
 };
 use crate::security_core::AccessDecision;
+use crate::tenant_identity::VerifiedTenantIdentity;
 use std::collections::HashMap;
 use std::sync::Mutex;
+
+fn validate_connection_id(connection_id: &str) -> Result<(), EvidenceError> {
+    if connection_id.trim().is_empty() || connection_id.len() > 256 || connection_id.contains('\0') {
+        return Err(EvidenceError {
+            code: "invalid_connection_id",
+            detail: "A non-empty, bounded protocol connection identifier is required.",
+        });
+    }
+    Ok(())
+}
 
 #[derive(Default)]
 pub struct ConnectionAdmissionGate {
@@ -34,42 +45,89 @@ impl ConnectionAdmissionGate {
         connection_id: &str,
         now_unix: i64,
     ) -> Result<AccessDecision, EvidenceError> {
-        if connection_id.trim().is_empty() || connection_id.len() > 256 {
-            return Err(EvidenceError {
-                code: "invalid_connection_id",
-                detail: "A non-empty, bounded protocol connection identifier is required.",
-            });
-        }
-
+        validate_connection_id(connection_id)?;
         // Cryptographic, freshness, target, revision and tenant checks happen
         // before consuming the replay slot. Invalid attempts cannot burn a
         // legitimate admission belonging to a valid connection.
         authority.verify_admission(admission, evidence, expected, now_unix)?;
+        self.consume_verified(admission, None, connection_id, now_unix)
+    }
 
+    /// Consume both a verified tenant identity request ID and its matching
+    /// policy admission in one critical section. This prevents a caller from
+    /// reusing one scoped identity to obtain multiple connection admissions.
+    pub fn consume_for_identity(
+        &self,
+        authority: &PolicyEvidenceAuthority,
+        admission: &SignedPolicyAdmission,
+        evidence: &SignedPolicyEvidence,
+        identity: &VerifiedTenantIdentity,
+        connection_id: &str,
+        now_unix: i64,
+    ) -> Result<AccessDecision, EvidenceError> {
+        validate_connection_id(connection_id)?;
+        if identity.issued_at_unix() > now_unix || identity.expires_at_unix() <= now_unix {
+            return Err(EvidenceError {
+                code: "tenant_identity_expired",
+                detail: "The verified tenant identity is not currently valid.",
+            });
+        }
+        authority.verify_admission(
+            admission,
+            evidence,
+            identity.admission_expectation(),
+            now_unix,
+        )?;
+        self.consume_verified(
+            admission,
+            Some((identity.request_id(), identity.expires_at_unix())),
+            connection_id,
+            now_unix,
+        )
+    }
+
+    fn consume_verified(
+        &self,
+        admission: &SignedPolicyAdmission,
+        identity_request: Option<(&str, i64)>,
+        connection_id: &str,
+        now_unix: i64,
+    ) -> Result<AccessDecision, EvidenceError> {
         let mut consumed = self.consumed.lock().map_err(|_| EvidenceError {
             code: "admission_gate_unavailable",
             detail: "The in-process admission replay registry is unavailable; access is denied.",
         })?;
-
         consumed.retain(|_, (_, expires_at)| *expires_at > now_unix);
-        // Bound memory under admission floods. Reject rather than evicting live
-        // entries: eviction would make a still-valid signed envelope replayable.
+
+        // Never evict live entries: eviction would make a still-valid signed
+        // admission or identity request replayable.
         const MAX_ACTIVE_ADMISSIONS: usize = 100_000;
-        if consumed.len() >= MAX_ACTIVE_ADMISSIONS {
+        let needed = if identity_request.is_some() { 2 } else { 1 };
+        if consumed.len().saturating_add(needed) > MAX_ACTIVE_ADMISSIONS {
             return Err(EvidenceError {
                 code: "admission_capacity_exceeded",
                 detail: "The replay registry reached its safety limit; new admissions are denied until entries expire.",
             });
         }
-        let key = admission.signature.clone();
-        if consumed.contains_key(&key) {
+
+        let admission_key = format!("admission:{}", admission.signature);
+        let identity_key = identity_request.map(|(request_id, _)| format!("identity:{request_id}"));
+        if consumed.contains_key(&admission_key)
+            || identity_key.as_ref().is_some_and(|key| consumed.contains_key(key))
+        {
             return Err(EvidenceError {
                 code: "admission_replay_detected",
-                detail: "This signed admission has already been consumed by a protocol connection.",
+                detail: "This signed admission or tenant identity request has already been consumed.",
             });
         }
 
-        consumed.insert(key, (connection_id.to_owned(), admission.expires_at_unix));
+        consumed.insert(
+            admission_key,
+            (connection_id.to_owned(), admission.expires_at_unix),
+        );
+        if let (Some(identity_key), Some((_, identity_expiry))) = (identity_key, identity_request) {
+            consumed.insert(identity_key, (connection_id.to_owned(), identity_expiry));
+        }
         Ok(AccessDecision::Allow)
     }
 
