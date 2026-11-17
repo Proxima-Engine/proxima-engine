@@ -170,7 +170,7 @@ mod tests {
         ProtectedResource, ResourceKind, ResourceRef, SECURITY_MODEL_VERSION,
     };
 
-    struct FixtureAdapter { omit_read: bool, wrong_tenant_key: bool, lie_about_previous: bool }
+    struct FixtureAdapter { omit_read: bool, wrong_tenant_key: bool, lie_about_previous: bool, omit_fingerprint: bool }
 
     impl DatabaseAdapter for FixtureAdapter {
         fn descriptor(&self) -> AdapterDescriptor {
@@ -197,6 +197,7 @@ mod tests {
             if self.omit_read { operations.retain(|operation| *operation != Operation::Read); }
             let mut resource = request.policy.resources[0].clone();
             if self.wrong_tenant_key { resource.tenant_key = "account_id".into(); }
+            let resource_fingerprint = if self.omit_fingerprint { None } else { Some("a".repeat(64)) };
             Box::pin(async move {
                 Ok(InspectionSnapshot {
                     database_kind: DatabaseKind::PostgreSql,
@@ -209,10 +210,10 @@ mod tests {
                         posture: SecurityPosture::Verified,
                         verified_operations: operations,
                         findings: Vec::new(),
-                        fingerprint: Some("a".repeat(64)),
+                        fingerprint: resource_fingerprint,
                     }],
                     findings: Vec::new(),
-                    fingerprint: Some("a".repeat(64)),
+                    fingerprint: if self.omit_fingerprint { None } else { Some("a".repeat(64)) },
                     observed_at: "2026-11-17T00:00:00Z".into(),
                 })
             })
@@ -290,7 +291,7 @@ mod tests {
 
     fn coordinator(omit_read: bool) -> SecurityCoreCoordinator {
         let mut registry = AdapterRegistry::default();
-        registry.register(std::sync::Arc::new(FixtureAdapter { omit_read, wrong_tenant_key: false, lie_about_previous: false })).unwrap();
+        registry.register(std::sync::Arc::new(FixtureAdapter { omit_read, wrong_tenant_key: false, lie_about_previous: false, omit_fingerprint: false })).unwrap();
         SecurityCoreCoordinator::new(registry)
     }
 
@@ -300,6 +301,22 @@ mod tests {
         assert!(!is_sha256("not-a-digest"));
         assert!(!is_sha256(&"g".repeat(64)));
         assert!(is_sha256(&"a".repeat(64)));
+    }
+
+    #[tokio::test]
+    async fn missing_native_fingerprint_fails_closed() {
+        let mut registry = AdapterRegistry::default();
+        registry.register(std::sync::Arc::new(FixtureAdapter {
+            omit_read: false,
+            wrong_tenant_key: false,
+            lie_about_previous: false,
+            omit_fingerprint: true,
+        })).unwrap();
+        let coordinator = SecurityCoreCoordinator::new(registry);
+        assert_eq!(
+            coordinator.inspect_and_verify(DatabaseKind::PostgreSql, &request()).await,
+            Err(SecurityCoreError::InvalidFingerprint)
+        );
     }
 
     #[tokio::test]
@@ -320,7 +337,7 @@ mod tests {
     #[test]
     fn compilation_rejects_a_different_tenant_ownership_key() {
         let mut registry = AdapterRegistry::default();
-        registry.register(std::sync::Arc::new(FixtureAdapter { omit_read: false, wrong_tenant_key: true, lie_about_previous: false })).unwrap();
+        registry.register(std::sync::Arc::new(FixtureAdapter { omit_read: false, wrong_tenant_key: true, lie_about_previous: false, omit_fingerprint: false })).unwrap();
         let coordinator = SecurityCoreCoordinator::new(registry);
         assert_eq!(coordinator.compile(DatabaseKind::PostgreSql, &request().policy), Err(SecurityCoreError::InvalidCompilation));
     }
@@ -328,7 +345,7 @@ mod tests {
     #[tokio::test]
     async fn mismatched_native_tenant_key_denies_admission() {
         let mut registry = AdapterRegistry::default();
-        registry.register(std::sync::Arc::new(FixtureAdapter { omit_read: false, wrong_tenant_key: true, lie_about_previous: false })).unwrap();
+        registry.register(std::sync::Arc::new(FixtureAdapter { omit_read: false, wrong_tenant_key: true, lie_about_previous: false, omit_fingerprint: false })).unwrap();
         let coordinator = SecurityCoreCoordinator::new(registry);
         let report = coordinator.inspect_and_verify(DatabaseKind::PostgreSql, &request()).await.unwrap();
         assert_eq!(report.access_decision(), AccessDecision::Deny);
@@ -342,6 +359,7 @@ mod tests {
             omit_read: false,
             wrong_tenant_key: false,
             lie_about_previous: true,
+            omit_fingerprint: false,
         })).unwrap();
         let coordinator = SecurityCoreCoordinator::new(registry);
         let target = request().target;
