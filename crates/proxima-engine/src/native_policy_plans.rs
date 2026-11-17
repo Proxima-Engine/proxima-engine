@@ -125,16 +125,18 @@ pub fn compile_mysql_database_boundary(policy: &TenantSecurityPolicy, kind: Data
         if resource.operations.contains(&Operation::Update) { grants.push("UPDATE"); }
         if resource.operations.contains(&Operation::Delete) { grants.push("DELETE"); }
         let sql = if grants.is_empty() { return Err(error("empty_privilege_set", "No supported table operations were requested.")); }
-            else { format!("GRANT {} ON \x60${{tenant_database}}\x60.{table} TO '${{tenant_principal}}'@'%';", grants.join(", ")) };
+            else { format!("GRANT {} ON \x60${{tenant_database}}\x60.{table} TO '${{tenant_principal}}'@'${{trusted_application_host}}';", grants.join(", ")) };
         changes.push(resource_change(resource, "mysql_family_per_tenant_database_grant_template", json!({
             "sql_template": [
-                "CREATE USER '${tenant_principal}'@'%' IDENTIFIED BY '${secret_manager_generated_password}';",
+                "CREATE USER '${tenant_principal}'@'${trusted_application_host}' IDENTIFIED BY '${secret_manager_generated_password}';",
                 sql
             ],
             "required_isolation_model": "one_database_per_tenant",
             "database_placeholder": "${tenant_database}",
             "principal_placeholder": "${tenant_principal}",
             "credential_placeholder": "${secret_manager_generated_password}",
+            "host_placeholder": "${trusted_application_host}",
+            "host_placeholder_requirement": "Replace with the exact trusted application egress host or a narrowly scoped network identity; never use an unrestricted wildcard host.",
             "shared_table_row_level_isolation": false,
             "limitations": [
                 "MySQL and MariaDB have no native row-level security predicate equivalent.",
