@@ -86,9 +86,12 @@ verification denies the connection.
 
 The Control Plane refreshes PostgreSQL catalog fingerprints every 30 seconds.
 The admission endpoint denies when the last fingerprint check is older than
-90 seconds. All enabled registrations for the requested tenant on the target
-must have their latest revision applied and verified as protected. A tenant
-with no registered protected resources is denied when admission is enabled.
+90 seconds. Every registration on the target that maps to the requested tenant
+must be enabled and have its latest revision applied and verified as protected;
+a disabled, unknown, stale or drifted registration denies admission. The
+Control Plane also checks that tenant roles have no access to unregistered
+application tables. A tenant with no registered protected resources is denied
+when admission is enabled.
 
 The Engine rechecks active tenant sessions every five seconds. Decisions are
 shared through a bounded five-second per-tenant cache, so multiple sessions
