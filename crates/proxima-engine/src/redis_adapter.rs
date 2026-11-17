@@ -82,14 +82,21 @@ impl RedisCatalogAdapter {
         for line in &acl_lines {
             let Some((username, tokens)) = parse_acl_line(line) else { continue };
             let patterns = tokens.iter().filter_map(|token| {
-                token.strip_prefix('~').or_else(|| token.strip_prefix("%R~"))
-                    .or_else(|| token.strip_prefix("%W~"))
-                    .map(str::to_owned)
-                    .or_else(|| if token == "allkeys" { Some("*".into()) } else { None })
+                if let Some(pattern) = token.strip_prefix("%R~") {
+                    Some((pattern.to_owned(), "read"))
+                } else if let Some(pattern) = token.strip_prefix("%W~") {
+                    Some((pattern.to_owned(), "write"))
+                } else if let Some(pattern) = token.strip_prefix('~') {
+                    Some((pattern.to_owned(), "read_write"))
+                } else if token == "allkeys" {
+                    Some(("*".into(), "read_write"))
+                } else {
+                    None
+                }
             }).collect::<Vec<_>>();
             let command_rules = tokens.iter().filter(|token| token.starts_with('+') || token.starts_with('-')).cloned().collect::<Vec<_>>();
             let channel_rules = tokens.iter().filter(|token| token.starts_with('&')).cloned().collect::<Vec<_>>();
-            for pattern in patterns {
+            for (pattern, pattern_mode) in patterns {
                 if pattern == "*" || pattern == "**" { broad_users.push(username.to_owned()); }
                 resources.push(DiscoveredResource {
                     namespace: Some(self.database_index.to_string()),
@@ -99,6 +106,7 @@ impl RedisCatalogAdapter {
                     attributes: json!({
                         "acl_username": username,
                         "key_pattern": pattern,
+                        "key_pattern_mode": pattern_mode,
                         "command_rules": command_rules,
                         "channel_rules": channel_rules,
                         "user_flags": tokens.iter().filter(|token| !token.starts_with('#') && !token.starts_with('>') && !token.starts_with('~') && !token.starts_with('&') && !token.starts_with('%') && !token.starts_with('+') && !token.starts_with('-')).cloned().collect::<Vec<_>>()
@@ -191,12 +199,33 @@ impl DatabaseAdapter for RedisCatalogAdapter {
                 if discovery.resources.iter().any(|resource| resource.name == "*" || resource.name == "**") {
                     resource_findings.push(finding("redis_unrestricted_key_pattern", &protected.resource, "At least one Redis ACL user has unrestricted key access."));
                 }
+                let needs_read_scope = protected.operations.contains(&Operation::Read);
+                let needs_write_scope = protected.operations.iter().any(|operation| matches!(operation, Operation::Create | Operation::Update | Operation::Delete));
+                let key_scope_coverage = matching.iter().any(|resource| {
+                    let Some(owner) = resource.owner.as_deref() else { return false };
+                    let same_user = matching.iter().filter(|other| other.owner.as_deref() == Some(owner));
+                    let mut read_scope = false;
+                    let mut write_scope = false;
+                    for candidate in same_user {
+                        match candidate.attributes["key_pattern_mode"].as_str() {
+                            Some("read_write") => { read_scope = true; write_scope = true; }
+                            Some("read") => read_scope = true,
+                            Some("write") => write_scope = true,
+                            _ => {}
+                        }
+                    }
+                    (!needs_read_scope || read_scope) && (!needs_write_scope || write_scope)
+                });
+                if !key_scope_coverage {
+                    resource_findings.push(finding("redis_acl_key_scope_incomplete", &protected.resource, "No single ACL user has key-pattern permissions covering every read and write scope required by this policy."));
+                }
                 let required_commands = required_commands(&protected.operations);
                 let explicit_command_coverage = matching.iter().any(|resource| {
                     let rules = resource.attributes["command_rules"].as_array();
-                    rules.is_some_and(|rules| required_commands.iter().all(|command| {
-                        rules.iter().any(|rule| rule.as_str().is_some_and(|value| value == format!("+{command}")))
-                    }))
+                    rules.is_some_and(|rules| {
+                        required_commands.iter().all(|command| rules.iter().any(|rule| rule.as_str().is_some_and(|value| value == format!("+{command}"))))
+                            && !rules.iter().filter_map(|rule| rule.as_str()).any(|rule| rule.starts_with("-@") || required_commands.iter().any(|command| rule == format!("-{command}")))
+                    })
                 });
                 if !explicit_command_coverage {
                     resource_findings.push(finding("redis_acl_command_coverage_incomplete", &protected.resource, "No single tenant ACL user explicitly grants every command required by this policy; command categories are not treated as proof of least-privilege coverage."));
