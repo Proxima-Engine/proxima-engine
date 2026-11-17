@@ -100,9 +100,10 @@ impl SqlServerCatalogAdapter {
         let mut resources = Vec::new();
 
         let table_rows = client.simple_query(
-            "SELECT s.name AS schema_name,t.name AS object_name,t.object_id,COALESCE(USER_NAME(t.principal_id),USER_NAME(s.principal_id)) AS owner_name,t.temporal_type_desc,t.is_memory_optimized,t.is_filetable,t.is_tracked_by_cdc FROM sys.tables t JOIN sys.schemas s ON s.schema_id=t.schema_id ORDER BY s.name,t.name"
+            "SELECT TOP (10001) s.name AS schema_name,t.name AS object_name,t.object_id,COALESCE(USER_NAME(t.principal_id),USER_NAME(s.principal_id)) AS owner_name,t.temporal_type_desc,t.is_memory_optimized,t.is_filetable,t.is_tracked_by_cdc FROM sys.tables t JOIN sys.schemas s ON s.schema_id=t.schema_id ORDER BY s.name,t.name"
         ).await.map_err(db_error)?.into_first_result().await.map_err(db_error)?;
-        for row in table_rows {
+        let table_inventory_truncated = table_rows.len() > 10_000;
+        for row in table_rows.into_iter().take(10_000) {
             let schema = row.get::<&str,_>("schema_name").unwrap_or_default().to_owned();
             if request.namespace.as_deref().is_some_and(|wanted| wanted != schema.as_str()) { continue; }
             let name = row.get::<&str,_>("object_name").unwrap_or_default().to_owned();
@@ -217,9 +218,10 @@ impl SqlServerCatalogAdapter {
         }
 
         let view_rows = client.simple_query(
-            "SELECT s.name AS schema_name,v.name AS object_name,v.object_id,v.with_check_option,CONVERT(bit,OBJECTPROPERTY(v.object_id,'IsSchemaBound')) AS is_schema_bound,m.definition,USER_NAME(o.principal_id) AS owner_name FROM sys.views v JOIN sys.schemas s ON s.schema_id=v.schema_id JOIN sys.objects o ON o.object_id=v.object_id LEFT JOIN sys.sql_modules m ON m.object_id=v.object_id ORDER BY s.name,v.name"
+            "SELECT TOP (10001) s.name AS schema_name,v.name AS object_name,v.object_id,v.with_check_option,CONVERT(bit,OBJECTPROPERTY(v.object_id,'IsSchemaBound')) AS is_schema_bound,m.definition,USER_NAME(o.principal_id) AS owner_name FROM sys.views v JOIN sys.schemas s ON s.schema_id=v.schema_id JOIN sys.objects o ON o.object_id=v.object_id LEFT JOIN sys.sql_modules m ON m.object_id=v.object_id ORDER BY s.name,v.name"
         ).await.map_err(db_error)?.into_first_result().await.map_err(db_error)?;
-        for row in view_rows {
+        let view_inventory_truncated = view_rows.len() > 10_000;
+        for row in view_rows.into_iter().take(10_000) {
             let schema = row.get::<&str,_>("schema_name").unwrap_or_default().to_owned();
             if request.namespace.as_deref().is_some_and(|wanted| wanted != schema.as_str()) { continue; }
             resources.push(DiscoveredResource {
@@ -236,9 +238,10 @@ impl SqlServerCatalogAdapter {
         }
 
         let routine_rows = client.simple_query(
-            "SELECT s.name AS schema_name,o.name AS object_name,o.type_desc,USER_NAME(o.principal_id) AS owner_name,m.definition,m.execute_as_principal_id,m.is_schema_bound FROM sys.objects o JOIN sys.schemas s ON s.schema_id=o.schema_id LEFT JOIN sys.sql_modules m ON m.object_id=o.object_id WHERE o.type IN ('P','FN','IF','TF','FS','FT') ORDER BY s.name,o.name"
+            "SELECT TOP (10001) s.name AS schema_name,o.name AS object_name,o.type_desc,USER_NAME(o.principal_id) AS owner_name,m.definition,m.execute_as_principal_id,m.is_schema_bound FROM sys.objects o JOIN sys.schemas s ON s.schema_id=o.schema_id LEFT JOIN sys.sql_modules m ON m.object_id=o.object_id WHERE o.type IN ('P','FN','IF','TF','FS','FT') ORDER BY s.name,o.name"
         ).await.map_err(db_error)?.into_first_result().await.map_err(db_error)?;
-        for row in routine_rows {
+        let routine_inventory_truncated = routine_rows.len() > 10_000;
+        for row in routine_rows.into_iter().take(10_000) {
             let schema = row.get::<&str,_>("schema_name").unwrap_or_default().to_owned();
             if request.namespace.as_deref().is_some_and(|wanted| wanted != schema.as_str()) { continue; }
             let type_desc = row.get::<&str,_>("type_desc").unwrap_or_default();
@@ -325,11 +328,19 @@ impl SqlServerCatalogAdapter {
                 "compatibility_level": row.get::<i32,_>("compatibility_level").unwrap_or_default(),
                 "containment": row.get::<&str,_>("containment_desc").unwrap_or_default()
             })),
+            "catalog_inventory_truncated": table_inventory_truncated || view_inventory_truncated || routine_inventory_truncated,
             "encrypted_transport_required": true
         });
         let fingerprint = digest(&serde_json::to_vec(&json!({"target":target_attributes,"resources":resources}))
             .map_err(|_| error("fingerprint_serialization_failed", "Could not serialize SQL Server catalog state."))?);
         let mut findings = Vec::new();
+        if table_inventory_truncated || view_inventory_truncated || routine_inventory_truncated {
+            findings.push(SecurityFinding {
+                code: "sql_server_catalog_inventory_truncated".into(),
+                resource: None,
+                detail: "The visible catalog exceeded the 10,000-table, 10,000-view or 10,000-routine safety bound; discovery is truncated.".into(),
+            });
+        }
         if !can_view_definition && !is_sysadmin {
             findings.push(SecurityFinding {
                 code: "sql_server_catalog_visibility_incomplete".into(),
@@ -361,7 +372,7 @@ impl SqlServerCatalogAdapter {
         Ok(DiscoverySnapshot {
             database_kind: DatabaseKind::SqlServer,
             target: request.target.clone(),
-            completeness: if can_view_definition || is_sysadmin { InspectionCompleteness::Complete } else { InspectionCompleteness::Incomplete },
+            completeness: if (can_view_definition || is_sysadmin) && !(table_inventory_truncated || view_inventory_truncated || routine_inventory_truncated) { InspectionCompleteness::Complete } else { InspectionCompleteness::Incomplete },
             target_attributes,
             resources,
             findings,
