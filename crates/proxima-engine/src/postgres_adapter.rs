@@ -343,7 +343,7 @@ impl DatabaseAdapter for PostgresCatalogAdapter {
             // role attributes, inherited memberships, and persistent role
             // settings can all widen access or disable row security.
             let role_rows = client.query(
-                "SELECT r.rolname, r.rolsuper, r.rolbypassrls, r.rolcreaterole, r.rolcreatedb, r.rolreplication, r.rolcanlogin, r.rolinherit, r.rolvaliduntil::text, COALESCE(s.setconfig::text, '') FROM pg_catalog.pg_roles r LEFT JOIN pg_catalog.pg_db_role_setting s ON s.setrole=r.oid ORDER BY r.rolname, s.setdatabase",
+                "SELECT r.rolname, r.rolsuper, r.rolbypassrls, r.rolcreaterole, r.rolcreatedb, r.rolreplication, r.rolcanlogin, r.rolinherit, r.rolvaliduntil::text, COALESCE(d.datname, 'ALL_DATABASES'), COALESCE(s.setconfig::text, '') FROM pg_catalog.pg_roles r LEFT JOIN pg_catalog.pg_db_role_setting s ON s.setrole=r.oid LEFT JOIN pg_catalog.pg_database d ON d.oid=s.setdatabase ORDER BY r.rolname, d.datname",
                 &[],
             ).await.map_err(db_error)?;
             state.extend(role_rows.into_iter().map(|row| json!({
@@ -357,7 +357,8 @@ impl DatabaseAdapter for PostgresCatalogAdapter {
                 "can_login": row.get::<_, bool>(6),
                 "inherit": row.get::<_, bool>(7),
                 "valid_until": row.get::<_, Option<String>>(8),
-                "settings": row.get::<_, String>(9)
+                "settings_database": row.get::<_, String>(9),
+                "settings": row.get::<_, String>(10)
             })));
 
             let membership_rows = client.query(
