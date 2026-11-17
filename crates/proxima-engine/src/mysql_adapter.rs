@@ -315,7 +315,7 @@ impl MySqlCatalogAdapter {
             }))).collect::<Result<Vec<_>,AdapterError>>()?,
             "tls_identity_verification_required": true
         });
-        let fingerprint = digest(&serde_json::to_vec(&json!({"target":target_attributes,"resources":resources}))
+        let fingerprint = digest(&serde_json::to_vec(&json!({"target_id":self.target_id,"database_name":self.database_name,"target":target_attributes,"resources":resources}))
             .map_err(|_| error("fingerprint_serialization_failed", "Could not serialize MySQL discovery results."))?);
         let observed_at: String = sqlx::query_scalar("SELECT DATE_FORMAT(UTC_TIMESTAMP(6),'%Y-%m-%dT%H:%i:%s.%fZ')")
             .fetch_one(&mut connection).await.map_err(db_error)?;
