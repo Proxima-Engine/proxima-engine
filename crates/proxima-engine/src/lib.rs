@@ -20,3 +20,5 @@ pub mod postgres_adapter;
 
 pub mod mysql_adapter;
 pub mod mongodb_adapter;
+
+pub mod redis_adapter;
