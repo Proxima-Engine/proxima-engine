@@ -166,6 +166,8 @@ impl CockroachCatalogAdapter {
         }
         let server_version: String = client.query_one("SELECT version()", &[]).await.map_err(db_error)?.get(0);
         let fingerprint = digest(&serde_json::to_vec(&json!({
+            "target_id": self.target_id,
+            "database_name": self.database_name,
             "server_version": server_version,
             "resources": state
         })).map_err(|_| error("cockroach_fingerprint_failed", "Catalog state could not be serialized."))?);
