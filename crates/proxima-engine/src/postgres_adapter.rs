@@ -715,6 +715,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn discovery_rejects_a_different_registered_target_before_connecting() {
+        let adapter = adapter();
+        let request = DiscoveryRequest {
+            target: AdapterTarget {
+                target_id: "other-target".into(),
+                database_name: "app_db".into(),
+                namespace: None,
+            },
+            namespace: None,
+        };
+        assert_eq!(adapter.discover(&request).await.unwrap_err().code, "postgres_target_mismatch");
+    }
+
+    #[tokio::test]
+    async fn discovery_rejects_invalid_namespace_before_connecting() {
+        let adapter = adapter();
+        let request = DiscoveryRequest {
+            target: AdapterTarget {
+                target_id: "test-target".into(),
+                database_name: "app_db".into(),
+                namespace: None,
+            },
+            namespace: Some("x".repeat(64)),
+        };
+        assert_eq!(adapter.discover(&request).await.unwrap_err().code, "invalid_discovery_namespace");
+    }
+
+    #[tokio::test]
     async fn inspection_rejects_a_different_registered_target_before_connecting() {
         let adapter = adapter();
         let request = InspectionRequest {
