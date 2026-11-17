@@ -177,8 +177,9 @@ fn prepare_startup(
             let value = value.trim().to_ascii_lowercase();
             let blocked = key == "role"
                 || key == "session_authorization"
-                || key == "row_security" && ["off","false","0","no"].contains(&value.as_str())
-                || key == "session_replication_role" && value == "replica"
+                || key == "replication"
+                || key == "row_security"
+                || key == "session_replication_role"
                 || key == "options" && sql_guard::blocks_tenant_startup_options(value.as_str());
             if blocked {
                 return Err(io::Error::new(
