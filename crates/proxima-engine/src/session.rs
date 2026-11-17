@@ -512,6 +512,29 @@ mod tests {
     }
 
     #[test]
+    fn rejects_replication_and_security_startup_parameters() {
+        let verifier=verifier();
+        let token=verifier.sign_for_test("tenant_a",u64::MAX);
+        for (key,value) in [
+            ("replication","database"),
+            ("row_security","on"),
+            ("row_security","off"),
+            ("session_replication_role","origin"),
+            ("session_replication_role","replica"),
+            ("role","proxima_tenant_other"),
+            ("session_authorization","other_user"),
+        ] {
+            let error=prepare_startup(
+                crate::protocol::PROTOCOL_3_0,
+                vec![(TENANT_TOKEN_PARAMETER.into(),token.clone()),(key.into(),value.into())],
+                Some(&verifier),
+                "proxima_tenant_",
+            ).unwrap_err();
+            assert_eq!(error.kind(),io::ErrorKind::PermissionDenied,"parameter {key}");
+        }
+    }
+
+    #[test]
     fn extracts_token_from_libpq_options() {
         let verifier = verifier();
         let token = verifier.sign_for_test("tenant_a", u64::MAX);
