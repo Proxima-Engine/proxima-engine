@@ -363,7 +363,7 @@ impl SqlServerCatalogAdapter {
             "catalog_inventory_truncated": table_inventory_truncated || view_inventory_truncated || routine_inventory_truncated,
             "encrypted_transport_required": true
         });
-        let fingerprint = digest(&serde_json::to_vec(&json!({"target":target_attributes,"resources":resources}))
+        let fingerprint = digest(&serde_json::to_vec(&json!({"target_id":self.target_id,"database_name":self.database_name,"target":target_attributes,"resources":resources}))
             .map_err(|_| error("fingerprint_serialization_failed", "Could not serialize SQL Server catalog state."))?);
         let mut findings = Vec::new();
         if table_inventory_truncated || view_inventory_truncated || routine_inventory_truncated {
