@@ -100,7 +100,7 @@ impl SqlServerCatalogAdapter {
         ).await.map_err(db_error)?.into_first_result().await.map_err(db_error)?;
         for row in table_rows {
             let schema = row.get::<&str,_>("schema_name").unwrap_or_default().to_owned();
-            if request.namespace.as_deref().is_some_and(|wanted| wanted != schema) { continue; }
+            if request.namespace.as_deref().is_some_and(|wanted| wanted != schema.as_str()) { continue; }
             let name = row.get::<&str,_>("object_name").unwrap_or_default().to_owned();
             let object_id = row.get::<i32,_>("object_id").unwrap_or_default();
             let columns = client.query(
@@ -166,7 +166,7 @@ impl SqlServerCatalogAdapter {
         ).await.map_err(db_error)?.into_first_result().await.map_err(db_error)?;
         for row in view_rows {
             let schema = row.get::<&str,_>("schema_name").unwrap_or_default().to_owned();
-            if request.namespace.as_deref().is_some_and(|wanted| wanted != schema) { continue; }
+            if request.namespace.as_deref().is_some_and(|wanted| wanted != schema.as_str()) { continue; }
             resources.push(DiscoveredResource {
                 namespace: Some(schema),
                 name: row.get::<&str,_>("object_name").unwrap_or_default().to_owned(),
@@ -185,7 +185,7 @@ impl SqlServerCatalogAdapter {
         ).await.map_err(db_error)?.into_first_result().await.map_err(db_error)?;
         for row in routine_rows {
             let schema = row.get::<&str,_>("schema_name").unwrap_or_default().to_owned();
-            if request.namespace.as_deref().is_some_and(|wanted| wanted != schema) { continue; }
+            if request.namespace.as_deref().is_some_and(|wanted| wanted != schema.as_str()) { continue; }
             let type_desc = row.get::<&str,_>("type_desc").unwrap_or_default();
             let kind = if type_desc.contains("PROCEDURE") { ResourceKind::Procedure } else { ResourceKind::Function };
             resources.push(DiscoveredResource {
