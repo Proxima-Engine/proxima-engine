@@ -346,3 +346,36 @@ fn db_error(error: sqlx::Error) -> AdapterError {
         retryable: matches!(error, sqlx::Error::PoolTimedOut | sqlx::Error::Io(_) | sqlx::Error::Tls(_)),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn accepts_only_mysql_family_database_kinds() {
+        assert!(MySqlCatalogAdapter::new("target", "app", "mysql://localhost/app", DatabaseKind::PostgreSql).is_err());
+        assert!(MySqlCatalogAdapter::new("target", "app", "mysql://localhost/app", DatabaseKind::MySql).is_ok());
+        assert!(MySqlCatalogAdapter::new("target", "app", "mysql://localhost/app", DatabaseKind::MariaDb).is_ok());
+    }
+
+    #[test]
+    fn descriptor_exposes_inspection_and_drift_but_not_admission() {
+        let adapter = MySqlCatalogAdapter::new("target", "app", "mysql://localhost/app", DatabaseKind::MySql).unwrap();
+        let descriptor = adapter.descriptor();
+        assert_eq!(descriptor.maturity, AdapterMaturity::InDevelopment);
+        assert!(descriptor.capabilities.schema_inspection);
+        assert!(descriptor.capabilities.policy_generation);
+        assert!(descriptor.capabilities.drift_detection);
+        assert!(!descriptor.capabilities.tenant_identity_enforcement);
+        assert!(!descriptor.capabilities.policy_semantic_verification);
+        assert!(!descriptor.capabilities.controlled_policy_deployment);
+        assert!(!descriptor.capabilities.runtime_fail_closed_admission);
+        assert!(!descriptor.capabilities.signed_security_evidence);
+    }
+
+    #[test]
+    fn rejects_unbounded_or_empty_target_configuration() {
+        assert!(MySqlCatalogAdapter::new("", "app", "mysql://localhost/app", DatabaseKind::MySql).is_err());
+        assert!(MySqlCatalogAdapter::new("target", &"d".repeat(65), "mysql://localhost/app", DatabaseKind::MySql).is_err());
+    }
+}
