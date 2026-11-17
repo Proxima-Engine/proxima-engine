@@ -146,10 +146,10 @@ impl ConnectionAdmissionGate {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::policy_evidence::{EvidenceCheck, PolicyEvidenceAuthority, PolicyEvidencePayload};
+    use crate::policy_evidence::{EvidenceCheck, EvidenceCheckKind, PolicyEvidenceAuthority, PolicyEvidencePayload};
     use crate::security_core::{
-        DatabaseKind, InspectionCompleteness, Operation, SecurityFinding, SecurityPosture,
-        SECURITY_MODEL_VERSION,
+        DatabaseKind, InspectionCompleteness, Operation, ProtectedResource, ResourceRef,
+        SecurityFinding, SecurityPosture, SECURITY_MODEL_VERSION,
     };
     use crate::tenant_identity::{
         TenantIdentityAuthority, TenantIdentityClaims, TenantIdentityExpectation,
@@ -159,23 +159,51 @@ mod tests {
         PolicyEvidenceAuthority::new(vec![11; 32], vec![19; 32]).unwrap()
     }
 
-    fn semantic_checks() -> Vec<EvidenceCheck> {
-        ["read", "create", "update", "delete"].into_iter().flat_map(|operation| {
-            let mut checks = vec![
-                EvidenceCheck { check_id: format!("own_tenant_allow:{operation}"), passed: true, detail: format!("own-tenant {operation} probe passed") },
-                EvidenceCheck { check_id: format!("cross_tenant_deny:{operation}"), passed: true, detail: format!("cross-tenant {operation} probe denied") },
-            ];
-            if operation != "read" {
+    fn protected_resource() -> ProtectedResource {
+        ProtectedResource {
+            resource: ResourceRef {
+                namespace: Some("public".into()),
+                name: "orders".into(),
+                kind: crate::security_core::ResourceKind::Table,
+            },
+            tenant_key: "tenant_id".into(),
+            operations: vec![Operation::Read, Operation::Create, Operation::Update, Operation::Delete],
+        }
+    }
+
+    fn semantic_checks(resource: &ProtectedResource) -> Vec<EvidenceCheck> {
+        let mut checks = Vec::new();
+        for operation in &resource.operations {
+            checks.push(EvidenceCheck {
+                resource: resource.resource.clone(),
+                operation: *operation,
+                kind: EvidenceCheckKind::OwnTenantAllow,
+                passed: true,
+                detail: format!("own-tenant {operation:?} probe passed"),
+            });
+            checks.push(EvidenceCheck {
+                resource: resource.resource.clone(),
+                operation: *operation,
+                kind: EvidenceCheckKind::CrossTenantDeny,
+                passed: true,
+                detail: format!("cross-tenant {operation:?} probe denied"),
+            });
+            if matches!(operation, Operation::Create | Operation::Update | Operation::Delete) {
                 checks.push(EvidenceCheck {
-                    check_id: format!("mutation_rollback:{operation}"),
+                    resource: resource.resource.clone(),
+                    operation: *operation,
+                    kind: EvidenceCheckKind::MutationRollback,
                     passed: true,
-                    detail: format!("own-tenant {operation} mutation was rolled back"),
+                    detail: format!("own-tenant {operation:?} mutation was rolled back"),
                 });
             }
-            checks
-        }).collect()
+        }
+        checks
     }
+
     fn signed_pair(authority: &PolicyEvidenceAuthority) -> (SignedPolicyEvidence, SignedPolicyAdmission) {
+        let resource = protected_resource();
+        let checks = semantic_checks(&resource);
         let payload = PolicyEvidencePayload {
             model_version: SECURITY_MODEL_VERSION.into(),
             policy_id: "tenant-boundary".into(),
@@ -186,10 +214,11 @@ mod tests {
             posture: SecurityPosture::Verified,
             inspection: InspectionCompleteness::Complete,
             findings: Vec::<SecurityFinding>::new(),
+            protected_resources: vec![resource],
             verified_operations: vec![Operation::Read, Operation::Create, Operation::Update, Operation::Delete],
             fingerprint: "c".repeat(64),
             observed_at_unix: 1_900_000_000,
-            checks: semantic_checks(),
+            checks,
         };
         let evidence = authority.sign_evidence(payload).unwrap();
         let admission = authority.issue_admission(&evidence, 1_900_000_001, 30).unwrap();
