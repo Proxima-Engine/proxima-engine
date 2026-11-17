@@ -105,7 +105,7 @@ pub struct AdmissionExpectation<'a> {
     pub tenant_id: &'a str,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct PolicyEvidenceAuthority {
     evidence_key: Vec<u8>,
     admission_key: Vec<u8>,
@@ -201,9 +201,14 @@ impl PolicyEvidenceAuthority {
         if admission.expires_at_unix <= now_unix {
             return Err(error("admission_expired", "The admission envelope has expired."));
         }
-        let lifetime = admission.expires_at_unix - admission.issued_at_unix;
+        let lifetime = admission.expires_at_unix.checked_sub(admission.issued_at_unix)
+            .ok_or_else(|| error("invalid_admission_lifetime", "The admission timestamps are inconsistent."))?;
         if !(1..=60).contains(&lifetime) {
             return Err(error("invalid_admission_lifetime", "The admission lifetime exceeds the 60-second maximum."));
+        }
+        if payload.observed_at_unix > admission.issued_at_unix
+            || admission.issued_at_unix.checked_sub(payload.observed_at_unix).map_or(true, |age| age > 60) {
+            return Err(error("evidence_stale", "The signed evidence was not fresh when this admission was issued."));
         }
         let evidence_bytes = serde_json::to_vec(evidence)
             .map_err(|_| error("evidence_serialization_failed", "The signed evidence could not be serialized."))?;
@@ -339,6 +344,7 @@ mod tests {
 
     #[test]
     fn short_signing_keys_are_rejected() {
-        assert_eq!(PolicyEvidenceAuthority::new(vec![1; 16], vec![2; 32]).unwrap_err().code, "signing_key_too_short");
+        let result = PolicyEvidenceAuthority::new(vec![1; 16], vec![2; 32]);
+        assert!(matches!(result, Err(error) if error.code == "signing_key_too_short"));
     }
 }
