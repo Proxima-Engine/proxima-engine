@@ -5,7 +5,10 @@ use sqlparser::{dialect::PostgreSqlDialect, parser::Parser};
 /// boundary for a tenant-bound session. PostgreSQL remains the syntax authority.
 pub fn blocks_tenant_session_mutation(sql: &str) -> bool {
     let dialect = PostgreSqlDialect {};
-    let _parsed = Parser::parse_sql(&dialect, sql);
+    if Parser::parse_sql(&dialect, sql).is_err() {
+        // Never forward tenant-bound SQL that the PostgreSQL dialect parser cannot validate.
+        return true;
+    }
     let Ok(tokens) = sqlparser::tokenizer::Tokenizer::new(&dialect, sql).tokenize() else {
         // A tenant-bound session must not forward SQL the guard cannot tokenize.
         return true;
