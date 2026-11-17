@@ -233,7 +233,7 @@ The inspection URI must point to the same file as the absolute registered path. 
 
 ## Native Elasticsearch / OpenSearch discovery
 
-The search-cluster adapter requires HTTPS and an explicit Authorization value supplied separately from the endpoint URL. It disables redirects, applies connection/request deadlines, confirms the root cluster identity, inventories indices matching the registered pattern, and retrieves mappings, settings and aliases. It also reads Elasticsearch security roles/users or OpenSearch Security plugin roles, role mappings and internal users when the inspection principal has permission. User password/hash/token fields are stripped before evidence serialization.
+The search-cluster adapter requires HTTPS and an explicit Authorization value supplied separately from the endpoint URL. It disables redirects, applies connection/request deadlines, confirms the root cluster identity, inventories indices matching the registered pattern, and retrieves mappings, settings and aliases. It also reads the authenticated identity and Elasticsearch security roles/users or OpenSearch Security plugin roles, role mappings and internal users when the inspection principal has permission. Policy inspection checks DLS coverage only against roles assigned to the authenticated principal; it does not infer safety from an unrelated tenant role. User password/hash/token fields are stripped before evidence serialization.
 
 The adapter is discovery-only. A tenant field in an index mapping does not isolate documents. Native DLS/FLS role definitions, authenticated tenant-principal binding, policy deployment and independent positive/negative document probes are still required.
 
