@@ -169,3 +169,18 @@ cargo run -p proxima-engine --bin proxima-policy-guard -- inspect-redis-policy p
 ```
 
 The inspection principal needs permission to run CLIENT INFO, PING, ACL WHOAMI, ACL LIST, ACL CAT, and INFO. The result remains incomplete and denied: ACL key patterns do not prove that application code consistently uses tenant keys, and keyless commands, scripts, functions and modules need a trusted enforcement layer and adversarial probes. Keep the Redis URI and credentials in a protected environment variable.
+
+
+## Native Microsoft SQL Server adapter
+
+The SQL Server adapter uses encrypted TDS with certificate verification. It rejects TrustServerCertificate=true and Encrypt=false, confirms the connected database, and inventories tables/columns, object and column permissions, schema/database permissions, principals, role memberships, RLS security policies/predicates, triggers, views and stored routines. It marks catalog visibility incomplete unless the inspection identity has database VIEW DEFINITION or sysadmin visibility; sysadmin inspection is explicitly flagged.
+
+```powershell
+$env:PROXIMA_SQL_SERVER_ADAPTER_CONNECTION_STRING = 'Server=tcp:db.example,1433;Database=app;User Id=...;Password=...;Encrypt=True;TrustServerCertificate=False'
+$env:PROXIMA_SQL_SERVER_ADAPTER_TARGET_ID = 'registered-target-id'
+$env:PROXIMA_SQL_SERVER_ADAPTER_DATABASE_NAME = 'app'
+cargo run -p proxima-engine --bin proxima-policy-guard -- discover-sql-server
+cargo run -p proxima-engine --bin proxima-policy-guard -- inspect-sql-server-policy policy.json
+```
+
+Inspection checks tenant columns and nullability, enabled FILTER/BLOCK predicates for the declared operations, and the referenced predicate-function definition for SESSION_CONTEXT and schema binding. It still denies admission: a database client can set SESSION_CONTEXT unless a trusted application/gateway boundary prevents it, and independent positive/negative tenant probes are required. Keep the connection string in a protected environment variable.
