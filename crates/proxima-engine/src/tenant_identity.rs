@@ -180,6 +180,8 @@ fn validate_claims(claims: &TenantIdentityClaims) -> Result<(), TenantIdentityEr
         || !valid_text(&claims.target_id, 256)
         || !valid_text(&claims.policy_id, 128)
         || !valid_text(&claims.request_id, 128)
+        || uuid::Uuid::parse_str(&claims.request_id)
+            .map_or(true, |request_id| request_id.to_string() != claims.request_id)
         || claims.policy_revision == 0
         || claims.issued_at_unix < 0
         || claims.expires_at_unix <= claims.issued_at_unix
@@ -217,7 +219,7 @@ mod tests {
             database_kind: DatabaseKind::PostgreSql,
             policy_id: "tenant-boundary".into(),
             policy_revision: 9,
-            request_id: "req-1".into(),
+            request_id: "550e8400-e29b-41d4-a716-446655440000".into(),
             issued_at_unix: 1_900_000_000,
             expires_at_unix: 1_900_000_030,
         }
