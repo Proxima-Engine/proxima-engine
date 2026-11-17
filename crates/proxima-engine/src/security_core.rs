@@ -26,6 +26,18 @@ pub enum DatabaseKind {
     CockroachDb,
     #[serde(rename = "vaultdb")]
     VaultDb,
+    #[serde(rename = "redis")]
+    Redis,
+    #[serde(rename = "sqlite")]
+    Sqlite,
+    #[serde(rename = "oracle")]
+    Oracle,
+    #[serde(rename = "dynamodb")]
+    DynamoDb,
+    #[serde(rename = "cassandra")]
+    Cassandra,
+    #[serde(rename = "elasticsearch")]
+    Elasticsearch,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -112,13 +124,17 @@ pub fn adapter_catalog() -> Vec<AdapterDescriptor> {
             capabilities: AdapterCapabilities::default(),
             status_note: "Adapter contract defined; CockroachDB-specific authorization behavior requires separate validation.",
         },
-        AdapterDescriptor {
-            kind: DatabaseKind::VaultDb,
+        AdapterDescriptor {\n            kind: DatabaseKind::Redis,\n            name: "Redis",\n            maturity: AdapterMaturity::InDevelopment,\n            capabilities: AdapterCapabilities { policy_generation: true, ..AdapterCapabilities::default() },\n            status_note: "Reviewable ACL templates exist for tenant-prefixed keyspaces; native inspection, principal binding, runtime enforcement, drift and evidence are not implemented.",\n        },\n        AdapterDescriptor {\n            kind: DatabaseKind::VaultDb,
             name: "VAULTDB (Agata-native research engine)",
             maturity: AdapterMaturity::Planned,
             capabilities: AdapterCapabilities::default(),
             status_note: "Agata-owned embedded relational research engine; tenant identity, resource authorization, isolation enforcement and security acceptance are not implemented.",
         },
+        AdapterDescriptor { kind: DatabaseKind::Sqlite, name: "SQLite", maturity: AdapterMaturity::Planned, capabilities: AdapterCapabilities::default(), status_note: "File-per-tenant and OS-level isolation research only; no runtime adapter is implemented." },
+        AdapterDescriptor { kind: DatabaseKind::Oracle, name: "Oracle Database", maturity: AdapterMaturity::Planned, capabilities: AdapterCapabilities::default(), status_note: "Oracle VPD and Database Vault integration are not implemented." },
+        AdapterDescriptor { kind: DatabaseKind::DynamoDb, name: "Amazon DynamoDB", maturity: AdapterMaturity::Planned, capabilities: AdapterCapabilities::default(), status_note: "Partition-key and IAM LeadingKeys enforcement are not implemented." },
+        AdapterDescriptor { kind: DatabaseKind::Cassandra, name: "Apache Cassandra", maturity: AdapterMaturity::Planned, capabilities: AdapterCapabilities::default(), status_note: "Keyspace-per-tenant isolation is not implemented." },
+        AdapterDescriptor { kind: DatabaseKind::Elasticsearch, name: "Elasticsearch / OpenSearch", maturity: AdapterMaturity::Planned, capabilities: AdapterCapabilities::default(), status_note: "Document-level security and role enforcement are not implemented." },
     ]
 }
 
@@ -130,6 +146,7 @@ pub enum ResourceKind {
     Collection,
     Procedure,
     Function,
+    Keyspace,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -417,7 +434,7 @@ mod tests {
     #[test]
     fn planned_adapters_make_no_unsupported_capability_claims() {
         let catalog = adapter_catalog();
-        assert_eq!(catalog.len(), 6);
+        assert_eq!(catalog.len(), 12);
         for adapter in catalog.iter().filter(|adapter| adapter.maturity == AdapterMaturity::Planned) {
             assert_eq!(adapter.capabilities, AdapterCapabilities::default());
         }
