@@ -5,6 +5,7 @@ use proxima_engine::postgres_adapter::{PostgresCatalogAdapter, PostgresConnector
 use proxima_engine::mysql_adapter::MySqlCatalogAdapter;
 use proxima_engine::mongodb_adapter::MongoCatalogAdapter;
 use proxima_engine::redis_adapter::RedisCatalogAdapter;
+use proxima_engine::sql_server_adapter::SqlServerCatalogAdapter;
 use proxima_engine::native_policy_plans::{compile_mongodb_database_boundary, compile_mysql_database_boundary, compile_redis_acl, compile_sql_server};
 use std::{collections::HashSet, env, error::Error, fs, io::BufReader, path::Path, str::FromStr, time::Duration};
 use tokio_postgres::config::SslMode;
@@ -575,6 +576,53 @@ async fn main() -> Result<(),Box<dyn Error>> {
         }))?);
         if decision != AccessDecision::Allow { std::process::exit(2); }
       },
+      Some("discover-sql-server") => {
+        if args.next().is_some() { return Err("usage: proxima-policy-guard discover-sql-server".into()); }
+        let connection_string = env::var("PROXIMA_SQL_SERVER_ADAPTER_CONNECTION_STRING")
+            .map_err(|_| "set PROXIMA_SQL_SERVER_ADAPTER_CONNECTION_STRING to an encrypted SQL Server connection string")?;
+        let target_id = env::var("PROXIMA_SQL_SERVER_ADAPTER_TARGET_ID")
+            .map_err(|_| "set PROXIMA_SQL_SERVER_ADAPTER_TARGET_ID to the registered non-secret target ID")?;
+        let database_name = env::var("PROXIMA_SQL_SERVER_ADAPTER_DATABASE_NAME")
+            .map_err(|_| "set PROXIMA_SQL_SERVER_ADAPTER_DATABASE_NAME to the expected database name")?;
+        let adapter = SqlServerCatalogAdapter::new(target_id.clone(), database_name.clone(), connection_string)?;
+        let snapshot = adapter.discover(&DiscoveryRequest {
+            target: AdapterTarget { target_id, database_name, namespace: None },
+            namespace: None,
+        }).await?;
+        println!("{}", serde_json::to_string_pretty(&json!({
+            "adapter": adapter.descriptor(),
+            "discovery": snapshot,
+            "access_decision": "deny",
+            "note": "SQL Server discovery inventories native authorization and RLS state. It does not establish trusted SESSION_CONTEXT binding or authorize traffic."
+        }))?);
+      },
+      Some("inspect-sql-server-policy") => {
+        let path = args.next().ok_or("usage: proxima-policy-guard inspect-sql-server-policy <policy.json>")?;
+        if args.next().is_some() { return Err("only one policy file may be supplied".into()); }
+        let policy: TenantSecurityPolicy = serde_json::from_slice(&fs::read(&path)?)?;
+        policy.validate().map_err(|error| format!("invalid policy: {error:?}"))?;
+        let connection_string = env::var("PROXIMA_SQL_SERVER_ADAPTER_CONNECTION_STRING")
+            .map_err(|_| "set PROXIMA_SQL_SERVER_ADAPTER_CONNECTION_STRING to an encrypted SQL Server connection string")?;
+        let target_id = env::var("PROXIMA_SQL_SERVER_ADAPTER_TARGET_ID")
+            .map_err(|_| "set PROXIMA_SQL_SERVER_ADAPTER_TARGET_ID to the registered non-secret target ID")?;
+        let database_name = env::var("PROXIMA_SQL_SERVER_ADAPTER_DATABASE_NAME")
+            .map_err(|_| "set PROXIMA_SQL_SERVER_ADAPTER_DATABASE_NAME to the expected database name")?;
+        let adapter = SqlServerCatalogAdapter::new(target_id.clone(), database_name.clone(), connection_string)?;
+        let request = InspectionRequest {
+            target: AdapterTarget { target_id, database_name, namespace: None },
+            policy,
+        };
+        let snapshot = adapter.inspect(&request).await?;
+        let verification = adapter.verify(&request.policy, &snapshot).await?;
+        let decision = verification.access_decision();
+        println!("{}", serde_json::to_string_pretty(&json!({
+            "adapter": adapter.descriptor(),
+            "snapshot": snapshot,
+            "verification": verification,
+            "access_decision": decision
+        }))?);
+        if decision != AccessDecision::Allow { std::process::exit(2); }
+      },
       Some("inspect-policy") => {
         let path = args.next().ok_or("usage: proxima-policy-guard inspect-policy <policy.json>")?;
         let policy: TenantSecurityPolicy = serde_json::from_slice(&fs::read(&path)?)?;
@@ -639,7 +687,7 @@ async fn main() -> Result<(),Box<dyn Error>> {
         let spec:Value=serde_json::from_slice(&fs::read(Path::new(&path))?)?;
         print!("{}",generate(&spec)?);
       },
-      _ => return Err("usage: proxima-policy-guard <adapters|audit|generate|validate-policy|compile-plan|discover-postgres|discover-mysql|discover-mariadb|inspect-mysql-policy|inspect-mariadb-policy|discover-mongodb|inspect-mongodb-policy|discover-redis|inspect-redis-policy|inspect-policy>".into())
+      _ => return Err("usage: proxima-policy-guard <adapters|audit|generate|validate-policy|compile-plan|discover-postgres|discover-mysql|discover-mariadb|inspect-mysql-policy|inspect-mariadb-policy|discover-mongodb|inspect-mongodb-policy|discover-redis|inspect-redis-policy|discover-sql-server|inspect-sql-server-policy|inspect-policy>".into())
     }
     Ok(())
 }
