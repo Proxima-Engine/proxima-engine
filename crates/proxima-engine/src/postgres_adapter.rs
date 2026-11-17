@@ -32,6 +32,7 @@ pub type PostgresConnector =
 pub struct PostgresCatalogAdapter {
     target_id: String,
     database_name: String,
+    tenant_role_prefix: String,
     connect: PostgresConnector,
 }
 
@@ -39,17 +40,26 @@ impl PostgresCatalogAdapter {
     pub fn new(
         target_id: impl Into<String>,
         database_name: impl Into<String>,
+        tenant_role_prefix: impl Into<String>,
         connect: PostgresConnector,
     ) -> Result<Self, AdapterError> {
         let target_id = target_id.into();
         let database_name = database_name.into();
+        let tenant_role_prefix = tenant_role_prefix.into();
         if target_id.trim().is_empty() || database_name.trim().is_empty()
             || target_id.len() > 256 || database_name.len() > 256
             || target_id.contains('\0') || database_name.contains('\0')
         {
             return Err(error("invalid_postgres_target", "A bounded target ID and database name are required."));
         }
-        Ok(Self { target_id, database_name, connect })
+        if tenant_role_prefix.is_empty() || tenant_role_prefix.len() > 63
+            || tenant_role_prefix.contains('\0')
+            || !tenant_role_prefix.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+            || !tenant_role_prefix.as_bytes().first().is_some_and(|byte| byte.is_ascii_alphabetic() || *byte == b'_')
+        {
+            return Err(error("invalid_tenant_role_prefix", "The tenant role prefix must be a valid PostgreSQL identifier prefix."));
+        }
+        Ok(Self { target_id, database_name, tenant_role_prefix, connect })
     }
 
     fn validate_target(&self, target: &AdapterTarget) -> Result<(), AdapterError> {
@@ -205,7 +215,14 @@ impl DatabaseAdapter for PostgresCatalogAdapter {
             let schema = protected.resource.namespace.as_deref().unwrap_or("public");
             let relation = format!("{}.{}", quote_ident(schema), quote_ident(&protected.resource.name));
             let tenant_column = quote_ident(&protected.tenant_key);
-            let tenant_expression = format!("({tenant_column})::text = current_setting('proxima.tenant_id', true)");
+            // The Engine binds tenant identity to a dedicated PostgreSQL login
+            // role at startup. Derive the tenant claim from that immutable role
+            // identity rather than a session GUC: session GUC state is not safe
+            // to rely on behind transaction-pooling proxies.
+            let role_prefix = quote_literal(&self.tenant_role_prefix);
+            let tenant_expression = format!(
+                "left(current_user, char_length({role_prefix})) = {role_prefix} AND replace(({tenant_column})::text, '-', '_') = substring(current_user FROM char_length({role_prefix}) + 1)"
+            );
             let mut statements = vec![
                 format!("ALTER TABLE {relation} ENABLE ROW LEVEL SECURITY"),
                 format!("ALTER TABLE {relation} FORCE ROW LEVEL SECURITY"),
@@ -240,7 +257,7 @@ impl DatabaseAdapter for PostgresCatalogAdapter {
                         "Enable and FORCE ROW LEVEL SECURITY on the relation.",
                         "Ensure the application role cannot own the table and has no BYPASSRLS or SUPERUSER membership.",
                         "Ensure each requested command has a reviewed permissive baseline policy; restrictive policies intersect with permissive policies and otherwise deny all rows.",
-                        "Set proxima.tenant_id from a cryptographically authenticated tenant context on every transaction.",
+                        "Route each authenticated tenant through the Engine's dedicated role prefix plus normalized tenant ID; never share a tenant login role across tenant identities.",
                         "Verify every operation with positive own-tenant and negative cross-tenant probes.",
                         "Inspect and protect every directly addressable partition and view."
                     ],
@@ -389,7 +406,7 @@ mod tests {
         let connector: PostgresConnector = Arc::new(|| Box::pin(async {
             Err(error("test_connector_not_called", "This test exercises compilation only."))
         }));
-        PostgresCatalogAdapter::new("test-target", "app_db", connector).unwrap()
+        PostgresCatalogAdapter::new("test-target", "app_db", "proxima_tenant_", connector).unwrap()
     }
 
     #[test]
@@ -403,7 +420,9 @@ mod tests {
         assert_eq!(statements.len(), 6);
         let sql = statements.iter().map(|value| value.as_str().unwrap()).collect::<Vec<_>>().join("\n");
         assert!(sql.contains("AS RESTRICTIVE"));
-        assert!(sql.contains("current_setting('proxima.tenant_id', true)"));
+        assert!(sql.contains("left(current_user, char_length('proxima_tenant_')) = 'proxima_tenant_'"));
+        assert!(sql.contains("substring(current_user FROM char_length('proxima_tenant_') + 1)"));
+        assert!(!sql.contains("current_setting"));
         assert!(sql.contains("\"customer data\".\"invoices\""));
         assert!(sql.contains("WITH CHECK"));
         assert_eq!(compiled.changes[0].definition["execution"], "not_executed");
