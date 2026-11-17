@@ -24,6 +24,8 @@ pub enum DatabaseKind {
     MongoDb,
     #[serde(rename = "cockroachdb")]
     CockroachDb,
+    #[serde(rename = "vaultdb")]
+    VaultDb,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -108,6 +110,13 @@ pub fn adapter_catalog() -> Vec<AdapterDescriptor> {
             maturity: AdapterMaturity::Planned,
             capabilities: AdapterCapabilities::default(),
             status_note: "Adapter contract defined; CockroachDB-specific authorization behavior requires separate validation.",
+        },
+        AdapterDescriptor {
+            kind: DatabaseKind::VaultDb,
+            name: "VAULTDB (Agata-native research engine)",
+            maturity: AdapterMaturity::Planned,
+            capabilities: AdapterCapabilities::default(),
+            status_note: "Agata-owned embedded relational research engine; tenant identity, resource authorization, isolation enforcement and security acceptance are not implemented.",
         },
     ]
 }
