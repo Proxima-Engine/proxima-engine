@@ -124,7 +124,7 @@ impl DatabaseAdapter for PostgresCatalogAdapter {
             }
             let client = self.connect_checked().await?;
             let rows = client.query(
-                "SELECT n.nspname, c.relname, CASE WHEN c.relkind IN ('r','p','f') THEN 'table' WHEN c.relkind IN ('v','m') THEN 'view' WHEN c.relkind='S' THEN 'sequence' END AS resource_kind, pg_catalog.pg_get_userbyid(c.relowner), jsonb_build_object('relkind',c.relkind::text,'row_security_enabled',c.relrowsecurity,'row_security_forced',c.relforcerowsecurity,'foreign_table',c.relkind='f','acl',COALESCE(c.relacl::text,'<default>'),'columns',COALESCE((SELECT jsonb_agg(jsonb_build_object('name',a.attname,'type',pg_catalog.format_type(a.atttypid,a.atttypmod),'not_null',a.attnotnull,'default',pg_catalog.pg_get_expr(d.adbin,d.adrelid)) ORDER BY a.attnum) FROM pg_catalog.pg_attribute a LEFT JOIN pg_catalog.pg_attrdef d ON d.adrelid=a.attrelid AND d.adnum=a.attnum WHERE a.attrelid=c.oid AND a.attnum>0 AND NOT a.attisdropped),'[]'::jsonb),'policies',COALESCE((SELECT jsonb_agg(jsonb_build_object('name',p.polname,'command',p.polcmd::text,'permissive',p.polpermissive,'using',pg_catalog.pg_get_expr(p.polqual,p.polrelid),'check',pg_catalog.pg_get_expr(p.polwithcheck,p.polrelid),'roles',p.polroles) ORDER BY p.polname) FROM pg_catalog.pg_policy p WHERE p.polrelid=c.oid),'[]'::jsonb),'constraints',COALESCE((SELECT jsonb_agg(jsonb_build_object('name',constraint_row.conname,'type',constraint_row.contype::text,'validated',constraint_row.convalidated,'definition',pg_catalog.pg_get_constraintdef(constraint_row.oid)) ORDER BY constraint_row.conname) FROM pg_catalog.pg_constraint constraint_row WHERE constraint_row.conrelid=c.oid),'[]'::jsonb),'indexes',COALESCE((SELECT jsonb_agg(jsonb_build_object('name',index_class.relname,'valid',index_row.indisvalid,'ready',index_row.indisready,'definition',pg_catalog.pg_get_indexdef(index_row.indexrelid)) ORDER BY index_class.relname) FROM pg_catalog.pg_index index_row JOIN pg_catalog.pg_class index_class ON index_class.oid=index_row.indexrelid WHERE index_row.indrelid=c.oid),'[]'::jsonb),'triggers',COALESCE((SELECT jsonb_agg(jsonb_build_object('name',trigger_row.tgname,'enabled',trigger_row.tgenabled::text,'definition',pg_catalog.pg_get_triggerdef(trigger_row.oid,true)) ORDER BY trigger_row.tgname) FROM pg_catalog.pg_trigger trigger_row WHERE trigger_row.tgrelid=c.oid AND NOT trigger_row.tgisinternal),'[]'::jsonb),'view_definition',CASE WHEN c.relkind IN ('v','m') THEN pg_catalog.pg_get_viewdef(c.oid,true) ELSE NULL END,'view_options',COALESCE(c.reloptions,'{}'::text[])) AS attributes FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE c.relkind IN ('r','p','f','v','m','S') AND n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname NOT LIKE 'pg_%' AND ($1::text IS NULL OR n.nspname=$1) UNION ALL SELECT n.nspname, p.proname, CASE WHEN p.prokind='p' THEN 'procedure' ELSE 'function' END, pg_catalog.pg_get_userbyid(p.proowner), jsonb_build_object('security_definer',p.prosecdef,'execute_acl',COALESCE(p.proacl::text,'<default>'),'identity_arguments',pg_catalog.pg_get_function_identity_arguments(p.oid),'configuration',COALESCE(p.proconfig,'{}'::text[])) FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace WHERE p.prokind IN ('f','p') AND n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname NOT LIKE 'pg_%' AND ($1::text IS NULL OR n.nspname=$1) ORDER BY 1,2,3",
+                "SELECT n.nspname, c.relname, CASE WHEN c.relkind IN ('r','p','f') THEN 'table' WHEN c.relkind IN ('v','m') THEN 'view' WHEN c.relkind='S' THEN 'sequence' END AS resource_kind, pg_catalog.pg_get_userbyid(c.relowner), jsonb_build_object('relkind',c.relkind::text,'row_security_enabled',c.relrowsecurity,'row_security_forced',c.relforcerowsecurity,'foreign_table',c.relkind='f','acl',COALESCE(c.relacl::text,'<default>'),'columns',COALESCE((SELECT jsonb_agg(jsonb_build_object('name',a.attname,'type',pg_catalog.format_type(a.atttypid,a.atttypmod),'not_null',a.attnotnull,'default',pg_catalog.pg_get_expr(d.adbin,d.adrelid)) ORDER BY a.attnum) FROM pg_catalog.pg_attribute a LEFT JOIN pg_catalog.pg_attrdef d ON d.adrelid=a.attrelid AND d.adnum=a.attnum WHERE a.attrelid=c.oid AND a.attnum>0 AND NOT a.attisdropped),'[]'::jsonb),'policies',COALESCE((SELECT jsonb_agg(jsonb_build_object('name',p.polname,'command',p.polcmd::text,'permissive',p.polpermissive,'using',pg_catalog.pg_get_expr(p.polqual,p.polrelid),'check',pg_catalog.pg_get_expr(p.polwithcheck,p.polrelid),'roles',p.polroles) ORDER BY p.polname) FROM pg_catalog.pg_policy p WHERE p.polrelid=c.oid),'[]'::jsonb),'constraints',COALESCE((SELECT jsonb_agg(jsonb_build_object('name',constraint_row.conname,'type',constraint_row.contype::text,'validated',constraint_row.convalidated,'definition',pg_catalog.pg_get_constraintdef(constraint_row.oid)) ORDER BY constraint_row.conname) FROM pg_catalog.pg_constraint constraint_row WHERE constraint_row.conrelid=c.oid),'[]'::jsonb),'indexes',COALESCE((SELECT jsonb_agg(jsonb_build_object('name',index_class.relname,'valid',index_row.indisvalid,'ready',index_row.indisready,'definition',pg_catalog.pg_get_indexdef(index_row.indexrelid)) ORDER BY index_class.relname) FROM pg_catalog.pg_index index_row JOIN pg_catalog.pg_class index_class ON index_class.oid=index_row.indexrelid WHERE index_row.indrelid=c.oid),'[]'::jsonb),'triggers',COALESCE((SELECT jsonb_agg(jsonb_build_object('name',trigger_row.tgname,'enabled',trigger_row.tgenabled::text,'definition',pg_catalog.pg_get_triggerdef(trigger_row.oid,true)) ORDER BY trigger_row.tgname) FROM pg_catalog.pg_trigger trigger_row WHERE trigger_row.tgrelid=c.oid AND NOT trigger_row.tgisinternal),'[]'::jsonb),'view_definition',CASE WHEN c.relkind IN ('v','m') THEN pg_catalog.pg_get_viewdef(c.oid,true) ELSE NULL END,'view_options',COALESCE(c.reloptions,'{}'::text[])) AS attributes FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE c.relkind IN ('r','p','f','v','m','S') AND n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname NOT LIKE 'pg_%' AND ($1::text IS NULL OR n.nspname=$1) UNION ALL SELECT n.nspname, p.proname, CASE WHEN p.prokind='p' THEN 'procedure' ELSE 'function' END, pg_catalog.pg_get_userbyid(p.proowner), jsonb_build_object('security_definer',p.prosecdef,'execute_acl',COALESCE(p.proacl::text,'<default>'),'identity_arguments',pg_catalog.pg_get_function_identity_arguments(p.oid),'configuration',COALESCE(p.proconfig,'{}'::text[]),'definition',pg_catalog.pg_get_functiondef(p.oid),'volatility',p.provolatile::text,'leakproof',p.proleakproof,'parallel_safety',p.proparallel::text) FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace WHERE p.prokind IN ('f','p') AND n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname NOT LIKE 'pg_%' AND ($1::text IS NULL OR n.nspname=$1) ORDER BY 1,2,3",
                 &[&request.namespace],
             ).await.map_err(db_error)?;
             let mut resources = Vec::with_capacity(rows.len());
@@ -155,12 +155,66 @@ impl DatabaseAdapter for PostgresCatalogAdapter {
                 "SELECT current_database(), current_user, current_setting('server_version'), current_setting('server_version_num')",
                 &[],
             ).await.map_err(db_error)?;
+            let roles = client.query(
+                "SELECT rolname,rolsuper,rolbypassrls,rolcreaterole,rolcreatedb,rolreplication,rolinherit,rolcanlogin,rolconnlimit FROM pg_catalog.pg_roles ORDER BY rolname",
+                &[],
+            ).await.map_err(db_error)?;
+            let role_memberships = client.query(
+                "SELECT member_role.rolname AS member_role,granted_role.rolname AS granted_role,membership.admin_option FROM pg_catalog.pg_auth_members membership JOIN pg_catalog.pg_roles member_role ON member_role.oid=membership.member JOIN pg_catalog.pg_roles granted_role ON granted_role.oid=membership.roleid ORDER BY member_role.rolname,granted_role.rolname",
+                &[],
+            ).await.map_err(db_error)?;
+            let database_privileges = client.query(
+                "SELECT database_info.datname,pg_catalog.pg_get_userbyid(database_info.datdba) AS owner,COALESCE(database_info.datacl::text,'<default>') AS acl,database_info.datallowconn,database_info.datistemplate FROM pg_catalog.pg_database database_info ORDER BY database_info.datname",
+                &[],
+            ).await.map_err(db_error)?;
+            let schema_privileges = client.query(
+                "SELECT namespace.nspname,pg_catalog.pg_get_userbyid(namespace.nspowner) AS owner,COALESCE(namespace.nspacl::text,'<default>') AS acl FROM pg_catalog.pg_namespace namespace WHERE namespace.nspname NOT IN ('pg_catalog','information_schema') AND namespace.nspname NOT LIKE 'pg_%' ORDER BY namespace.nspname",
+                &[],
+            ).await.map_err(db_error)?;
+            let default_privileges = client.query(
+                "SELECT pg_catalog.pg_get_userbyid(default_acl.defaclrole) AS owner_role,COALESCE(namespace.nspname,'') AS schema_name,default_acl.defaclobjtype::text AS object_type,COALESCE(default_acl.defaclacl::text,'<default>') AS acl FROM pg_catalog.pg_default_acl default_acl LEFT JOIN pg_catalog.pg_namespace namespace ON namespace.oid=default_acl.defaclnamespace ORDER BY 1,2,3",
+                &[],
+            ).await.map_err(db_error)?;
             let target_attributes = json!({
                 "database": target_row.get::<_, String>(0),
                 "authenticated_role": target_row.get::<_, String>(1),
                 "server_version": target_row.get::<_, String>(2),
                 "server_version_num": target_row.get::<_, String>(3),
-                "inspection_role_is_read_only": true
+                "inspection_role_is_read_only": true,
+                "roles": roles.iter().map(|role| json!({
+                    "name": role.get::<_, String>(0),
+                    "superuser": role.get::<_, bool>(1),
+                    "bypass_rls": role.get::<_, bool>(2),
+                    "create_role": role.get::<_, bool>(3),
+                    "create_database": role.get::<_, bool>(4),
+                    "replication": role.get::<_, bool>(5),
+                    "inherit": role.get::<_, bool>(6),
+                    "can_login": role.get::<_, bool>(7),
+                    "connection_limit": role.get::<_, i32>(8)
+                })).collect::<Vec<_>>(),
+                "role_memberships": role_memberships.iter().map(|membership| json!({
+                    "member_role": membership.get::<_, String>(0),
+                    "granted_role": membership.get::<_, String>(1),
+                    "admin_option": membership.get::<_, bool>(2)
+                })).collect::<Vec<_>>(),
+                "database_privileges": database_privileges.iter().map(|database| json!({
+                    "database": database.get::<_, String>(0),
+                    "owner": database.get::<_, String>(1),
+                    "acl": database.get::<_, String>(2),
+                    "allow_connections": database.get::<_, bool>(3),
+                    "is_template": database.get::<_, bool>(4)
+                })).collect::<Vec<_>>(),
+                "schema_privileges": schema_privileges.iter().map(|schema| json!({
+                    "schema": schema.get::<_, String>(0),
+                    "owner": schema.get::<_, String>(1),
+                    "acl": schema.get::<_, String>(2)
+                })).collect::<Vec<_>>(),
+                "default_privileges": default_privileges.iter().map(|default_acl| json!({
+                    "owner_role": default_acl.get::<_, String>(0),
+                    "schema": default_acl.get::<_, String>(1),
+                    "object_type": default_acl.get::<_, String>(2),
+                    "acl": default_acl.get::<_, String>(3)
+                })).collect::<Vec<_>>()
             });
             let fingerprint = sha256(&serde_json::to_vec(&json!({"target":target_attributes,"resources":resources}))
                 .map_err(|_| error("fingerprint_serialization_failed", "Could not serialize discovered PostgreSQL resources."))?);
