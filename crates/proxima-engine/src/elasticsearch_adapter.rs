@@ -327,9 +327,10 @@ impl DatabaseAdapter for ElasticsearchCatalogAdapter {
 
     fn verify<'a>(&'a self, _policy: &'a TenantSecurityPolicy, snapshot: &'a InspectionSnapshot) -> AdapterFuture<'a, Result<VerificationReport, AdapterError>> {
         Box::pin(async move {
-            if snapshot.database_kind != DatabaseKind::Elasticsearch || snapshot.target.target_id != self.target_id {
-                return Err(error("elasticsearch_snapshot_target_mismatch", "The inspection snapshot belongs to a different Elasticsearch/OpenSearch target."));
+            if snapshot.database_kind != DatabaseKind::Elasticsearch {
+                return Err(error("elasticsearch_snapshot_target_mismatch", "The inspection snapshot belongs to a different database kind."));
             }
+            self.validate_target(&snapshot.target)?;
             let mut findings = snapshot.findings.clone();
             findings.push(SecurityFinding {
                 code: "elasticsearch_semantic_verification_unavailable".into(),
