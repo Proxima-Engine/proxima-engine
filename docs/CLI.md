@@ -154,7 +154,7 @@ Both commands return a deny decision until a native document-level enforcement b
 
 ## Native Redis ACL adapter
 
-The Rust adapter requires a rediss:// URI and a registered logical database index. It connects with TLS, confirms the selected database using CLIENT INFO, reads the authenticated ACL user, ACL user rules, key patterns, command rules, ACL categories, server version and keyspace statistics, and fingerprints the observed ACL state. Credential hashes and plaintext-style ACL password tokens are redacted from the returned inventory; the raw ACL rules are hashed for drift detection.
+The Rust adapter requires a rediss:// URI and a registered logical database index. It connects with TLS, confirms the selected database using CLIENT INFO, reads the authenticated ACL user, ACL user rules, read-only/write-only/read-write key patterns, command rules, ACL categories, server version and keyspace statistics, and fingerprints the observed ACL state. Policy inspection checks required explicit commands and key-pattern modes, flags broad categories and wildcard access, and still requires independent data-plane probes. Credential hashes and plaintext-style ACL password tokens are redacted from the returned inventory; the raw ACL rules are hashed for drift detection.
 
 ```bash
 PROXIMA_REDIS_ADAPTER_URI='rediss://...' \\
