@@ -363,12 +363,15 @@ impl PolicyAdmissionClient {
             .map_err(|_| io::Error::new(io::ErrorKind::PermissionDenied, "Policy admission signature verification failed"))?;
         let allow = payload.decision == "allow";
         if let Ok(mut cache) = self.cache.lock() {
-            cache.insert(cache_key, CachedPolicyDecision {
-                checked_at: timestamp,
-                expires_at: payload.expires_at,
-                allow,
-                reason: payload.reason.clone(),
-            });
+            cache.retain(|_, cached| cached.expires_at > timestamp);
+            if cache.len() < 100_000 || cache.contains_key(&cache_key) {
+                cache.insert(cache_key, CachedPolicyDecision {
+                    checked_at: timestamp,
+                    expires_at: payload.expires_at,
+                    allow,
+                    reason: payload.reason.clone(),
+                });
+            }
         }
         if !allow {
             return Err(io::Error::new(io::ErrorKind::PermissionDenied,
