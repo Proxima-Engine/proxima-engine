@@ -99,6 +99,7 @@ pub struct SignedPolicyAdmission {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AdmissionExpectation<'a> {
+    pub database_kind: DatabaseKind,
     pub policy_id: &'a str,
     pub policy_revision: u64,
     pub target_id: &'a str,
@@ -184,6 +185,9 @@ impl PolicyEvidenceAuthority {
         let payload = &evidence.payload;
         if admission.model_version != SECURITY_MODEL_VERSION || payload.model_version != SECURITY_MODEL_VERSION {
             return Err(error("unsupported_security_model", "The admission or evidence uses an unknown security-model version."));
+        }
+        if payload.database_kind != expected.database_kind {
+            return Err(error("database_kind_mismatch", "The signed evidence belongs to a different database engine than the requested target."));
         }
         if admission.policy_id != expected.policy_id || admission.policy_revision != expected.policy_revision
             || payload.policy_id != expected.policy_id || payload.policy_revision != expected.policy_revision {
@@ -296,7 +300,7 @@ mod tests {
     }
 
     fn expected() -> AdmissionExpectation<'static> {
-        AdmissionExpectation { policy_id: "tenant-data", policy_revision: 4, target_id: "db-prod-01", tenant_id: "tenant-a" }
+        AdmissionExpectation { database_kind: DatabaseKind::PostgreSql, policy_id: "tenant-data", policy_revision: 4, target_id: "db-prod-01", tenant_id: "tenant-a" }
     }
 
     #[test]
