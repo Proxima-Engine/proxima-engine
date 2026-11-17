@@ -114,7 +114,7 @@ mod tests {
     }
 
     fn expected() -> AdmissionExpectation<'static> {
-        AdmissionExpectation { policy_id: "tenant-boundary", policy_revision: 3, target_id: "prod-db", tenant_id: "tenant-a" }
+        AdmissionExpectation { database_kind: DatabaseKind::PostgreSql, policy_id: "tenant-boundary", policy_revision: 3, target_id: "prod-db", tenant_id: "tenant-a" }
     }
 
     #[test]
