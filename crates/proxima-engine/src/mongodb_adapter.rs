@@ -181,7 +181,7 @@ impl MongoCatalogAdapter {
             "index_inventory_truncated": index_inventory_truncated,
             "index_count": total_index_count
         });
-        let fingerprint = digest(&serde_json::to_vec(&json!({"target":target_attributes,"resources":resources}))
+        let fingerprint = digest(&serde_json::to_vec(&json!({"target_id":self.target_id,"database_name":self.database_name,"target":target_attributes,"resources":resources}))
             .map_err(|_| error("fingerprint_serialization_failed", "Could not serialize MongoDB discovery results."))?);
         Ok(DiscoverySnapshot {
             database_kind: DatabaseKind::MongoDb,
