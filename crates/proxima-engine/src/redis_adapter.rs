@@ -34,6 +34,9 @@ impl RedisCatalogAdapter {
         if !connection_uri.to_ascii_lowercase().starts_with("rediss://") {
             return Err(error("redis_tls_required", "Redis catalog connections must use rediss:// with certificate and hostname verification."));
         }
+        if connection_uri.contains('#') {
+            return Err(error("redis_tls_verification_required", "Redis URL fragments are forbidden; redis-rs uses #insecure to disable TLS certificate verification."));
+        }
         Client::open(connection_uri.as_str())
             .map_err(|_| error("invalid_redis_connection_config", "The Redis TLS connection URI could not be parsed."))?;
         Ok(Self { target_id, database_index, connection_uri })
