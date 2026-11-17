@@ -361,7 +361,9 @@ async fn main() -> Result<(),Box<dyn Error>> {
             let connector: PostgresConnector = std::sync::Arc::new(|| Box::pin(async {
               Err(AdapterError { code: "compile_only_connector".into(), detail: "PostgreSQL plan compilation does not connect to a database.".into(), retryable: false })
             }));
-            let adapter = PostgresCatalogAdapter::new("compile-only", "compile-only", connector)?;
+            let tenant_role_prefix = env::var("PROXIMA_TENANT_ROLE_PREFIX")
+              .map_err(|_| "set PROXIMA_TENANT_ROLE_PREFIX to compile a role-bound PostgreSQL policy")?;
+            let adapter = PostgresCatalogAdapter::new("compile-only", "compile-only", tenant_role_prefix, connector)?;
             adapter.compile_policy(&policy)?
           },
           "sql_server" => compile_sql_server(&policy)?,
@@ -388,6 +390,8 @@ async fn main() -> Result<(),Box<dyn Error>> {
             .map_err(|_| "set PROXIMA_POSTGRES_ADAPTER_TARGET_ID to the registered non-secret target ID")?;
         let database_name = env::var("PROXIMA_POSTGRES_ADAPTER_DATABASE_NAME")
             .map_err(|_| "set PROXIMA_POSTGRES_ADAPTER_DATABASE_NAME to the expected database name")?;
+        let tenant_role_prefix = env::var("PROXIMA_TENANT_ROLE_PREFIX")
+            .map_err(|_| "set PROXIMA_TENANT_ROLE_PREFIX to the Engine's tenant role prefix")?;
         let connector_url = url.clone();
         let connector: PostgresConnector = std::sync::Arc::new(move || {
             let connector_url = connector_url.clone();
@@ -409,11 +413,11 @@ async fn main() -> Result<(),Box<dyn Error>> {
                 Ok(client)
             }) as AdapterFuture<'static, Result<tokio_postgres::Client, AdapterError>>
         });
-        let adapter = PostgresCatalogAdapter::new(target_id.clone(), database_name, connector)?;
+        let adapter = PostgresCatalogAdapter::new(target_id.clone(), database_name.clone(), tenant_role_prefix, connector)?;
         let request = InspectionRequest {
             target: AdapterTarget {
                 target_id,
-                database_name: env::var("PROXIMA_POSTGRES_ADAPTER_DATABASE_NAME")?,
+                database_name,
                 namespace: None,
             },
             policy,
