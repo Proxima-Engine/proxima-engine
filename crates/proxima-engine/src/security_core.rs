@@ -116,7 +116,7 @@ pub fn adapter_catalog() -> Vec<AdapterDescriptor> {
             name: "MariaDB",
             maturity: AdapterMaturity::InDevelopment,
             capabilities: AdapterCapabilities { policy_generation: true, ..AdapterCapabilities::default() },
-            status_note: "Reviewable database-per-tenant grant templates exist. No shared-table row-level enforcement, native inspection, runtime principal binding or drift verification is implemented.",
+            status_note: "Reviewable database-per-tenant grant templates require a trusted application-host scope. No shared-table row-level enforcement, native inspection, runtime principal binding or drift verification is implemented.",
         },
         AdapterDescriptor {
             kind: DatabaseKind::SqlServer,
