@@ -277,6 +277,10 @@ impl DatabaseAdapter for MongoCatalogAdapter {
                         resource_findings.push(finding("tenant_ownership_validator_missing", &protected.resource, "The collection validator does not declare the policy tenant ownership field."));
                     } else if tenant_property.and_then(|property| property.get("bsonType")).is_none() {
                         resource_findings.push(finding("tenant_ownership_type_unconstrained", &protected.resource, "The collection validator does not constrain the BSON type of the tenant ownership field."));
+                    } else if tenant_property.and_then(|property| property.get("bsonType")).is_some_and(|bson_type| {
+                        bson_type.as_str() == Some("null") || bson_type.as_array().is_some_and(|types| types.iter().any(|kind| kind.as_str() == Some("null")))
+                    }) {
+                        resource_findings.push(finding("tenant_ownership_type_nullable", &protected.resource, "The collection validator permits BSON null for the tenant ownership field."));
                     }
                     let required = validator.get("$jsonSchema").and_then(|schema| schema.get("required")).and_then(Value::as_array);
                     if !required.is_some_and(|fields| fields.iter().any(|field| field.as_str() == Some(protected.tenant_key.as_str()))) {
