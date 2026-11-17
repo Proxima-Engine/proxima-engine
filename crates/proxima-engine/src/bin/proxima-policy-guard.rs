@@ -1,5 +1,5 @@
 use serde_json::{json, Value};
-use proxima_engine::security_core::{adapter_catalog, SECURITY_MODEL_VERSION};
+use proxima_engine::security_core::{adapter_catalog, TenantSecurityPolicy, SECURITY_MODEL_VERSION};
 use std::{collections::HashSet, env, error::Error, fs, io::BufReader, path::Path, str::FromStr, time::Duration};
 use tokio_postgres::config::SslMode;
 use tokio_postgres_rustls::MakeRustlsConnect;
@@ -283,6 +283,24 @@ $agata_proxima_preflight$;
 async fn main() -> Result<(),Box<dyn Error>> {
     let mut args=env::args().skip(1);
     match args.next().as_deref() {
+      Some("validate-policy") => {
+        let path=args.next().ok_or("usage: proxima-policy-guard validate-policy <policy.json>")?;
+        let source=fs::read_to_string(&path)?;
+        let policy:TenantSecurityPolicy=serde_json::from_str(&source)?;
+        match policy.validate() {
+          Ok(()) => println!("{}",serde_json::to_string_pretty(&json!({
+            "valid":true,
+            "schema_version":policy.schema_version,
+            "policy_id":policy.policy_id,
+            "revision":policy.revision,
+            "resource_count":policy.resources.len()
+          }))?),
+          Err(error) => {
+            println!("{}",serde_json::to_string_pretty(&json!({"valid":false,"error":format!("{error:?}")}))?);
+            std::process::exit(2);
+          }
+        }
+      },
       Some("adapters") => {
         let value=json!({"schema_version":SECURITY_MODEL_VERSION,"adapters":adapter_catalog()});
         println!("{}",serde_json::to_string_pretty(&value)?);
@@ -298,7 +316,7 @@ async fn main() -> Result<(),Box<dyn Error>> {
         let spec:Value=serde_json::from_slice(&fs::read(Path::new(&path))?)?;
         print!("{}",generate(&spec)?);
       },
-      _ => return Err("usage: proxima-policy-guard <adapters|audit|generate>".into())
+      _ => return Err("usage: proxima-policy-guard <adapters|audit|generate|validate-policy>".into())
     }
     Ok(())
 }
