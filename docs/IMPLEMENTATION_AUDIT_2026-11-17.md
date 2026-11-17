@@ -84,3 +84,10 @@ The MySQL/MariaDB database-per-tenant grant template now requires a trusted appl
 The Redis ACL compiler now derives a narrower command allowlist from the requested read/create/update/delete operations rather than granting the same broad mutating command set for every write operation. Regression tests cover delete-only and create-only plans. The generated plan also explicitly states that Redis ACL command permissions cannot distinguish create-only from update-only behavior for upsert commands; that semantic distinction requires an enforcing gateway or application contract and is not claimed as a Redis-native capability.
 
 These are policy-plan safety improvements only. They do not add native MySQL/MariaDB/Redis connections, catalog inspection, deployment, semantic verification, runtime enforcement or drift monitoring. The tests were authored but not executed in this session.
+
+
+## 9. Signed evidence admission coverage hardening — 17 November 2026
+
+The generic Engine evidence authority now refuses admission unless every declared operation has both a passing own_tenant_allow:<operation> check and a passing cross_tenant_deny:<operation> check. Duplicate check identifiers and duplicate verified operations are rejected, and check identifiers/details are bounded. This prevents a signed payload with one arbitrary passing check from being treated as complete tenant-isolation proof.
+
+The evidence fixture tests now model positive and negative coverage for read, create, update and delete. Regression tests cover missing per-operation negative probes, duplicate check identifiers and duplicate operation declarations. These checks validate the evidence contract; they do not themselves execute database probes. A trusted native verifier must still perform the operations and sign the resulting evidence. Tests were authored but not executed.
