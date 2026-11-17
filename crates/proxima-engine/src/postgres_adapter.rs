@@ -20,7 +20,7 @@ use crate::security_core::{
 };
 use serde_json::json;
 use sha2::{Digest, Sha256};
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 use tokio_postgres::Client;
 
 /// The connector owns credential retrieval, TLS verification, connection
@@ -126,6 +126,7 @@ impl DatabaseAdapter for PostgresCatalogAdapter {
         request: &'a DiscoveryRequest,
     ) -> AdapterFuture<'a, Result<DiscoverySnapshot, AdapterError>> {
         Box::pin(async move {
+            tokio::time::timeout(Duration::from_secs(90), async {
             self.validate_target(&request.target)?;
             if request.namespace.as_ref().is_some_and(|namespace| {
                 namespace.trim().is_empty() || namespace.len() > 63 || namespace.contains('\\0')
@@ -238,6 +239,13 @@ impl DatabaseAdapter for PostgresCatalogAdapter {
                 fingerprint: Some(fingerprint),
                 observed_at,
             })
+            })
+            .await
+            .map_err(|_| AdapterError {
+                code: "postgres_catalog_timeout".into(),
+                detail: "PostgreSQL catalog discovery exceeded the ninety-second operation deadline.".into(),
+                retryable: true,
+            })?
         })
     }
 
