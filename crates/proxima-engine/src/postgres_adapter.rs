@@ -433,8 +433,8 @@ mod tests {
         assert_eq!(statements.len(), 6);
         let sql = statements.iter().map(|value| value.as_str().unwrap()).collect::<Vec<_>>().join("\n");
         assert!(sql.contains("AS RESTRICTIVE"));
-        assert!(sql.contains("left(current_user, char_length('proxima_tenant_')) = 'proxima_tenant_'"));
-        assert!(sql.contains("substring(current_user FROM char_length('proxima_tenant_') + 1)"));
+        assert!(sql.contains("pg_catalog.left(current_user, pg_catalog.char_length('proxima_tenant_')) = 'proxima_tenant_'"));
+        assert!(sql.contains("pg_catalog.substring(current_user FROM pg_catalog.char_length('proxima_tenant_') + 1)"));
         assert!(!sql.contains("current_setting"));
         assert!(sql.contains("\"customer data\".\"invoices\""));
         assert!(sql.contains("WITH CHECK"));
