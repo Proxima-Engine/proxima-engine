@@ -264,7 +264,10 @@ fn is_sha256(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::connection_admission::ConnectionAdmissionGate;
     use crate::database_adapter::{AdapterFuture, DatabaseAdapter, ResourceInspection};
+    use crate::policy_evidence::{EvidenceCheck, EvidenceCheckKind, PolicyEvidenceAuthority, PolicyEvidencePayload};
+    use crate::tenant_identity::{TenantIdentityAuthority, TenantIdentityClaims, TenantIdentityExpectation};
     use crate::security_core::{
         AdapterCapabilities, AdapterDescriptor, AdapterMaturity, Operation,
         ProtectedResource, ResourceKind, ResourceRef, SECURITY_MODEL_VERSION,
@@ -293,27 +296,33 @@ mod tests {
         }
 
         fn inspect<'a>(&'a self, request: &'a InspectionRequest) -> AdapterFuture<'a, Result<InspectionSnapshot, AdapterError>> {
-            let mut operations = request.policy.resources[0].operations.clone();
-            if self.omit_read { operations.retain(|operation| *operation != Operation::Read); }
-            let mut resource = request.policy.resources[0].clone();
-            if self.wrong_tenant_key { resource.tenant_key = "account_id".into(); }
-            let resource_fingerprint = if self.omit_fingerprint { None } else { Some("a".repeat(64)) };
+            let resources = request.policy.resources.iter().cloned().map(|mut resource| {
+                if self.wrong_tenant_key {
+                    resource.tenant_key = "account_id".into();
+                }
+                let mut operations = resource.operations.clone();
+                if self.omit_read {
+                    operations.retain(|operation| *operation != Operation::Read);
+                }
+                ResourceInspection {
+                    resource,
+                    completeness: InspectionCompleteness::Complete,
+                    posture: SecurityPosture::Verified,
+                    verified_operations: operations,
+                    findings: Vec::new(),
+                    fingerprint: if self.omit_fingerprint { None } else { Some("a".repeat(64)) },
+                }
+            }).collect();
+            let omit_fingerprint = self.omit_fingerprint;
             Box::pin(async move {
                 Ok(InspectionSnapshot {
                     database_kind: DatabaseKind::PostgreSql,
                     target: request.target.clone(),
                     completeness: InspectionCompleteness::Complete,
                     posture: SecurityPosture::Verified,
-                    resources: vec![ResourceInspection {
-                        resource,
-                        completeness: InspectionCompleteness::Complete,
-                        posture: SecurityPosture::Verified,
-                        verified_operations: operations,
-                        findings: Vec::new(),
-                        fingerprint: resource_fingerprint,
-                    }],
+                    resources,
                     findings: Vec::new(),
-                    fingerprint: if self.omit_fingerprint { None } else { Some("a".repeat(64)) },
+                    fingerprint: if omit_fingerprint { None } else { Some("a".repeat(64)) },
                     observed_at: "2026-11-17T00:00:00Z".into(),
                 })
             })
@@ -387,6 +396,102 @@ mod tests {
                 }],
             },
         }
+    }
+
+    fn identity(request: &InspectionRequest, now: i64) -> crate::tenant_identity::VerifiedTenantIdentity {
+        let authority = TenantIdentityAuthority::new(vec![31; 32]).unwrap();
+        let claims = TenantIdentityClaims {
+            schema_version: "proxima.tenant-identity.v1".into(),
+            tenant_id: "tenant-a".into(),
+            principal_id: "app-service".into(),
+            target_id: request.target.target_id.clone(),
+            database_kind: DatabaseKind::PostgreSql,
+            policy_id: request.policy.policy_id.clone(),
+            policy_revision: request.policy.revision,
+            request_id: "550e8400-e29b-41d4-a716-446655440001".into(),
+            issued_at_unix: now,
+            expires_at_unix: now + 30,
+        };
+        let expected = TenantIdentityExpectation {
+            tenant_id: "tenant-a",
+            principal_id: "app-service",
+            target_id: &request.target.target_id,
+            database_kind: DatabaseKind::PostgreSql,
+            policy_id: &request.policy.policy_id,
+            policy_revision: request.policy.revision,
+        };
+        let token = authority.sign(&claims, now).unwrap();
+        authority.verify(&token, expected, now).unwrap()
+    }
+
+    fn signed_evidence(
+        request: &InspectionRequest,
+        resources: Vec<ProtectedResource>,
+        now: i64,
+    ) -> (
+        PolicyEvidenceAuthority,
+        crate::policy_evidence::SignedPolicyEvidence,
+        crate::policy_evidence::SignedPolicyAdmission,
+    ) {
+        let mut operations = Vec::new();
+        let mut checks = Vec::new();
+        for resource in &resources {
+            for operation in &resource.operations {
+                if !operations.contains(operation) {
+                    operations.push(*operation);
+                }
+                checks.push(EvidenceCheck {
+                    resource: resource.resource.clone(),
+                    operation: *operation,
+                    kind: EvidenceCheckKind::OwnTenantAllow,
+                    passed: true,
+                    detail: "own-tenant operation probe passed".into(),
+                });
+                checks.push(EvidenceCheck {
+                    resource: resource.resource.clone(),
+                    operation: *operation,
+                    kind: EvidenceCheckKind::CrossTenantDeny,
+                    passed: true,
+                    detail: "cross-tenant operation probe denied".into(),
+                });
+                if matches!(operation, Operation::Create | Operation::Update | Operation::Delete) {
+                    checks.push(EvidenceCheck {
+                        resource: resource.resource.clone(),
+                        operation: *operation,
+                        kind: EvidenceCheckKind::MutationRollback,
+                        passed: true,
+                        detail: "mutation probe rolled back".into(),
+                    });
+                }
+            }
+        }
+        let authority = PolicyEvidenceAuthority::new(vec![41; 32], vec![43; 32]).unwrap();
+        let evidence = authority.sign_evidence(PolicyEvidencePayload {
+            model_version: SECURITY_MODEL_VERSION.into(),
+            policy_id: request.policy.policy_id.clone(),
+            policy_revision: request.policy.revision,
+            database_kind: DatabaseKind::PostgreSql,
+            target_id: request.target.target_id.clone(),
+            tenant_id: "tenant-a".into(),
+            posture: SecurityPosture::Verified,
+            inspection: InspectionCompleteness::Complete,
+            findings: Vec::new(),
+            protected_resources: resources,
+            verified_operations: operations,
+            fingerprint: "a".repeat(64),
+            observed_at_unix: now - 1,
+            checks,
+        }).unwrap();
+        let admission = authority.issue_admission(&evidence, now, 30).unwrap();
+        (authority, evidence, admission)
+    }
+
+    fn two_resource_request() -> InspectionRequest {
+        let mut request = request();
+        let mut second = request.policy.resources[0].clone();
+        second.resource.name = "invoices".into();
+        request.policy.resources.push(second);
+        request
     }
 
     fn coordinator(omit_read: bool) -> SecurityCoreCoordinator {
@@ -467,6 +572,51 @@ mod tests {
             coordinator.detect_drift(DatabaseKind::PostgreSql, &target, Some(&"a".repeat(64))).await,
             Err(SecurityCoreError::DriftFingerprintMismatch)
         );
+    }
+
+    #[tokio::test]
+    async fn multi_resource_admission_requires_per_resource_probe_evidence() {
+        let request = two_resource_request();
+        let now = 1_900_000_010;
+        let identity = identity(&request, now);
+        let coordinator = coordinator(false);
+        let gate = ConnectionAdmissionGate::new();
+        let (authority, evidence, admission) =
+            signed_evidence(&request, vec![request.policy.resources[0].clone()], now);
+
+        assert_eq!(
+            coordinator.inspect_and_admit(
+                DatabaseKind::PostgreSql, &request, &identity, &authority,
+                &evidence, &admission, &gate, "fixture-connection", now,
+            ).await,
+            Err(SecurityCoreError::EvidenceCoverageIncomplete)
+        );
+    }
+
+    #[tokio::test]
+    async fn complete_multi_resource_admission_consumes_identity_once() {
+        let request = two_resource_request();
+        let now = 1_900_000_010;
+        let identity = identity(&request, now);
+        let coordinator = coordinator(false);
+        let gate = ConnectionAdmissionGate::new();
+        let (authority, evidence, admission) =
+            signed_evidence(&request, request.policy.resources.clone(), now);
+
+        assert_eq!(
+            coordinator.inspect_and_admit(
+                DatabaseKind::PostgreSql, &request, &identity, &authority,
+                &evidence, &admission, &gate, "fixture-connection", now,
+            ).await,
+            Ok(AccessDecision::Allow)
+        );
+        assert!(matches!(
+            coordinator.inspect_and_admit(
+                DatabaseKind::PostgreSql, &request, &identity, &authority,
+                &evidence, &admission, &gate, "fixture-connection-2", now,
+            ).await,
+            Err(SecurityCoreError::Admission(error)) if error.code == "admission_replay_detected"
+        ));
     }
 
     #[test]
