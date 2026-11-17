@@ -22,7 +22,7 @@ The Rust Policy Guard binary also exposes the adapter maturity catalog:
 cargo run -p proxima-engine --bin proxima-policy-guard -- adapters
 ```
 
-The `adapters` command prints the versioned Proxima Security Core catalog. PostgreSQL is marked `in_development`; MySQL, MariaDB, Microsoft SQL Server, MongoDB and CockroachDB are marked `planned` with no enabled capabilities. A planned entry is not a supported database integration.
+The `adapters` command prints the versioned Proxima Security Core catalog. PostgreSQL is marked `in_development`; MySQL, MariaDB, Microsoft SQL Server, MongoDB, CockroachDB and VAULTDB (Agata's embedded-engine research target) are marked `planned` with no enabled capabilities. A planned entry is not a supported database integration.
 
 The PostgreSQL `audit` command is a catalog posture inspection, not a semantic policy verifier. Its JSON deliberately reports `security_posture: unknown` and `access_decision: deny`, even when it finds no catalog findings. A zero exit code means the inspection completed without catalog findings; it does not certify tenant isolation.
 
@@ -34,6 +34,16 @@ cargo run -p proxima-engine --bin proxima-policy-guard -- validate-policy ./poli
 ```
 
 The command checks the versioned envelope, explicit resources, tenant ownership keys and unique operations. It does not prove that any database adapter has enforced the policy.
+
+Generate reviewable PostgreSQL policy SQL from an explicit JSON specification:
+
+```bash
+cargo run -p proxima-engine --bin proxima-policy-guard -- generate ./policy.json > policy.sql
+```
+
+Each tenant role must match one shared Engine prefix plus the normalized tenant ID. For example, `tenant-a` maps to `proxima_tenant_tenant_a` when `PROXIMA_TENANT_ROLE_PREFIX=proxima_tenant_`. The generated SQL prints the required prefix and performs transactional preflight checks; the CLI never connects to a database or executes the generated DDL. Review and apply it through a controlled migration workflow.
+
+Generation refuses partitioned relations, unsafe dependent views, materialized views without separate protection, tenant roles with database/schema `CREATE` privileges, and unsafe role defaults. These restrictions are deliberate until the PostgreSQL adapter implements and verifies those paths.
 
 
 | Command | Purpose |
