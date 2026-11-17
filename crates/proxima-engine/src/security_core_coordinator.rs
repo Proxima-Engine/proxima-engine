@@ -124,14 +124,19 @@ impl SecurityCoreCoordinator {
         if report.previous_fingerprint.as_deref() != previous_fingerprint {
             return Err(SecurityCoreError::DriftFingerprintMismatch);
         }
+        if previous_fingerprint.is_some_and(|value| !is_sha256(value)) {
+            return Err(SecurityCoreError::DriftFingerprintMismatch);
+        }
         if report.observed_at.trim().is_empty() || report.observed_fingerprint.as_deref().map_or(true, |value| !is_sha256(value)) {
             return Err(SecurityCoreError::DriftInspectionIncomplete);
         }
         if let (Some(previous), Some(observed)) = (previous_fingerprint, report.observed_fingerprint.as_deref()) {
             let actual_drift = previous != observed;
             if report.detected != actual_drift { return Err(SecurityCoreError::DriftFingerprintMismatch); }
-        } else if previous_fingerprint.is_some() {
-            return Err(SecurityCoreError::DriftInspectionIncomplete);
+        } else if report.detected {
+            // Without a trusted baseline, an adapter cannot assert that drift
+            // was or was not detected. Establish the first baseline as clean only.
+            return Err(SecurityCoreError::DriftFingerprintMismatch);
         }
         if report.detected && report.findings.is_empty() {
             return Err(SecurityCoreError::DriftFingerprintMismatch);
