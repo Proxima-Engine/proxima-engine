@@ -157,7 +157,7 @@ pub fn adapter_catalog() -> Vec<AdapterDescriptor> {
         AdapterDescriptor { kind: DatabaseKind::Oracle, name: "Oracle Database", maturity: AdapterMaturity::Planned, capabilities: AdapterCapabilities::default(), status_note: "Oracle VPD and Database Vault integration are not implemented." },
         AdapterDescriptor { kind: DatabaseKind::DynamoDb, name: "Amazon DynamoDB", maturity: AdapterMaturity::Planned, capabilities: AdapterCapabilities::default(), status_note: "Partition-key and IAM LeadingKeys enforcement are not implemented." },
         AdapterDescriptor { kind: DatabaseKind::Cassandra, name: "Apache Cassandra", maturity: AdapterMaturity::Planned, capabilities: AdapterCapabilities::default(), status_note: "Keyspace-per-tenant isolation is not implemented." },
-        AdapterDescriptor { kind: DatabaseKind::Elasticsearch, name: "Elasticsearch / OpenSearch", maturity: AdapterMaturity::Planned, capabilities: AdapterCapabilities::default(), status_note: "Document-level security and role enforcement are not implemented." },
+        AdapterDescriptor { kind: DatabaseKind::Elasticsearch, name: "Elasticsearch / OpenSearch", maturity: AdapterMaturity::InDevelopment, capabilities: AdapterCapabilities { schema_inspection: true, drift_detection: true, ..AdapterCapabilities::default() }, status_note: "Verified-HTTPS discovery inventories matching indices, mappings, settings, aliases and native security roles/users where visible. DLS/FLS enforcement, trusted tenant-principal binding, policy deployment, independent document probes and runtime admission are not implemented." },
     ]
 }
 
