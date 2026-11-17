@@ -221,6 +221,17 @@ impl MongoCatalogAdapter {
             observed_at: chrono::Utc::now().to_rfc3339(),
         })
     }
+
+    async fn discover_bounded(&self, request: &DiscoveryRequest) -> Result<DiscoverySnapshot, AdapterError> {
+        tokio::time::timeout(std::time::Duration::from_secs(60), self.discover_inner(request))
+            .await
+            .map_err(|_| AdapterError {
+                code: "mongodb_catalog_timeout".into(),
+                detail: "MongoDB catalog discovery exceeded the sixty-second operation deadline.".into(),
+                retryable: true,
+            })?
+    }
+
 }
 
 impl DatabaseAdapter for MongoCatalogAdapter {
@@ -240,7 +251,7 @@ impl DatabaseAdapter for MongoCatalogAdapter {
     }
 
     fn discover<'a>(&'a self, request: &'a DiscoveryRequest) -> AdapterFuture<'a, Result<DiscoverySnapshot, AdapterError>> {
-        Box::pin(async move { self.discover_inner(request).await })
+        Box::pin(async move { self.discover_bounded(request).await })
     }
 
     fn inspect<'a>(&'a self, request: &'a InspectionRequest) -> AdapterFuture<'a, Result<InspectionSnapshot, AdapterError>> {
@@ -248,7 +259,7 @@ impl DatabaseAdapter for MongoCatalogAdapter {
             self.validate_target(&request.target)?;
             request.policy.validate().map_err(|_| error("invalid_policy", "The canonical tenant policy failed validation."))?;
             let _compiled_plan = compile_mongodb_database_boundary(&request.policy)?;
-            let discovery = self.discover_inner(&DiscoveryRequest {
+            let discovery = self.discover_bounded(&DiscoveryRequest {
                 target: request.target.clone(),
                 namespace: None,
             }).await?;
@@ -363,7 +374,7 @@ impl DatabaseAdapter for MongoCatalogAdapter {
             if previous_fingerprint.is_some_and(|value| value.len() != 64 || hex::decode(value).map_or(true, |bytes| bytes.len() != 32)) {
                 return Err(error("invalid_previous_fingerprint", "The previous catalog fingerprint must be a 32-byte hexadecimal SHA-256 digest."));
             }
-            let snapshot = self.discover_inner(&DiscoveryRequest { target: target.clone(), namespace: None }).await?;
+            let snapshot = self.discover_bounded(&DiscoveryRequest { target: target.clone(), namespace: None }).await?;
             Ok(DriftReport {
                 database_kind: DatabaseKind::MongoDb,
                 target: target.clone(),
