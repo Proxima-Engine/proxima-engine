@@ -122,8 +122,8 @@ pub fn adapter_catalog() -> Vec<AdapterDescriptor> {
             kind: DatabaseKind::SqlServer,
             name: "Microsoft SQL Server",
             maturity: AdapterMaturity::InDevelopment,
-            capabilities: AdapterCapabilities { policy_generation: true, ..AdapterCapabilities::default() },
-            status_note: "Reviewable native Row-Level Security predicate and policy DDL can be generated. Session-context trust, catalog inspection, deployment, semantic verification and runtime admission are not implemented.",
+            capabilities: AdapterCapabilities { schema_inspection: true, policy_generation: true, drift_detection: true, ..AdapterCapabilities::default() },
+            status_note: "Encrypted TDS discovery inspects tables, columns, object/schema/database permissions, principals, role membership, RLS predicates, triggers, views and routines; fingerprint drift comparison is implemented. Trusted SESSION_CONTEXT binding, controlled deployment, independent semantic probes and runtime admission are not implemented.",
         },
         AdapterDescriptor {
             kind: DatabaseKind::MongoDb,
