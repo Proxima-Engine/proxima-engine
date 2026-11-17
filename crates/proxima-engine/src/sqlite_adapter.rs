@@ -265,7 +265,7 @@ impl SqliteCatalogAdapter {
         Ok(DiscoverySnapshot {
             database_kind: DatabaseKind::Sqlite,
             target: request.target.clone(),
-            completeness: if truncated { InspectionCompleteness::Incomplete } else { InspectionCompleteness::Complete },
+            completeness: if truncated || !filesystem.assessed { InspectionCompleteness::Incomplete } else { InspectionCompleteness::Complete },
             target_attributes,
             resources,
             findings,
