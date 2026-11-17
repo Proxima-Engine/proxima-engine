@@ -61,6 +61,8 @@ pub struct DiscoverySnapshot {
     pub database_kind: DatabaseKind,
     pub target: AdapterTarget,
     pub completeness: InspectionCompleteness,
+    /// Database-level facts such as server version and effective account grants.
+    pub target_attributes: Value,
     pub resources: Vec<DiscoveredResource>,
     pub findings: Vec<SecurityFinding>,
     pub fingerprint: Option<String>,
