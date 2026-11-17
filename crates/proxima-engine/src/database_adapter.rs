@@ -148,11 +148,18 @@ pub struct AdapterRegistry {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RegistryError {
     DuplicateAdapter,
+    IncompleteAdapter,
 }
 
 impl AdapterRegistry {
     pub fn register(&mut self, adapter: Arc<dyn DatabaseAdapter>) -> Result<(), RegistryError> {
-        let kind = adapter.descriptor().kind;
+        let descriptor = adapter.descriptor();
+        if descriptor.maturity != crate::security_core::AdapterMaturity::Supported
+            || !descriptor.capabilities.is_production_complete()
+        {
+            return Err(RegistryError::IncompleteAdapter);
+        }
+        let kind = descriptor.kind;
         if self.adapters.contains_key(&kind) {
             return Err(RegistryError::DuplicateAdapter);
         }
