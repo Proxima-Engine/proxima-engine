@@ -335,6 +335,11 @@ mod tests {
     fn metrics_exposition_is_prometheus_compatible_and_tracks_sessions() {
         let metrics = EngineMetrics::default();
         metrics.connection_accepted();
+        metrics.policy_admission_checked();
+        metrics.policy_admission_allowed();
+        metrics.policy_admission_checked();
+        metrics.policy_admission_denied();
+        metrics.policy_admission_session_revoked();
         metrics.session_started(true);
         metrics.session_finished(100, 80, 2_500);
         metrics.observe_query_latency(500);
@@ -346,6 +351,10 @@ mod tests {
         assert!(output.contains("proxima_engine_database_bytes_total 80\n"));
         assert!(output.contains("proxima_engine_session_duration_seconds_total 0.002500\n"));
         assert!(output.contains("proxima_engine_authenticated_tenant_sessions_total 1\n"));
+        assert!(output.contains("proxima_engine_policy_admission_checks_total 2\\n"));
+        assert!(output.contains("proxima_engine_policy_admission_allowed_total 1\\n"));
+        assert!(output.contains("proxima_engine_policy_admission_denied_total 1\\n"));
+        assert!(output.contains("proxima_engine_policy_admission_session_revocations_total 1\\n"));
         assert!(output
             .contains("proxima_engine_query_roundtrip_latency_seconds_bucket{le=\"0.001\"} 1\n"));
         assert!(output
