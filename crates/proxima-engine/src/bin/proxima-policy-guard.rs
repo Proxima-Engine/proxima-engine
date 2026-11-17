@@ -47,7 +47,7 @@ async fn inspect(url: &str) -> Result<Vec<TableFinding>, Box<dyn Error>> {
     let tls = audit_tls_connector()?;
     let (client, connection) = tokio::time::timeout(Duration::from_secs(10), config.connect(tls)).await??;
     tokio::spawn(async move { if let Err(e) = connection.await { eprintln!("audit connection ended: {e}"); } });
-    client.batch_execute("SET default_transaction_read_only = on; SET statement_timeout = '10s'; SET lock_timeout = '2s';").await?;
+    client.batch_execute("SET default_transaction_read_only = on; SET statement_timeout = '10s'; SET lock_timeout = '2s'; SET search_path = pg_catalog, pg_temp;").await?;
     let unsafe_inspector: bool = client.query_one(r#"
       WITH RECURSIVE member_roles(role_oid) AS (
         SELECT oid FROM pg_roles WHERE rolname=current_user
@@ -145,7 +145,7 @@ fn generate(spec: &Value) -> Result<String, Box<dyn Error>> {
     if tables.is_empty() { return Err("tables array cannot be empty".into()); }
     if tables.len()>100 { return Err("at most 100 tables may be generated in one policy spec".into()); }
     let mut seen_tables=HashSet::new();
-    let mut out=String::from("-- Agata Proxima generated SQL. Review and apply through migrations.\n-- Tenant identity is bound to current_user, not a client-writable GUC.\nBEGIN;\n");
+    let mut out=String::from("-- Agata Proxima generated SQL. Review and apply through migrations.\n-- Tenant identity is bound to current_user, not a client-writable GUC.\nBEGIN;\nSET LOCAL search_path = pg_catalog, pg_temp;\n");
     for t in tables {
         let schema=t["schema"].as_str().ok_or("schema required")?;
         let name=t["table"].as_str().ok_or("table required")?;
