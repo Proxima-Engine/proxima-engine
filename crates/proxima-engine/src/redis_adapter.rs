@@ -131,6 +131,7 @@ impl RedisCatalogAdapter {
         }
         let sanitized_acl = acl_lines.iter().map(|line| sanitize_acl_line(line)).collect::<Vec<_>>();
         let target_attributes = json!({
+            "target_id": self.target_id,
             "database_index": self.database_index,
             "authenticated_acl_user": whoami,
             "server_version": info_field(&server_info, "redis_version").unwrap_or_else(|| "unknown".into()),
