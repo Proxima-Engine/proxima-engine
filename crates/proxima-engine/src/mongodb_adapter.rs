@@ -116,10 +116,21 @@ impl MongoCatalogAdapter {
             let options = entry.get_document("options").cloned().unwrap_or_default();
             let info = entry.get_document("info").cloned().unwrap_or_default();
             let kind = if resource_type == "view" { ResourceKind::View } else { ResourceKind::Collection };
+            let indexes = if resource_type == "view" {
+                Vec::new()
+            } else {
+                let index_response = database.run_command(doc! { "listIndexes": &name, "cursor": {} })
+                    .await.map_err(db_error)?;
+                let index_batch = index_response.get_document("cursor")
+                    .and_then(|cursor| cursor.get_array("firstBatch"))
+                    .map_err(|_| error("mongodb_index_discovery_response_invalid", "MongoDB listIndexes returned an invalid cursor response."))?;
+                index_batch.iter().filter_map(Bson::as_document).map(|index| bson_value(index)).collect::<Result<Vec<_>,AdapterError>>()?
+            };
             let attributes = json!({
                 "native_type": resource_type,
                 "options": bson_value(&options)?,
                 "info": bson_value(&info)?,
+                "indexes": indexes,
                 "collection_uuid": info.get("uuid").map(|value| format!("{value:?}")),
                 "validator": options.get("validator").map(|value| format!("{value:?}")),
                 "view_on": options.get_str("viewOn").ok(),
