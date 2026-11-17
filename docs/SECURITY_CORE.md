@@ -47,6 +47,12 @@ Every adapter must implement and validate:
 
 A database driver or successful connection is not an adapter. A catalog listing is not semantic authorization verification. A generated policy is not evidence that it was safely deployed.
 
+## Signed policy evidence and admission primitives
+
+The Engine library now exposes `policy_evidence::PolicyEvidenceAuthority`. It signs policy-evidence payloads with HMAC-SHA256, binding the model version, policy revision, database kind, target, tenant, posture, inspection completeness, findings, verified operations, catalog fingerprint, timestamp and individual checks. Admission envelopes bind to the exact signed-evidence digest and expire within 60 seconds. Issuance rejects stale evidence, incomplete inspection, unresolved findings, empty operation coverage or failed checks; verification rejects altered signatures and mismatched policy, target or tenant.
+
+These are cryptographic library primitives, not a completed runtime admission pipeline. The PostgreSQL listener does not yet require or verify these admission envelopes at connection startup, and the Cloud control plane does not yet ingest and persist these policy-evidence records. They must not be represented as active runtime enforcement or hosted evidence until those integrations and replay/connection-binding controls are implemented and accepted.
+
 ## PostgreSQL-specific implementation
 
 The PostgreSQL adapter currently uses the PostgreSQL wire protocol and native role/RLS mechanisms. It must preserve the existing signed tenant identity and tenant-to-role binding while Policy Guard matures.
