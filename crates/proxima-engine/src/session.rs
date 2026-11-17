@@ -180,11 +180,12 @@ fn prepare_startup(
                 || key == "replication"
                 || key == "row_security"
                 || key == "session_replication_role"
+                || key == "search_path"
                 || key == "options" && sql_guard::blocks_tenant_startup_options(value.as_str());
             if blocked {
                 return Err(io::Error::new(
                     io::ErrorKind::PermissionDenied,
-                    "tenant-bound PostgreSQL startup options cannot change roles or disable row security",
+                    "tenant-bound PostgreSQL startup options cannot change roles, row security, or search_path",
                 ));
             }
         }
@@ -521,6 +522,7 @@ mod tests {
             ("row_security","off"),
             ("session_replication_role","origin"),
             ("session_replication_role","replica"),
+            ("search_path","public"),
             ("role","proxima_tenant_other"),
             ("session_authorization","other_user"),
         ] {
