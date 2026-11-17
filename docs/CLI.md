@@ -104,3 +104,10 @@ proxima-policy-guard compile-plan redis policy.json
 ```
 
 Redirect output to a file for review, for example `proxima-policy-guard compile-plan sql_server policy.json > sql-server-plan.json`. SQL Server plans contain a `<VERIFIED_COLUMN_TYPE>` placeholder that must be resolved by a future live catalog inspector; do not execute the plan as-is. MySQL/MariaDB and MongoDB templates require one database per tenant. Redis requires a keyspace resource whose `tenant_key` uses a strict tenant-specific pattern such as `tenant:${tenant_id}:*`. These are policy-generation templates only, not live adapters or production support.
+
+
+## Native MySQL/MariaDB adapter
+
+The Rust adapter exposes read-only MySQL-protocol discovery and catalog inspection for a registered database target. It requires a `mysql://` connection URL whose server certificate and hostname can be verified; TLS identity verification is mandatory. The adapter reads `information_schema` tables, columns, routines, table privileges and schema privileges, and computes a catalog fingerprint for drift comparison. It deliberately reports catalog visibility as incomplete because MySQL/MariaDB metadata visibility is privilege-filtered.
+
+The adapter can be constructed by an Engine integration with `MySqlCatalogAdapter::new(target_id, database_name, connection_url, DatabaseKind::MySql)` or `DatabaseKind::MariaDb`. It does not apply DDL, create users, switch roles, or authorize traffic. Its existing database-per-tenant plan compiler remains review-only until a trusted protocol gateway binds tenant identity to isolated database principals and independent positive/negative probes prove the boundary.
