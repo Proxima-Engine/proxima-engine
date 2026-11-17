@@ -12,11 +12,17 @@ pub const SECURITY_MODEL_VERSION: &str = "proxima.security.v1";
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DatabaseKind {
+    #[serde(rename = "postgresql")]
     PostgreSql,
+    #[serde(rename = "mysql")]
     MySql,
+    #[serde(rename = "mariadb")]
     MariaDb,
+    #[serde(rename = "sql_server")]
     SqlServer,
+    #[serde(rename = "mongodb")]
     MongoDb,
+    #[serde(rename = "cockroachdb")]
     CockroachDb,
 }
 
@@ -127,6 +133,7 @@ pub enum Operation {
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ResourceRef {
     pub namespace: Option<String>,
     pub name: String,
@@ -134,6 +141,7 @@ pub struct ResourceRef {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ProtectedResource {
     pub resource: ResourceRef,
     /// Native tenant ownership attribute (column, field, or equivalent).
@@ -142,6 +150,7 @@ pub struct ProtectedResource {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TenantSecurityPolicy {
     pub schema_version: String,
     pub policy_id: String,
@@ -154,11 +163,18 @@ pub struct TenantSecurityPolicy {
 pub enum PolicyValidationError {
     UnsupportedSchemaVersion,
     EmptyPolicyId,
+    PolicyIdTooLong,
     ZeroRevision,
     EmptyTenantIdentityClaim,
+    TenantIdentityClaimTooLong,
     NoProtectedResources,
+    TooManyResources,
     EmptyResourceName,
+    ResourceNameTooLong,
+    EmptyNamespace,
+    NamespaceTooLong,
     EmptyTenantKey,
+    TenantKeyTooLong,
     NoOperations,
     DuplicateResource,
     DuplicateOperation,
@@ -170,26 +186,49 @@ impl TenantSecurityPolicy {
         if self.schema_version != SECURITY_MODEL_VERSION {
             return Err(PolicyValidationError::UnsupportedSchemaVersion);
         }
-        if self.policy_id.trim().is_empty() {
+        if self.policy_id.trim().is_empty() || self.policy_id.contains('\0') {
             return Err(PolicyValidationError::EmptyPolicyId);
+        }
+        if self.policy_id.chars().count() > 128 {
+            return Err(PolicyValidationError::PolicyIdTooLong);
         }
         if self.revision == 0 {
             return Err(PolicyValidationError::ZeroRevision);
         }
-        if self.tenant_identity_claim.trim().is_empty() {
+        if self.tenant_identity_claim.trim().is_empty() || self.tenant_identity_claim.contains('\0') {
             return Err(PolicyValidationError::EmptyTenantIdentityClaim);
+        }
+        if self.tenant_identity_claim.chars().count() > 128 {
+            return Err(PolicyValidationError::TenantIdentityClaimTooLong);
         }
         if self.resources.is_empty() {
             return Err(PolicyValidationError::NoProtectedResources);
         }
+        if self.resources.len() > 1000 {
+            return Err(PolicyValidationError::TooManyResources);
+        }
 
         let mut resources = HashSet::new();
         for item in &self.resources {
-            if item.resource.name.trim().is_empty() {
+            if item.resource.name.trim().is_empty() || item.resource.name.contains('\0') {
                 return Err(PolicyValidationError::EmptyResourceName);
             }
-            if item.tenant_key.trim().is_empty() {
+            if item.resource.name.chars().count() > 256 {
+                return Err(PolicyValidationError::ResourceNameTooLong);
+            }
+            if let Some(namespace) = item.resource.namespace.as_deref() {
+                if namespace.trim().is_empty() || namespace.contains('\0') {
+                    return Err(PolicyValidationError::EmptyNamespace);
+                }
+                if namespace.chars().count() > 256 {
+                    return Err(PolicyValidationError::NamespaceTooLong);
+                }
+            }
+            if item.tenant_key.trim().is_empty() || item.tenant_key.contains('\0') {
                 return Err(PolicyValidationError::EmptyTenantKey);
+            }
+            if item.tenant_key.chars().count() > 256 {
+                return Err(PolicyValidationError::TenantKeyTooLong);
             }
             if item.operations.is_empty() {
                 return Err(PolicyValidationError::NoOperations);
@@ -308,6 +347,28 @@ mod tests {
         let mut policy = valid_policy();
         policy.resources[0].tenant_key.clear();
         assert_eq!(policy.validate(), Err(PolicyValidationError::EmptyTenantKey));
+    }
+
+    #[test]
+    fn enforces_the_shared_schema_limits_and_rejects_unknown_fields() {
+        let mut policy = valid_policy();
+        policy.policy_id = "x".repeat(129);
+        assert_eq!(policy.validate(), Err(PolicyValidationError::PolicyIdTooLong));
+
+        let mut policy = valid_policy();
+        policy.resources[0].resource.namespace = Some(" ".into());
+        assert_eq!(policy.validate(), Err(PolicyValidationError::EmptyNamespace));
+
+        let mut policy = valid_policy();
+        policy.resources[0].tenant_key = "k".repeat(257);
+        assert_eq!(policy.validate(), Err(PolicyValidationError::TenantKeyTooLong));
+
+        let unknown_field = r#"{
+          "schema_version":"proxima.security.v1","policy_id":"p","revision":1,
+          "tenant_identity_claim":"tenant_id","unexpected":true,
+          "resources":[{"resource":{"name":"invoices","kind":"table"},"tenant_key":"tenant_id","operations":["read"]}]
+        }"#;
+        assert!(serde_json::from_str::<TenantSecurityPolicy>(unknown_field).is_err());
     }
 
     #[test]
