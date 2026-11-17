@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT"
 description = "Agata Proxima security infrastructure engine"
-repository = "https://github.com/Agata-Proxima/proxima-engine"
+repository = "https://github.com/Proxima-Engine/proxima-engine"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
