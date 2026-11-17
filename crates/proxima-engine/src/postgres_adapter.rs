@@ -420,6 +420,45 @@ mod tests {
         assert_eq!(adapter().compile_policy(&invalid).unwrap_err().code, "unsupported_resource_kind");
     }
 
+
+    #[tokio::test]
+    async fn catalog_only_verification_never_allows_admission() {
+        let adapter = adapter();
+        let policy = policy();
+        let snapshot = InspectionSnapshot {
+            database_kind: DatabaseKind::PostgreSql,
+            target: AdapterTarget {
+                target_id: "test-target".into(),
+                database_name: "app_db".into(),
+                namespace: None,
+            },
+            completeness: InspectionCompleteness::Complete,
+            posture: SecurityPosture::Verified,
+            resources: Vec::new(),
+            findings: Vec::new(),
+            fingerprint: Some("a".repeat(64)),
+            observed_at: "2026-11-17T00:00:00Z".into(),
+        };
+        let report = adapter.verify(&policy, &snapshot).await.unwrap();
+        assert_eq!(report.access_decision(), crate::security_core::AccessDecision::Deny);
+        assert!(report.findings.iter().any(|item| item.code == "independent_tenant_probes_required"));
+    }
+
+    #[tokio::test]
+    async fn inspection_rejects_a_different_registered_target_before_connecting() {
+        let adapter = adapter();
+        let request = InspectionRequest {
+            target: AdapterTarget {
+                target_id: "other-target".into(),
+                database_name: "app_db".into(),
+                namespace: None,
+            },
+            policy: policy(),
+        };
+        let result = adapter.inspect(&request).await;
+        assert_eq!(result.unwrap_err().code, "postgres_target_mismatch");
+    }
+
     #[test]
     fn postgres_adapter_does_not_claim_production_support() {
         let descriptor = adapter().descriptor();
