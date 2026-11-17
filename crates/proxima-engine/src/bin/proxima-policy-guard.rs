@@ -326,4 +326,19 @@ mod tests {
      {"tenant_id":"tenant-a","role":"proxima_shared"},{"tenant_id":"tenant-b","role":"proxima_shared"}]}]});
    assert!(generate(&spec).is_err());
  }
+ #[test] fn rejects_duplicate_table_mappings() {
+   let spec=json!({"tables":[
+     {"schema":"public","table":"orders","tenant_column":"tenant_id","tenants":[{"tenant_id":"a","role":"proxima_a"}]},
+     {"schema":"public","table":"orders","tenant_column":"tenant_id","tenants":[{"tenant_id":"b","role":"proxima_b"}]}
+   ]});
+   assert!(generate(&spec).is_err());
+ }
+ #[test] fn rejects_nul_and_unsafe_role_identifiers() {
+   let nul_identifier=json!({"tables":[{"schema":"public\\u0000","table":"orders","tenant_column":"tenant_id","tenants":[{"tenant_id":"a","role":"proxima_a"}]}]});
+   let nul_tenant=json!({"tables":[{"schema":"public","table":"orders","tenant_column":"tenant_id","tenants":[{"tenant_id":"a\\u0000b","role":"proxima_a"}]}]});
+   let invalid_role=json!({"tables":[{"schema":"public","table":"orders","tenant_column":"tenant_id","tenants":[{"tenant_id":"a","role":"proxima-a"}]}]});
+   assert!(generate(&nul_identifier).is_err());
+   assert!(generate(&nul_tenant).is_err());
+   assert!(generate(&invalid_role).is_err());
+ }
 }
