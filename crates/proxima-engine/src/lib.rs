@@ -8,6 +8,7 @@ pub mod protocol;
 pub mod security_breaker;
 pub mod session;
 pub mod tenant;
+pub mod tenant_identity;
 pub mod tls;
 pub mod sql_guard;
 pub mod security_core;
