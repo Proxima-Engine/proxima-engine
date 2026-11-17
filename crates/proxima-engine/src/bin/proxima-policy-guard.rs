@@ -4,6 +4,7 @@ use proxima_engine::database_adapter::{AdapterError, AdapterFuture, AdapterTarge
 use proxima_engine::postgres_adapter::{PostgresCatalogAdapter, PostgresConnector};
 use proxima_engine::mysql_adapter::MySqlCatalogAdapter;
 use proxima_engine::mongodb_adapter::MongoCatalogAdapter;
+use proxima_engine::redis_adapter::RedisCatalogAdapter;
 use proxima_engine::native_policy_plans::{compile_mongodb_database_boundary, compile_mysql_database_boundary, compile_redis_acl, compile_sql_server};
 use std::{collections::HashSet, env, error::Error, fs, io::BufReader, path::Path, str::FromStr, time::Duration};
 use tokio_postgres::config::SslMode;
@@ -525,6 +526,55 @@ async fn main() -> Result<(),Box<dyn Error>> {
         }))?);
         if decision != AccessDecision::Allow { std::process::exit(2); }
       },
+      Some("discover-redis") => {
+        if args.next().is_some() { return Err("usage: proxima-policy-guard discover-redis".into()); }
+        let uri = env::var("PROXIMA_REDIS_ADAPTER_URI")
+            .map_err(|_| "set PROXIMA_REDIS_ADAPTER_URI to a rediss:// URI with verified TLS")?;
+        let target_id = env::var("PROXIMA_REDIS_ADAPTER_TARGET_ID")
+            .map_err(|_| "set PROXIMA_REDIS_ADAPTER_TARGET_ID to the registered non-secret target ID")?;
+        let database_index = env::var("PROXIMA_REDIS_ADAPTER_DATABASE_INDEX")
+            .map_err(|_| "set PROXIMA_REDIS_ADAPTER_DATABASE_INDEX to the expected Redis logical database number")?
+            .parse::<u32>().map_err(|_| "PROXIMA_REDIS_ADAPTER_DATABASE_INDEX must be a non-negative integer")?;
+        let adapter = RedisCatalogAdapter::new(target_id.clone(), database_index, uri)?;
+        let snapshot = adapter.discover(&DiscoveryRequest {
+            target: AdapterTarget { target_id, database_name: database_index.to_string(), namespace: None },
+            namespace: None,
+        }).await?;
+        println!("{}", serde_json::to_string_pretty(&json!({
+            "adapter": adapter.descriptor(),
+            "discovery": snapshot,
+            "access_decision": "deny",
+            "note": "Redis ACL discovery inventories command and key-pattern rules. It does not prove application tenant binding or authorize traffic."
+        }))?);
+      },
+      Some("inspect-redis-policy") => {
+        let path = args.next().ok_or("usage: proxima-policy-guard inspect-redis-policy <policy.json>")?;
+        if args.next().is_some() { return Err("only one policy file may be supplied".into()); }
+        let policy: TenantSecurityPolicy = serde_json::from_slice(&fs::read(&path)?)?;
+        policy.validate().map_err(|error| format!("invalid policy: {error:?}"))?;
+        let uri = env::var("PROXIMA_REDIS_ADAPTER_URI")
+            .map_err(|_| "set PROXIMA_REDIS_ADAPTER_URI to a rediss:// URI with verified TLS")?;
+        let target_id = env::var("PROXIMA_REDIS_ADAPTER_TARGET_ID")
+            .map_err(|_| "set PROXIMA_REDIS_ADAPTER_TARGET_ID to the registered non-secret target ID")?;
+        let database_index = env::var("PROXIMA_REDIS_ADAPTER_DATABASE_INDEX")
+            .map_err(|_| "set PROXIMA_REDIS_ADAPTER_DATABASE_INDEX to the expected Redis logical database number")?
+            .parse::<u32>().map_err(|_| "PROXIMA_REDIS_ADAPTER_DATABASE_INDEX must be a non-negative integer")?;
+        let adapter = RedisCatalogAdapter::new(target_id.clone(), database_index, uri)?;
+        let request = InspectionRequest {
+            target: AdapterTarget { target_id, database_name: database_index.to_string(), namespace: None },
+            policy,
+        };
+        let snapshot = adapter.inspect(&request).await?;
+        let verification = adapter.verify(&request.policy, &snapshot).await?;
+        let decision = verification.access_decision();
+        println!("{}", serde_json::to_string_pretty(&json!({
+            "adapter": adapter.descriptor(),
+            "snapshot": snapshot,
+            "verification": verification,
+            "access_decision": decision
+        }))?);
+        if decision != AccessDecision::Allow { std::process::exit(2); }
+      },
       Some("inspect-policy") => {
         let path = args.next().ok_or("usage: proxima-policy-guard inspect-policy <policy.json>")?;
         let policy: TenantSecurityPolicy = serde_json::from_slice(&fs::read(&path)?)?;
@@ -589,7 +639,7 @@ async fn main() -> Result<(),Box<dyn Error>> {
         let spec:Value=serde_json::from_slice(&fs::read(Path::new(&path))?)?;
         print!("{}",generate(&spec)?);
       },
-      _ => return Err("usage: proxima-policy-guard <adapters|audit|generate|validate-policy|compile-plan|discover-postgres|discover-mysql|discover-mariadb|inspect-mysql-policy|inspect-mariadb-policy|discover-mongodb|inspect-mongodb-policy|inspect-policy>".into())
+      _ => return Err("usage: proxima-policy-guard <adapters|audit|generate|validate-policy|compile-plan|discover-postgres|discover-mysql|discover-mariadb|inspect-mysql-policy|inspect-mariadb-policy|discover-mongodb|inspect-mongodb-policy|discover-redis|inspect-redis-policy|inspect-policy>".into())
     }
     Ok(())
 }
