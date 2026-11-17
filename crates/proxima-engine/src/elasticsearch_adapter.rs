@@ -173,17 +173,19 @@ impl ElasticsearchCatalogAdapter {
                 detail: "The cluster index inventory exceeded 10,000 entries; discovery is incomplete.".into(),
             });
         }
-        let (roles, role_mappings, users, security_api) = if is_opensearch {
+        let (roles, role_mappings, users, authenticated_identity, security_api) = if is_opensearch {
             let roles = self.get_optional_json(self.url_for(&["_plugins", "_security", "api", "roles"])?).await?;
             let mappings = self.get_optional_json(self.url_for(&["_plugins", "_security", "api", "rolesmapping"])?).await?;
             let users = self.get_optional_json(self.url_for(&["_plugins", "_security", "api", "internalusers"])?).await?;
-            (roles, mappings, users, "opensearch_security_plugin")
+            let identity = self.get_optional_json(self.url_for(&["_plugins", "_security", "authinfo"])?).await?;
+            (roles, mappings, users, identity, "opensearch_security_plugin")
         } else {
             let roles = self.get_optional_json(self.url_for(&["_security", "role"])?).await?;
             let users = self.get_optional_json(self.url_for(&["_security", "user"])?).await?;
-            (roles, None, users, "elasticsearch_security")
+            let identity = self.get_optional_json(self.url_for(&["_security", "_authenticate"])?).await?;
+            (roles, None, users, identity, "elasticsearch_security")
         };
-        let security_visible = roles.is_some() && users.is_some()
+        let security_visible = roles.is_some() && users.is_some() && authenticated_identity.is_some()
             && (!is_opensearch || role_mappings.is_some());
         if !security_visible {
             findings.push(SecurityFinding {
@@ -200,6 +202,7 @@ impl ElasticsearchCatalogAdapter {
             "roles": roles.clone().unwrap_or(Value::Null),
             "role_mappings": role_mappings.clone().unwrap_or(Value::Null),
             "users": sanitize_user_catalog(users.clone().unwrap_or(Value::Null)),
+            "authenticated_identity": sanitize_user_catalog(authenticated_identity.clone().unwrap_or(Value::Null)),
             "security_catalog_visible": security_visible
         });
         let fingerprint = digest(&serde_json::to_vec(&json!({ "target": target_attributes, "indices": state }))
@@ -273,7 +276,11 @@ impl DatabaseAdapter for ElasticsearchCatalogAdapter {
                 } else {
                     let empty_roles = Value::Null;
                     let roles = discovery.target_attributes.get("roles").unwrap_or(&empty_roles);
-                    let (matching_roles, tenant_dls_roles, broad_roles) = dls_role_coverage(roles, &required.resource.name, &required.tenant_key);
+                    let identity = discovery.target_attributes.get("authenticated_identity").unwrap_or(&empty_roles);
+                    let effective_roles = identity.get("roles").and_then(Value::as_array)
+                        .map(|values| values.iter().filter_map(Value::as_str).map(str::to_owned).collect::<Vec<_>>())
+                        .unwrap_or_default();
+                    let (matching_roles, tenant_dls_roles, broad_roles) = dls_role_coverage(roles, &effective_roles, &required.resource.name, &required.tenant_key);
                     if matching_roles == 0 {
                         resource_findings.push(finding("elasticsearch_no_index_role_observed", &required.resource, "No native security role with an index pattern matching this index was observed."));
                     } else if tenant_dls_roles == 0 {
@@ -364,12 +371,13 @@ impl DatabaseAdapter for ElasticsearchCatalogAdapter {
     }
 }
 
-fn dls_role_coverage(roles: &Value, index: &str, tenant_field: &str) -> (usize, usize, usize) {
+fn dls_role_coverage(roles: &Value, effective_roles: &[String], index: &str, tenant_field: &str) -> (usize, usize, usize) {
     let mut matching_roles = 0usize;
     let mut tenant_dls_roles = 0usize;
     let mut broad_roles = 0usize;
     let Some(role_map) = roles.as_object() else { return (0, 0, 0) };
-    for role in role_map.values() {
+    for role_name in effective_roles {
+        let Some(role) = role_map.get(role_name) else { continue };
         let permissions = role.get("indices").and_then(Value::as_array)
             .or_else(|| role.get("index_permissions").and_then(Value::as_array));
         let Some(permissions) = permissions else { continue };
@@ -484,8 +492,9 @@ mod tests {
                 }]
             }
         });
-        assert_eq!(dls_role_coverage(&roles, "tenant-acme", "tenant_id"), (2, 1, 1));
-        assert_eq!(dls_role_coverage(&roles, "other-acme", "tenant_id"), (0, 0, 0));
+        assert_eq!(dls_role_coverage(&roles, &["tenant_reader".into(), "legacy_reader".into()], "tenant-acme", "tenant_id"), (2, 1, 1));
+        assert_eq!(dls_role_coverage(&roles, &["tenant_reader".into()], "tenant-acme", "tenant_id"), (1, 1, 0));
+        assert_eq!(dls_role_coverage(&roles, &["tenant_reader".into()], "other-acme", "tenant_id"), (0, 0, 0));
     }
 
     #[test]
