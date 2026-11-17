@@ -109,7 +109,7 @@ pub fn adapter_catalog() -> Vec<AdapterDescriptor> {
             name: "MySQL",
             maturity: AdapterMaturity::InDevelopment,
             capabilities: AdapterCapabilities { policy_generation: true, ..AdapterCapabilities::default() },
-            status_note: "Reviewable database-per-tenant grant templates exist. No shared-table row-level enforcement, native inspection, runtime principal binding or drift verification is implemented.",
+            status_note: "Reviewable database-per-tenant grant templates require a trusted application-host scope. No shared-table row-level enforcement, native inspection, runtime principal binding or drift verification is implemented.",
         },
         AdapterDescriptor {
             kind: DatabaseKind::MariaDb,
@@ -144,7 +144,7 @@ pub fn adapter_catalog() -> Vec<AdapterDescriptor> {
             name: "Redis",
             maturity: AdapterMaturity::InDevelopment,
             capabilities: AdapterCapabilities { policy_generation: true, ..AdapterCapabilities::default() },
-            status_note: "Reviewable tenant-prefixed ACL templates with an explicit baseline command allowlist exist. Native ACL inspection, trusted principal selection, runtime enforcement and drift verification are not implemented.",
+            status_note: "Reviewable tenant-prefixed ACL templates derive a narrower command allowlist from requested operations; Redis ACLs cannot distinguish create-only from update-only upsert semantics. Native ACL inspection, trusted principal selection, runtime enforcement and drift verification are not implemented.",
         },
         AdapterDescriptor {
             kind: DatabaseKind::VaultDb,
