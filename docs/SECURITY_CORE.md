@@ -29,7 +29,7 @@ The CLI's `adapters` command reports `scope: engine_runtime`. The Cloud API repo
 
 The Engine catalog intentionally reports PostgreSQL as `in_development`. Existing work includes signed tenant-context verification, PostgreSQL role binding, the PostgreSQL Policy Guard CLI work and protocol-level tenant-session protections. The catalog does not mark semantic policy verification, controlled policy deployment, drift detection or signed policy evidence as complete Engine capabilities.
 
-MySQL, MariaDB, Microsoft SQL Server, MongoDB and CockroachDB are `planned`. They have no enabled adapter capabilities. They must not be used as production integrations until their own native adapter implementations and acceptance suites exist.
+MySQL, MariaDB, Microsoft SQL Server, MongoDB and CockroachDB are `planned`. VAULTDB is also listed as a planned Agata-native research target. Its separate embedded-engine project is educational and does not yet implement tenant identity or isolation enforcement. None of these targets has enabled adapter capabilities; they must not be used as production integrations until their own native implementations and acceptance suites exist.
 
 ## Adapter responsibilities
 
