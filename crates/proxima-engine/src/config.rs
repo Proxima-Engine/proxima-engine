@@ -69,13 +69,14 @@ impl Config {
         let tenant_role_prefix = env::var("PROXIMA_TENANT_ROLE_PREFIX")
             .unwrap_or_else(|_| "proxima_tenant_".to_string());
         if tenant_role_prefix.is_empty()
+            || tenant_role_prefix.len() > 27
             || !tenant_role_prefix
                 .bytes()
                 .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
         {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "PROXIMA_TENANT_ROLE_PREFIX must contain only ASCII letters, digits, and underscores",
+                "PROXIMA_TENANT_ROLE_PREFIX must contain only ASCII letters, digits, and underscores and be at most 27 bytes",
             ));
         }
 
@@ -289,6 +290,19 @@ mod tests {
         assert!(!config.require_client_tls);
         assert_eq!(config.upstream_tls_mode, UpstreamTlsMode::Disable);
         assert!(config.dashboard_enabled);
+    }
+
+    #[test]
+    #[serial]
+    fn rejects_role_prefix_longer_than_control_plane_limit() {
+        let previous = std::env::var_os("PROXIMA_TENANT_ROLE_PREFIX");
+        std::env::set_var("PROXIMA_TENANT_ROLE_PREFIX", "x".repeat(28));
+        let error = Config::from_env().unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        match previous {
+            Some(value) => std::env::set_var("PROXIMA_TENANT_ROLE_PREFIX", value),
+            None => std::env::remove_var("PROXIMA_TENANT_ROLE_PREFIX"),
+        }
     }
 
     #[test]
