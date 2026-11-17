@@ -74,7 +74,6 @@ impl MongoCatalogAdapter {
         let mut options = ClientOptions::parse(&self.connection_uri).await.map_err(db_error)?;
         options.server_selection_timeout = Some(Duration::from_secs(10));
         options.connect_timeout = Some(Duration::from_secs(10));
-        options.socket_timeout = Some(Duration::from_secs(15));
         let client = Client::with_options(options).map_err(db_error)?;
         // Force authentication and server selection now, rather than treating
         // the driver's lazy Client construction as a successful connection.
