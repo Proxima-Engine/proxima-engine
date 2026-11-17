@@ -142,7 +142,6 @@ impl MySqlCatalogAdapter {
                     "security_type": row.try_get::<String,_>("SECURITY_TYPE").map_err(db_error)?
                 }))).transpose()?
             } else { None };
-            let kind = if table_type.eq_ignore_ascii_case("VIEW") { ResourceKind::View } else { ResourceKind::Table };
             let attributes = json!({
                 "table_type": table_type,
                 "engine": row.try_get::<Option<String>,_>("ENGINE").map_err(db_error)?,
@@ -199,7 +198,7 @@ impl MySqlCatalogAdapter {
             });
         }
         let routine_rows = sqlx::query(
-            "SELECT ROUTINE_SCHEMA,ROUTINE_NAME,ROUTINE_TYPE,DEFINER,SECURITY_TYPE,SQL_DATA_ACCESS \
+            "SELECT ROUTINE_SCHEMA,ROUTINE_NAME,ROUTINE_TYPE,DEFINER,SECURITY_TYPE,SQL_DATA_ACCESS,IS_DETERMINISTIC,SQL_MODE,ROUTINE_DEFINITION \
              FROM information_schema.ROUTINES WHERE ROUTINE_SCHEMA=? ORDER BY ROUTINE_NAME,ROUTINE_TYPE"
         ).bind(&self.database_name).fetch_all(&mut connection).await.map_err(db_error)?;
         for row in routine_rows {
