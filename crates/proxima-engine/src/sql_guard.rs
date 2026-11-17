@@ -32,7 +32,7 @@ pub fn blocks_tenant_session_mutation(sql: &str) -> bool {
             || at(index,"comment") && at(index+1,"on")
             || at(index,"refresh") && at(index+1,"materialized") && at(index+2,"view")
             || at(index,"reset") && (at(index+1,"all") || at(index+1,"role")
-                || at(index+1,"row_security") || at(index+1,"search_path")
+                || at(index+1,"row_security") || at(index+1,"search_path") || at(index+1,"schema")
                 || at(index+1,"session") && at(index+2,"authorization")) {
             return true;
         }
@@ -44,7 +44,7 @@ pub fn blocks_tenant_session_mutation(sql: &str) -> bool {
             if at(cursor,"session") && at(cursor+1,"authorization") { return true; }
             if at(cursor,"role") || at(cursor,"session_authorization")
                 || at(cursor,"row_security") || at(cursor,"session_replication_role")
-                || at(cursor,"search_path") {
+                || at(cursor,"search_path") || at(cursor,"schema") {
                 return true;
             }
         }
