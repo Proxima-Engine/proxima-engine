@@ -2,6 +2,7 @@ use serde_json::{json, Value};
 use proxima_engine::security_core::{adapter_catalog, AccessDecision, TenantSecurityPolicy, SECURITY_MODEL_VERSION};
 use proxima_engine::database_adapter::{AdapterError, AdapterFuture, AdapterTarget, DatabaseAdapter, DiscoveryRequest, InspectionRequest};
 use proxima_engine::postgres_adapter::{PostgresCatalogAdapter, PostgresConnector};
+use proxima_engine::mysql_adapter::MySqlCatalogAdapter;
 use proxima_engine::native_policy_plans::{compile_mongodb_database_boundary, compile_mysql_database_boundary, compile_redis_acl, compile_sql_server};
 use std::{collections::HashSet, env, error::Error, fs, io::BufReader, path::Path, str::FromStr, time::Duration};
 use tokio_postgres::config::SslMode;
@@ -424,6 +425,58 @@ async fn main() -> Result<(),Box<dyn Error>> {
             "note": "Discovery inventories native resources. It does not certify tenant isolation or authorize traffic."
         }))?);
       },
+      Some("discover-mysql") | Some("discover-mariadb") => {
+        let command = env::args().nth(1).unwrap_or_default();
+        let namespace = args.next();
+        if args.next().is_some() { return Err("usage: proxima-policy-guard discover-mysql [database] | discover-mariadb [database]".into()); }
+        let kind = if command == "discover-mariadb" { proxima_engine::security_core::DatabaseKind::MariaDb } else { proxima_engine::security_core::DatabaseKind::MySql };
+        let url = env::var("PROXIMA_MYSQL_ADAPTER_DATABASE_URL")
+            .map_err(|_| "set PROXIMA_MYSQL_ADAPTER_DATABASE_URL to a MySQL/MariaDB URL with TLS identity verification")?;
+        let target_id = env::var("PROXIMA_MYSQL_ADAPTER_TARGET_ID")
+            .map_err(|_| "set PROXIMA_MYSQL_ADAPTER_TARGET_ID to the registered non-secret target ID")?;
+        let database_name = env::var("PROXIMA_MYSQL_ADAPTER_DATABASE_NAME")
+            .map_err(|_| "set PROXIMA_MYSQL_ADAPTER_DATABASE_NAME to the expected database name")?;
+        let adapter = MySqlCatalogAdapter::new(target_id.clone(), database_name.clone(), url, kind)?;
+        let snapshot = adapter.discover(&DiscoveryRequest {
+            target: AdapterTarget { target_id, database_name, namespace: None },
+            namespace,
+        }).await?;
+        println!("{}", serde_json::to_string_pretty(&json!({
+            "adapter": adapter.descriptor(),
+            "discovery": snapshot,
+            "access_decision": "deny",
+            "note": "MySQL/MariaDB discovery is a privilege-filtered native inventory. It does not establish complete catalog visibility, tenant isolation or runtime admission."
+        }))?);
+      },
+      Some("inspect-mysql-policy") | Some("inspect-mariadb-policy") => {
+        let command = env::args().nth(1).unwrap_or_default();
+        let path = args.next().ok_or("usage: proxima-policy-guard inspect-mysql-policy <policy.json> | inspect-mariadb-policy <policy.json>")?;
+        if args.next().is_some() { return Err("only one policy file may be supplied".into()); }
+        let policy: TenantSecurityPolicy = serde_json::from_slice(&fs::read(&path)?)?;
+        policy.validate().map_err(|error| format!("invalid policy: {error:?}"))?;
+        let kind = if command == "inspect-mariadb-policy" { proxima_engine::security_core::DatabaseKind::MariaDb } else { proxima_engine::security_core::DatabaseKind::MySql };
+        let url = env::var("PROXIMA_MYSQL_ADAPTER_DATABASE_URL")
+            .map_err(|_| "set PROXIMA_MYSQL_ADAPTER_DATABASE_URL to a MySQL/MariaDB URL with TLS identity verification")?;
+        let target_id = env::var("PROXIMA_MYSQL_ADAPTER_TARGET_ID")
+            .map_err(|_| "set PROXIMA_MYSQL_ADAPTER_TARGET_ID to the registered non-secret target ID")?;
+        let database_name = env::var("PROXIMA_MYSQL_ADAPTER_DATABASE_NAME")
+            .map_err(|_| "set PROXIMA_MYSQL_ADAPTER_DATABASE_NAME to the expected database name")?;
+        let adapter = MySqlCatalogAdapter::new(target_id.clone(), database_name.clone(), url, kind)?;
+        let request = InspectionRequest {
+            target: AdapterTarget { target_id, database_name, namespace: None },
+            policy,
+        };
+        let snapshot = adapter.inspect(&request).await?;
+        let verification = adapter.verify(&request.policy, &snapshot).await?;
+        let decision = verification.access_decision();
+        println!("{}", serde_json::to_string_pretty(&json!({
+            "adapter": adapter.descriptor(),
+            "snapshot": snapshot,
+            "verification": verification,
+            "access_decision": decision
+        }))?);
+        if decision != AccessDecision::Allow { std::process::exit(2); }
+      },
       Some("inspect-policy") => {
         let path = args.next().ok_or("usage: proxima-policy-guard inspect-policy <policy.json>")?;
         let policy: TenantSecurityPolicy = serde_json::from_slice(&fs::read(&path)?)?;
@@ -488,7 +541,7 @@ async fn main() -> Result<(),Box<dyn Error>> {
         let spec:Value=serde_json::from_slice(&fs::read(Path::new(&path))?)?;
         print!("{}",generate(&spec)?);
       },
-      _ => return Err("usage: proxima-policy-guard <adapters|audit|generate|validate-policy|compile-plan|discover-postgres|inspect-policy>".into())
+      _ => return Err("usage: proxima-policy-guard <adapters|audit|generate|validate-policy|compile-plan|discover-postgres|discover-mysql|discover-mariadb|inspect-mysql-policy|inspect-mariadb-policy|inspect-policy>".into())
     }
     Ok(())
 }
