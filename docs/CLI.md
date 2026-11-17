@@ -111,3 +111,10 @@ Redirect output to a file for review, for example `proxima-policy-guard compile-
 The Rust adapter exposes read-only MySQL-protocol discovery and catalog inspection for a registered database target. It requires a `mysql://` connection URL whose server certificate and hostname can be verified; TLS identity verification is mandatory. The adapter reads `information_schema` tables, columns, routines, table privileges and schema privileges, and computes a catalog fingerprint for drift comparison. It deliberately reports catalog visibility as incomplete because MySQL/MariaDB metadata visibility is privilege-filtered.
 
 The adapter can be constructed by an Engine integration with `MySqlCatalogAdapter::new(target_id, database_name, connection_url, DatabaseKind::MySql)` or `DatabaseKind::MariaDb`. It does not apply DDL, create users, switch roles, or authorize traffic. Its existing database-per-tenant plan compiler remains review-only until a trusted protocol gateway binds tenant identity to isolated database principals and independent positive/negative probes prove the boundary.
+
+
+## Native MongoDB adapter
+
+The Engine crate exposes `MongoCatalogAdapter` for a registered MongoDB database. Its URI must explicitly enable TLS or use `mongodb+srv://`; insecure certificate/hostname options and explicit TLS disablement are rejected. Discovery records visible collections/views, collection validators/options, view definitions and the authenticated account's effective privileges from `connectionStatus`. The inventory is marked incomplete because MongoDB metadata visibility is privilege-scoped.
+
+The adapter checks whether a collection validator declares and requires the configured tenant ownership field, but this is not a substitute for enforcing document-level authorization. MongoDB database roles do not automatically filter documents by tenant. Independent authenticated tenant probes and a trusted runtime enforcement boundary remain mandatory before admission.
