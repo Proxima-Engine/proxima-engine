@@ -567,6 +567,36 @@ mod tests {
         assert_eq!(predicate_function_name(""), None);
     }
 
+    #[tokio::test]
+    async fn verification_never_allows_catalog_only_sql_server_evidence() {
+        use crate::security_core::{ProtectedResource, ResourceRef};
+        let adapter = SqlServerCatalogAdapter::new("target", "app", "Server=localhost;Database=app;User Id=auditor;Password=example;Encrypt=True;TrustServerCertificate=False").unwrap();
+        let policy = TenantSecurityPolicy {
+            schema_version: SECURITY_MODEL_VERSION.into(),
+            policy_id: "tenant-policy".into(),
+            revision: 1,
+            tenant_identity_claim: "tenant_id".into(),
+            resources: vec![ProtectedResource {
+                resource: ResourceRef { namespace: Some("dbo".into()), name: "records".into(), kind: ResourceKind::Table },
+                tenant_key: "tenant_id".into(),
+                operations: vec![Operation::Read, Operation::Create, Operation::Update, Operation::Delete],
+            }],
+        };
+        let snapshot = InspectionSnapshot {
+            database_kind: DatabaseKind::SqlServer,
+            target: AdapterTarget { target_id: "target".into(), database_name: "app".into(), namespace: None },
+            completeness: InspectionCompleteness::Complete,
+            posture: SecurityPosture::Verified,
+            resources: Vec::new(),
+            findings: Vec::new(),
+            fingerprint: Some("a".repeat(64)),
+            observed_at: "2026-11-17T00:00:00Z".into(),
+        };
+        let report = adapter.verify(&policy, &snapshot).await.unwrap();
+        assert_eq!(report.posture, SecurityPosture::Blocked);
+        assert!(!report.findings.is_empty());
+    }
+
     #[test]
     fn rejects_invalid_database_target() {
         assert!(SqlServerCatalogAdapter::new("", "app", "Server=localhost;Database=app").is_err());
