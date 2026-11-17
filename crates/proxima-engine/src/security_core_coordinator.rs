@@ -20,6 +20,7 @@ pub enum SecurityCoreError {
     InvalidCompilation,
     DriftInspectionIncomplete,
     DriftFingerprintMismatch,
+    InvalidFingerprint,
     DuplicateCompiledResource(String),
 }
 
@@ -123,7 +124,7 @@ impl SecurityCoreCoordinator {
         if report.previous_fingerprint.as_deref() != previous_fingerprint {
             return Err(SecurityCoreError::DriftFingerprintMismatch);
         }
-        if report.observed_at.trim().is_empty() || report.observed_fingerprint.as_deref().map_or(true, str::is_empty) {
+        if report.observed_at.trim().is_empty() || report.observed_fingerprint.as_deref().map_or(true, |value| !is_sha256(value)) {
             return Err(SecurityCoreError::DriftInspectionIncomplete);
         }
         if let (Some(previous), Some(observed)) = (previous_fingerprint, report.observed_fingerprint.as_deref()) {
@@ -142,8 +143,21 @@ impl SecurityCoreCoordinator {
         if snapshot.database_kind != kind { return Err(SecurityCoreError::SnapshotKindMismatch); }
         if snapshot.target != request.target { return Err(SecurityCoreError::SnapshotTargetMismatch); }
         if snapshot.observed_at.trim().is_empty() { return Err(SecurityCoreError::IncompleteInspection); }
+        if snapshot.fingerprint.as_deref().map_or(true, |value| !is_sha256(value)) {
+            return Err(SecurityCoreError::InvalidFingerprint);
+        }
+        for resource in &snapshot.resources {
+            if resource.fingerprint.as_deref().map_or(true, |value| !is_sha256(value)) {
+                return Err(SecurityCoreError::InvalidFingerprint);
+            }
+        }
         Ok(())
     }
+}
+
+
+fn is_sha256(value: &str) -> bool {
+    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 
