@@ -16,3 +16,4 @@ pub mod native_policy_plans;
 pub mod policy_evidence;
 pub mod connection_admission;
 pub mod security_core_coordinator;
+pub mod postgres_adapter;
