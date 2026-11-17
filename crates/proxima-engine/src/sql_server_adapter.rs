@@ -42,6 +42,9 @@ impl SqlServerCatalogAdapter {
         if ["trustservercertificate=true","trustservercertificate=yes","trustservercertificate=1","encrypt=false","encrypt=no","encrypt=0"].iter().any(|option| normalized.contains(option)) {
             return Err(error("sql_server_tls_verification_required", "SQL Server connections must require encryption and certificate/hostname verification; TrustServerCertificate=true and Encrypt=false are forbidden."));
         }
+        if ["integratedsecurity=true","integratedsecurity=yes"].iter().any(|option| normalized.contains(option)) {
+            return Err(error("sql_server_authentication_mode_unsupported", "This adapter build requires SQL Server username/password authentication; integrated Windows/Kerberos authentication is not enabled."));
+        }
         Config::from_ado_string(&connection_string)
             .map_err(|_| error("invalid_sql_server_connection_config", "The SQL Server connection string could not be parsed."))?;
         Ok(Self { target_id, database_name, connection_string })
@@ -558,6 +561,7 @@ mod tests {
     fn rejects_unverified_sql_server_transport_options() {
         assert!(SqlServerCatalogAdapter::new("target", "app", "Server=localhost;Database=app;TrustServerCertificate=true").is_err());
         assert!(SqlServerCatalogAdapter::new("target", "app", "Server=localhost;Database=app;Encrypt=false").is_err());
+        assert!(SqlServerCatalogAdapter::new("target", "app", "Server=localhost;Database=app;Integrated Security=true").is_err());
     }
 
     #[test]
