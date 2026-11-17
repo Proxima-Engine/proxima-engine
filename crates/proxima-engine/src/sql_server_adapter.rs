@@ -141,7 +141,7 @@ impl SqlServerCatalogAdapter {
                 &[&object_id],
             ).await.map_err(db_error)?.into_first_result().await.map_err(db_error)?;
             let triggers = client.query(
-                "SELECT trigger_info.name,trigger_info.is_disabled,trigger_info.is_instead_of_trigger,module.definition FROM sys.triggers trigger_info LEFT JOIN sys.sql_modules module ON module.object_id=trigger_info.object_id WHERE trigger_info.parent_id=@P1 ORDER BY trigger_info.name",
+                "SELECT trigger_info.name,trigger_info.is_disabled,trigger_info.is_instead_of_trigger,module.definition,module.execute_as_principal_id FROM sys.triggers trigger_info LEFT JOIN sys.sql_modules module ON module.object_id=trigger_info.object_id WHERE trigger_info.parent_id=@P1 ORDER BY trigger_info.name",
                 &[&object_id],
             ).await.map_err(db_error)?.into_first_result().await.map_err(db_error)?;
             resources.push(DiscoveredResource {
@@ -230,7 +230,8 @@ impl SqlServerCatalogAdapter {
                         "name": trigger.get::<&str,_>("name").unwrap_or_default(),
                         "disabled": trigger.get::<bool,_>("is_disabled").unwrap_or(false),
                         "instead_of": trigger.get::<bool,_>("is_instead_of_trigger").unwrap_or(false),
-                        "definition": trigger.get::<&str,_>("definition")
+                        "definition": trigger.get::<&str,_>("definition"),
+                        "execute_as_principal_id": trigger.get::<i32,_>("execute_as_principal_id")
                     })).collect::<Vec<_>>()
                 }),
             });
@@ -498,6 +499,12 @@ impl DatabaseAdapter for SqlServerCatalogAdapter {
                 }
                 if predicate_functions.iter().any(|function| function.attributes["schema_bound"].as_bool() != Some(true)) {
                     resource_findings.push(finding("sql_server_predicate_function_not_schema_bound", &protected.resource, "A predicate function is not confirmed schema-bound; SQL Server RLS predicate functions should be schema-bound."));
+                }
+                if predicate_functions.iter().any(|function| function.attributes["execute_as_principal_id"].as_i64().is_some()) {
+                    resource_findings.push(finding("sql_server_predicate_function_execute_as", &protected.resource, "An RLS predicate function uses EXECUTE AS; review its effective permissions and tenant-boundary behavior."));
+                }
+                if found.attributes["triggers"].as_array().is_some_and(|triggers| triggers.iter().any(|trigger| trigger["execute_as_principal_id"].as_i64().is_some())) {
+                    resource_findings.push(finding("sql_server_trigger_execute_as", &protected.resource, "A table trigger uses EXECUTE AS and requires review for elevated cross-tenant data access."));
                 }
                 resource_findings.push(finding("sql_server_session_context_trust_unverified", &protected.resource, "SESSION_CONTEXT is settable by a database session unless the application/gateway boundary prevents untrusted callers from setting tenant identity."));
                 let resource_fingerprint = digest(&serde_json::to_vec(&found.attributes)
