@@ -241,7 +241,7 @@ impl DatabaseAdapter for RedisCatalogAdapter {
                     let rules = resource.attributes["command_rules"].as_array();
                     rules.is_some_and(|rules| {
                         required_commands.iter().all(|command| rules.iter().any(|rule| rule.as_str().is_some_and(|value| value == format!("+{command}"))))
-                            && !rules.iter().filter_map(|rule| rule.as_str()).any(|rule| rule.starts_with("-@") || required_commands.iter().any(|command| rule == format!("-{command}")))
+                            && !rules.iter().filter_map(|rule| rule.as_str()).any(|rule| rule.starts_with("-@") || required_commands.iter().any(|command| rule == format!("-{command}").as_str()))
                     })
                 });
                 if !explicit_command_coverage {
