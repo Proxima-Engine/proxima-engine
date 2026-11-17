@@ -1,5 +1,6 @@
 use serde_json::{json, Value};
 use proxima_engine::security_core::{adapter_catalog, TenantSecurityPolicy, SECURITY_MODEL_VERSION};
+use proxima_engine::native_policy_plans::{compile_mongodb_database_boundary, compile_mysql_database_boundary, compile_redis_acl, compile_sql_server};
 use std::{collections::HashSet, env, error::Error, fs, io::BufReader, path::Path, str::FromStr, time::Duration};
 use tokio_postgres::config::SslMode;
 use tokio_postgres_rustls::MakeRustlsConnect;
@@ -348,6 +349,22 @@ async fn main() -> Result<(),Box<dyn Error>> {
           }
         }
       },
+      Some("compile-plan") => {
+        let database = args.next().ok_or("usage: proxima-policy-guard compile-plan <sql_server|mysql|mariadb|mongodb|redis> <policy.json>")?;
+        let path = args.next().ok_or("usage: proxima-policy-guard compile-plan <sql_server|mysql|mariadb|mongodb|redis> <policy.json>")?;
+        let source = fs::read_to_string(&path)?;
+        let policy: TenantSecurityPolicy = serde_json::from_str(&source)?;
+        let compiled = match database.as_str() {
+          "sql_server" => compile_sql_server(&policy)?,
+          "mysql" => compile_mysql_database_boundary(&policy, proxima_engine::security_core::DatabaseKind::MySql)?,
+          "mariadb" => compile_mysql_database_boundary(&policy, proxima_engine::security_core::DatabaseKind::MariaDb)?,
+          "mongodb" => compile_mongodb_database_boundary(&policy)?,
+          "redis" => compile_redis_acl(&policy)?,
+          _ => return Err("unsupported compile-plan database; choose sql_server, mysql, mariadb, mongodb, or redis".into())
+        };
+        println!("{}", serde_json::to_string_pretty(&compiled)?);
+        eprintln!("Review-only policy plan generated. No database connection or DDL/ACL change was made.");
+      },
       Some("adapters") => {
         let value=json!({"schema_version":SECURITY_MODEL_VERSION,"scope":"engine_runtime","adapter_contract":"database_adapter::DatabaseAdapter","adapters":adapter_catalog()});
         println!("{}",serde_json::to_string_pretty(&value)?);
@@ -363,7 +380,7 @@ async fn main() -> Result<(),Box<dyn Error>> {
         let spec:Value=serde_json::from_slice(&fs::read(Path::new(&path))?)?;
         print!("{}",generate(&spec)?);
       },
-      _ => return Err("usage: proxima-policy-guard <adapters|audit|generate|validate-policy>".into())
+      _ => return Err("usage: proxima-policy-guard <adapters|audit|generate|validate-policy|compile-plan>".into())
     }
     Ok(())
 }
