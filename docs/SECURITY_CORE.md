@@ -8,6 +8,8 @@ The current Engine implementation is PostgreSQL-specific. The common contract is
 
 ## Shared contract
 
+The canonical JSON Schema is published at [`schemas/proxima.security.v1.schema.json`](../schemas/proxima.security.v1.schema.json). The Engine Rust model validates the same envelope before an adapter compiles it.
+
 The Rust library module `security_core` defines:
 
 - Versioned policy envelopes (`proxima.security.v1`).
