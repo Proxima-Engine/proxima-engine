@@ -359,9 +359,10 @@ impl DatabaseAdapter for SqliteCatalogAdapter {
 
     fn verify<'a>(&'a self, _policy: &'a TenantSecurityPolicy, snapshot: &'a InspectionSnapshot) -> AdapterFuture<'a, Result<VerificationReport, AdapterError>> {
         Box::pin(async move {
-            if snapshot.database_kind != DatabaseKind::Sqlite || snapshot.target.target_id != self.target_id {
-                return Err(error("sqlite_snapshot_target_mismatch", "The inspection snapshot belongs to a different SQLite target."));
+            if snapshot.database_kind != DatabaseKind::Sqlite {
+                return Err(error("sqlite_snapshot_target_mismatch", "The inspection snapshot belongs to a different database kind."));
             }
+            self.validate_target(&snapshot.target)?;
             let mut findings = snapshot.findings.clone();
             findings.push(SecurityFinding {
                 code: "sqlite_semantic_verification_unavailable".into(),
