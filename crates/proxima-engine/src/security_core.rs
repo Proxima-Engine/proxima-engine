@@ -123,7 +123,7 @@ pub fn adapter_catalog() -> Vec<AdapterDescriptor> {
             name: "Microsoft SQL Server",
             maturity: AdapterMaturity::InDevelopment,
             capabilities: AdapterCapabilities { schema_inspection: true, policy_generation: true, drift_detection: true, ..AdapterCapabilities::default() },
-            status_note: "Encrypted TDS discovery inspects tables, columns, object/schema/database permissions, principals, role membership, RLS predicates, triggers, views and routines; fingerprint drift comparison is implemented. Trusted SESSION_CONTEXT binding, controlled deployment, independent semantic probes and runtime admission are not implemented.",
+            status_note: "Encrypted TDS discovery and fingerprint drift comparison are implemented. A dedicated tenant-session connector now binds verified tenant, principal, target and policy context into read-only SESSION_CONTEXT before returning the connection. The TDS application gateway, controlled RLS deployment, independent semantic probes and fail-closed runtime admission are not yet integrated.",
         },
         AdapterDescriptor {
             kind: DatabaseKind::MongoDb,
