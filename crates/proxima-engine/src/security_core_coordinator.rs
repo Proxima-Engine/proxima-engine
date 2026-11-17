@@ -100,7 +100,7 @@ impl SecurityCoreCoordinator {
         let report = adapter.detect_drift(target, previous_fingerprint).await?;
         if report.database_kind != kind || report.target != *target { return Err(SecurityCoreError::SnapshotTargetMismatch); }
         if report.completeness != InspectionCompleteness::Complete { return Err(SecurityCoreError::DriftInspectionIncomplete); }
-        if report.observed_at.trim().is_empty() || report.observed_fingerprint.as_deref().is_none_or(str::is_empty) {
+        if report.observed_at.trim().is_empty() || report.observed_fingerprint.as_deref().map_or(true, str::is_empty) {
             return Err(SecurityCoreError::DriftInspectionIncomplete);
         }
         if let (Some(previous), Some(observed)) = (previous_fingerprint, report.observed_fingerprint.as_deref()) {
