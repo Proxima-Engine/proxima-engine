@@ -322,7 +322,7 @@ $agata_proxima_preflight$;
         out.push_str(&format!("\nALTER TABLE {target} ENABLE ROW LEVEL SECURITY;\nALTER TABLE {target} FORCE ROW LEVEL SECURITY;\nCREATE POLICY {} ON {target} FOR ALL TO {} USING ({predicate}) WITH CHECK ({predicate});\n",ident(policy),roles.join(", ")));
     }
     let prefix=required_role_prefix.ok_or("policy spec did not define an Engine role prefix")?;
-    out.push_str(&format!("\\n-- Required PROXIMA_TENANT_ROLE_PREFIX: {prefix}\\n"));
+    out.push_str(&format!("\n-- Required PROXIMA_TENANT_ROLE_PREFIX: {prefix}\n"));
     out.push_str("\nCOMMIT;\n");
     Ok(out)
 }
