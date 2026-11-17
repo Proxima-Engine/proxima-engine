@@ -74,6 +74,7 @@ impl MongoCatalogAdapter {
         let mut options = ClientOptions::parse(&self.connection_uri).await.map_err(db_error)?;
         options.server_selection_timeout = Some(Duration::from_secs(10));
         options.connect_timeout = Some(Duration::from_secs(10));
+        options.socket_timeout = Some(Duration::from_secs(15));
         let client = Client::with_options(options).map_err(db_error)?;
         // Force authentication and server selection now, rather than treating
         // the driver's lazy Client construction as a successful connection.
@@ -166,6 +167,13 @@ impl MongoCatalogAdapter {
                     resource: None,
                     detail: "MongoDB collection and privilege visibility is scoped to the authenticated account; a partial inventory cannot certify complete database coverage.".into(),
                 }];
+                if has_broad_mongodb_privileges(&connection_status) {
+                    findings.push(SecurityFinding {
+                        code: "mongodb_inspection_principal_overprivileged".into(),
+                        resource: None,
+                        detail: "The authenticated MongoDB principal has broad administrative, any-database or any-resource privileges. Use a dedicated least-privilege inspection identity separate from application tenant principals.".into(),
+                    });
+                }
                 if collection_inventory_truncated {
                     findings.push(SecurityFinding {
                         code: "mongodb_collection_inventory_truncated".into(),
@@ -331,6 +339,26 @@ impl DatabaseAdapter for MongoCatalogAdapter {
     }
 }
 
+fn has_broad_mongodb_privileges(status: &Document) -> bool {
+    let Some(auth_info) = status.get_document("authInfo").ok() else { return false };
+    let broad_roles = ["root", "dbOwner", "userAdminAnyDatabase", "readWriteAnyDatabase", "dbAdminAnyDatabase", "clusterAdmin"];
+    let role_is_broad = auth_info.get_array("authenticatedUserRoles").ok().is_some_and(|roles| {
+        roles.iter().filter_map(Bson::as_document).any(|role| {
+            role.get_str("role").ok().is_some_and(|name| broad_roles.iter().any(|broad| name.eq_ignore_ascii_case(broad)))
+        })
+    });
+    let privilege_is_broad = auth_info.get_array("authenticatedUserPrivileges").ok().is_some_and(|privileges| {
+        privileges.iter().filter_map(Bson::as_document).any(|privilege| {
+            let any_resource = privilege.get_document("resource").ok()
+                .and_then(|resource| resource.get_bool("anyResource").ok()).unwrap_or(false);
+            let any_action = privilege.get_array("actions").ok()
+                .is_some_and(|actions| actions.iter().any(|action| action.as_str() == Some("anyAction")));
+            any_resource || any_action
+        })
+    });
+    role_is_broad || privilege_is_broad
+}
+
 fn bson_value(document: &Document) -> Result<Value, AdapterError> {
     serde_json::to_value(document).map_err(|_| error("mongodb_catalog_serialization_failed", "Could not serialize MongoDB catalog metadata."))
 }
@@ -368,6 +396,27 @@ mod tests {
         assert!(MongoCatalogAdapter::new("target", "app", "mongodb://localhost/app?tls=true&tlsInsecure=true").is_err());
         assert!(MongoCatalogAdapter::new("target", "app", "mongodb://localhost/app?tls=true").is_ok());
         assert!(MongoCatalogAdapter::new("target", "app", "mongodb+srv://cluster.example/app").is_ok());
+    }
+
+    #[test]
+    fn detects_broad_mongodb_roles_and_any_resource_privileges() {
+        let root = doc! {
+            "authInfo": {
+                "authenticatedUserRoles": [{ "role": "root", "db": "admin" }],
+                "authenticatedUserPrivileges": []
+            }
+        };
+        assert!(has_broad_mongodb_privileges(&root));
+        let any_resource = doc! {
+            "authInfo": {
+                "authenticatedUserRoles": [],
+                "authenticatedUserPrivileges": [{
+                    "resource": { "anyResource": true },
+                    "actions": ["find"]
+                }]
+            }
+        };
+        assert!(has_broad_mongodb_privileges(&any_resource));
     }
 
     #[test]
