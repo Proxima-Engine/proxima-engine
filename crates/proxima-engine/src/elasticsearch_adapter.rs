@@ -271,7 +271,8 @@ impl DatabaseAdapter for ElasticsearchCatalogAdapter {
                 if !discovery.target_attributes.get("security_catalog_visible").and_then(Value::as_bool).unwrap_or(false) {
                     resource_findings.push(finding("elasticsearch_security_roles_unavailable", &required.resource, "Native DLS/FLS role state could not be inspected."));
                 } else {
-                    let roles = discovery.target_attributes.get("roles").unwrap_or(&Value::Null);
+                    let empty_roles = Value::Null;
+                    let roles = discovery.target_attributes.get("roles").unwrap_or(&empty_roles);
                     let (matching_roles, tenant_dls_roles, broad_roles) = dls_role_coverage(roles, &required.resource.name, &required.tenant_key);
                     if matching_roles == 0 {
                         resource_findings.push(finding("elasticsearch_no_index_role_observed", &required.resource, "No native security role with an index pattern matching this index was observed."));
