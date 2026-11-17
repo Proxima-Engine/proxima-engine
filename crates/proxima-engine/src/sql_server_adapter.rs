@@ -479,11 +479,14 @@ impl DatabaseAdapter for SqlServerCatalogAdapter {
                 if protected.operations.contains(&Operation::Delete) && !has_before_delete {
                     resource_findings.push(finding("sql_server_delete_block_predicate_missing", &protected.resource, "Delete operations require a BEFORE DELETE block predicate."));
                 }
-                let predicate_function_names = predicates.iter()
-                    .filter_map(|predicate| predicate["definition"].as_str().and_then(predicate_function_name))
+                let predicate_function_identities = predicates.iter()
+                    .filter_map(|predicate| predicate["definition"].as_str().and_then(predicate_function_identity))
                     .collect::<Vec<_>>();
                 let predicate_functions = discovery.resources.iter().filter(|resource| {
-                    resource.kind == ResourceKind::Function && predicate_function_names.iter().any(|name| name.eq_ignore_ascii_case(&resource.name))
+                    resource.kind == ResourceKind::Function && predicate_function_identities.iter().any(|(schema, name)| {
+                        name.eq_ignore_ascii_case(&resource.name)
+                            && schema.as_deref().is_none_or(|schema| resource.namespace.as_deref().is_some_and(|actual| actual.eq_ignore_ascii_case(schema)))
+                    })
                 }).collect::<Vec<_>>();
                 if !predicates.is_empty() && predicate_functions.is_empty() {
                     resource_findings.push(finding("sql_server_predicate_function_definition_unavailable", &protected.resource, "The RLS predicate function definition was not visible in the catalog; its tenant identity source cannot be inspected."));
@@ -561,10 +564,13 @@ impl DatabaseAdapter for SqlServerCatalogAdapter {
     }
 }
 
-fn predicate_function_name(definition: &str) -> Option<String> {
+fn predicate_function_identity(definition: &str) -> Option<(Option<String>, String)> {
     let call = definition.split('(').next()?.trim();
     let normalized = call.replace('[', "").replace(']', "");
-    normalized.rsplit('.').next().map(str::trim).filter(|name| !name.is_empty()).map(str::to_owned)
+    let parts = normalized.split('.').map(str::trim).filter(|part| !part.is_empty()).collect::<Vec<_>>();
+    let name = parts.last()?.to_string();
+    let schema = if parts.len() >= 2 { Some(parts[parts.len() - 2].to_string()) } else { None };
+    Some((schema, name))
 }
 
 fn finding(code: &str, resource: &ResourceRef, detail: &str) -> SecurityFinding {
@@ -598,9 +604,9 @@ mod tests {
 
     #[test]
     fn extracts_schema_qualified_rls_predicate_function_names() {
-        assert_eq!(predicate_function_name("[security].[fn_tenant_access]([tenant_id])").as_deref(), Some("fn_tenant_access"));
-        assert_eq!(predicate_function_name("security.fn_tenant_access([tenant_id])").as_deref(), Some("fn_tenant_access"));
-        assert_eq!(predicate_function_name(""), None);
+        assert_eq!(predicate_function_identity("[security].[fn_tenant_access]([tenant_id])").as_ref(), Some(&(Some("security".into()), "fn_tenant_access".into())));
+        assert_eq!(predicate_function_identity("security.fn_tenant_access([tenant_id])").as_ref(), Some(&(Some("security".into()), "fn_tenant_access".into())));
+        assert_eq!(predicate_function_identity(""), None);
     }
 
     #[tokio::test]
