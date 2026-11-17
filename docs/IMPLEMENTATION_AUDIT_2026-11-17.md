@@ -146,3 +146,12 @@ MongoDB tenant-field validation now also rejects validators whose BSON type cons
 - Added a separate CockroachDB adapter over the PostgreSQL wire protocol with an injected connector, read-only session settings, server identity validation, database-target binding, bounded discovery, native `information_schema` table/view/column/table-grant inventory, deterministic catalog fingerprinting and drift comparison.
 - The adapter is deliberately marked `in_development` and exposes only schema inspection and drift detection. It does not reuse PostgreSQL RLS assumptions, compile or deploy policy, claim tenant enforcement, or return a verified posture.
 - CockroachDB native authorization, authenticated tenant binding, independent positive/negative probes, controlled policy deployment, signed evidence and runtime admission remain unimplemented. The module has authored unit tests only; no Rust build, tests or live CockroachDB validation were run.
+
+## Native adapter inspection-session hardening
+
+- PostgreSQL inspection now evaluates the connected role and its reachable role memberships for SUPERUSER, BYPASSRLS, CREATEROLE, CREATEDB and REPLICATION attributes before catalog access.
+- MySQL/MariaDB inspection now sets subsequent transactions read-only and requires the vendor-specific SELECT statement deadline to be accepted; it no longer silently ignores unsupported timeout settings.
+- SQL Server inspection now rejects sysadmin, database owner/DDL/security/access administration, db_datawriter, and effective database/object mutation privileges before inventory queries.
+- MongoDB catalog operations now have an explicit socket timeout in addition to server-selection and connection timeouts.
+- MySQL/MariaDB, MongoDB, Redis, SQL Server and CockroachDB discovery/inspection/drift inventory operations have a bounded sixty-second operation deadline. PostgreSQL retains server-side statement and lock deadlines.
+- These are code changes and regression coverage where present, not executed validation. No Rust build, unit test suite, live database test or migration execution has been run.
