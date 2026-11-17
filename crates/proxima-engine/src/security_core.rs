@@ -35,6 +35,7 @@ pub struct AdapterCapabilities {
     pub policy_generation: bool,
     pub controlled_policy_deployment: bool,
     pub drift_detection: bool,
+    pub runtime_fail_closed_admission: bool,
     pub signed_security_evidence: bool,
 }
 
