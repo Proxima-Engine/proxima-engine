@@ -202,6 +202,7 @@ struct NodePolicyStatusPayload {
     decision: String,
     policy_revision: Option<i32>,
     reason: String,
+    evidence: serde_json::Value,
     issued_at: i64,
     expires_at: i64,
 }
@@ -213,8 +214,9 @@ struct SignedNodePolicyStatus {
 }
 
 /// Per-connection fail-closed check against the Control Plane's latest verified
-/// PostgreSQL posture. A signed response is bound to this node, target,
-/// database, tenant, request timestamp and a 15-second expiry.
+/// PostgreSQL posture. Every response is bound to a fresh one-time request ID,
+/// node, target, database and tenant; it includes signed per-registration
+/// verification evidence and expires within 15 seconds.
 #[derive(Clone)]
 struct PolicyAdmissionClient {
     client: reqwest::Client,
