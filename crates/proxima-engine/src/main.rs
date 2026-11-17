@@ -1247,6 +1247,10 @@ async fn handle_connection(
     let (mut client, upstream, session) =
         establish(client, upstream, verifier, tenant_role_prefix).await?;
 
+    if policy_admission.is_some() && session.tenant_context.is_none() {
+        return Err(io::Error::new(io::ErrorKind::PermissionDenied,
+            "Unauthenticated PostgreSQL protocol requests are disabled when policy admission is required"));
+    }
     if let (Some(admission), Some(context)) = (policy_admission, session.tenant_context.as_ref()) {
         if let Err(error) = admission.authorize(&session.database_name, &context.tenant_id).await {
             let _ = write_startup_error(
