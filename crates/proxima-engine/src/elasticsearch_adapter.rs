@@ -164,7 +164,13 @@ impl ElasticsearchCatalogAdapter {
                 owner: None,
                 attributes: attributes.clone(),
             });
-            state.push(json!({ "index": index, "attributes": attributes }));
+            // Fingerprints intentionally exclude volatile document counts, store size and health.
+            state.push(json!({
+                "index": index,
+                "mapping": mapping_value,
+                "settings": settings_value,
+                "aliases": aliases_value
+            }));
         }
         if truncated {
             findings.push(SecurityFinding {
