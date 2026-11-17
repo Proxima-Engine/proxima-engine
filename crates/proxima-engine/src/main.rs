@@ -1050,7 +1050,12 @@ async fn handle_connection(
             query_latency.clone(),
             session.tenant_context.is_some(),
         ),
-        copy_backend_messages(&mut upstream_reader, &mut client_writer, query_latency),
+        copy_backend_messages(
+            &mut upstream_reader,
+            &mut client_writer,
+            query_latency,
+            session.tenant_context.is_some(),
+        ),
     );
     let duration_micros = session_started_at
         .elapsed()
@@ -1122,6 +1127,7 @@ async fn copy_backend_messages<R, W>(
     reader: &mut R,
     writer: &mut W,
     query_latency: Arc<QueryLatencyTracker>,
+    tenant_enforced: bool,
 ) -> io::Result<u64>
 where
     R: AsyncRead + Unpin,
@@ -1143,6 +1149,9 @@ where
             }
             let frame_length = i32::from_be_bytes(pending[1..5].try_into().unwrap());
             if frame_length < 4 || frame_length as usize > 16 * 1024 * 1024 {
+                if tenant_enforced {
+                    return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid or oversized PostgreSQL backend frame in tenant-bound session"));
+                }
                 pending.clear();
                 break;
             }
