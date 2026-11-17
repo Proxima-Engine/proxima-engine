@@ -9,7 +9,7 @@
 
 use crate::database_adapter::{
     AdapterError, AdapterFuture, AdapterTarget, CompiledPolicy, DatabaseAdapter,
-    DriftReport, InspectionRequest, InspectionSnapshot, NativePolicyChange,
+    DriftReport, DiscoveryRequest, DiscoverySnapshot, DiscoveredResource, InspectionRequest, InspectionSnapshot, NativePolicyChange,
     ResourceInspection,
 };
 use crate::security_core::{
@@ -109,6 +109,60 @@ impl DatabaseAdapter for PostgresCatalogAdapter {
             },
             status_note: "Concrete read-only catalog inspection and review-only RLS policy generation are implemented. Semantic verification, controlled deployment, drift response and runtime admission are not production-complete.",
         }
+    }
+
+    fn discover<'a>(
+        &'a self,
+        request: &'a DiscoveryRequest,
+    ) -> AdapterFuture<'a, Result<DiscoverySnapshot, AdapterError>> {
+        Box::pin(async move {
+            self.validate_target(&request.target)?;
+            if request.namespace.as_ref().is_some_and(|namespace| {
+                namespace.trim().is_empty() || namespace.len() > 63 || namespace.contains('\\0')
+            }) {
+                return Err(error("invalid_discovery_namespace", "The discovery namespace must be a valid bounded PostgreSQL schema name."));
+            }
+            let client = self.connect_checked().await?;
+            let rows = client.query(
+                "SELECT n.nspname, c.relname, CASE WHEN c.relkind IN ('r','p') THEN 'table' WHEN c.relkind IN ('v','m') THEN 'view' WHEN c.relkind='S' THEN 'sequence' END AS resource_kind, pg_catalog.pg_get_userbyid(c.relowner), jsonb_build_object('relkind',c.relkind::text,'row_security_enabled',c.relrowsecurity,'row_security_forced',c.relforcerowsecurity,'acl',COALESCE(c.relacl::text,'<default>'),'columns',COALESCE((SELECT jsonb_agg(jsonb_build_object('name',a.attname,'type',pg_catalog.format_type(a.atttypid,a.atttypmod),'not_null',a.attnotnull,'default',pg_catalog.pg_get_expr(d.adbin,d.adrelid)) ORDER BY a.attnum) FROM pg_catalog.pg_attribute a LEFT JOIN pg_catalog.pg_attrdef d ON d.adrelid=a.attrelid AND d.adnum=a.attnum WHERE a.attrelid=c.oid AND a.attnum>0 AND NOT a.attisdropped),'[]'::jsonb)) AS attributes FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE c.relkind IN ('r','p','v','m','S') AND n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname NOT LIKE 'pg_%' AND ($1::text IS NULL OR n.nspname=$1) UNION ALL SELECT n.nspname, p.proname, CASE WHEN p.prokind='p' THEN 'procedure' ELSE 'function' END, pg_catalog.pg_get_userbyid(p.proowner), jsonb_build_object('security_definer',p.prosecdef,'execute_acl',COALESCE(p.proacl::text,'<default>'),'identity_arguments',pg_catalog.pg_get_function_identity_arguments(p.oid),'configuration',COALESCE(p.proconfig,'{}'::text[])) FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace WHERE p.prokind IN ('f','p') AND n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname NOT LIKE 'pg_%' AND ($1::text IS NULL OR n.nspname=$1) ORDER BY 1,2,3",
+                &[&request.namespace],
+            ).await.map_err(db_error)?;
+            let mut resources = Vec::with_capacity(rows.len());
+            for row in rows {
+                let kind: String = row.get(2);
+                let kind = match kind.as_str() {
+                    "table" => ResourceKind::Table,
+                    "view" => ResourceKind::View,
+                    "sequence" => ResourceKind::Sequence,
+                    "procedure" => ResourceKind::Procedure,
+                    "function" => ResourceKind::Function,
+                    _ => return Err(error("unknown_discovered_resource_kind", "PostgreSQL returned an unsupported resource kind during discovery.")),
+                };
+                resources.push(DiscoveredResource {
+                    namespace: Some(row.get(0)),
+                    name: row.get(1),
+                    kind,
+                    owner: Some(row.get(3)),
+                    attributes: row.get(4),
+                });
+            }
+            let clock = client.query_one(
+                "SELECT to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"')",
+                &[],
+            ).await.map_err(db_error)?;
+            let observed_at: String = clock.get(0);
+            let fingerprint = sha256(&serde_json::to_vec(&resources)
+                .map_err(|_| error("fingerprint_serialization_failed", "Could not serialize discovered PostgreSQL resources."))?);
+            Ok(DiscoverySnapshot {
+                database_kind: DatabaseKind::PostgreSql,
+                target: request.target.clone(),
+                completeness: InspectionCompleteness::Complete,
+                resources,
+                findings: Vec::new(),
+                fingerprint: Some(fingerprint),
+                observed_at,
+            })
+        })
     }
 
     fn inspect<'a>(
