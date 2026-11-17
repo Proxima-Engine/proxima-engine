@@ -21,6 +21,7 @@ rustls-pemfile = "2.2"
 tokio-rustls = "0.26"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tokio-postgres = "0.7"
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "mysql"] }
 tokio-postgres-rustls = { version = "0.14", features = ["aws-lc-rs", "webpki-roots"] }
 sqlparser = "0.64"
 webpki-roots = "1"
