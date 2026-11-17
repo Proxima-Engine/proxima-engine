@@ -75,7 +75,7 @@ async fn inspect(url: &str) -> Result<Vec<TableFinding>, Box<dyn Error>> {
                    SELECT c.relowner UNION SELECT am.roleid FROM pg_auth_members am JOIN owner_roles o ON am.member=o.role_oid
                  )
                  SELECT 1 FROM owner_roles o JOIN pg_roles owner_member ON owner_member.oid=o.role_oid
-                 WHERE owner_member.rolsuper OR owner_member.rolbypassrls
+                 WHERE owner_member.rolsuper OR owner_member.rolbypassrls OR owner_member.rolcreaterole OR owner_member.rolcreatedb OR owner_member.rolreplication
                )),
                EXISTS (SELECT 1 FROM aclexplode(COALESCE(c.relacl, acldefault('r', c.relowner))) a
                        WHERE a.grantee = 0 AND a.privilege_type = 'SELECT'),
@@ -224,7 +224,7 @@ BEGIN
                     OR lower(setting) LIKE 'row_security=no%'
                     OR lower(setting) LIKE 'session_replication_role=replica%'))
      THEN RAISE EXCEPTION 'Agata Proxima: tenant role/database defaults can change security state'; END IF;
-  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname=owner_name AND (rolsuper OR rolbypassrls))
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname=owner_name AND (rolsuper OR rolbypassrls OR rolcreaterole OR rolcreatedb OR rolreplication))
      THEN RAISE EXCEPTION 'Agata Proxima: table owner bypasses row security'; END IF;
   IF EXISTS (WITH RECURSIVE owner_roles(role_oid) AS (
                SELECT oid FROM pg_roles WHERE rolname=owner_name
