@@ -95,3 +95,5 @@ The evidence fixture tests now model positive and negative coverage for read, cr
 The signed evidence payload validator also bounds policy/target/tenant identifiers, finding/check counts, finding and check text, resource identifiers and operation counts, and rejects NUL-bearing values. Regression coverage includes oversized tenant identifiers and finding details.
 
 The read-only PostgreSQL inspection path also checks that each policy-declared tenant ownership column exists on the registered relation and is NOT NULL; missing or nullable tenant keys become explicit findings rather than being inferred from RLS policy presence.
+
+PostgreSQL resource inspection also checks dependent view chains for non-security-invoker views and materialized views, and flags application SECURITY DEFINER routines for explicit review. These are conservative findings; their presence does not automatically prove exploitability, but they prevent a clean isolation posture from being inferred without reviewing those alternate access paths.
