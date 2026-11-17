@@ -70,12 +70,19 @@ impl SqlServerCatalogAdapter {
             .await.map_err(|_| error("sql_server_tls_login_timeout", "SQL Server encrypted login exceeded the fifteen-second deadline."))?
             .map_err(db_error)?;
         let rows = client.simple_query(
-            "SELECT DB_NAME() AS database_name, ORIGINAL_LOGIN() AS login_name, USER_NAME() AS database_user, CONVERT(nvarchar(128), SERVERPROPERTY('ProductVersion')) AS server_version, CONVERT(int,SERVERPROPERTY('ProductMajorVersion')) AS product_major_version, CONVERT(int,SERVERPROPERTY('EngineEdition')) AS engine_edition, CONVERT(bit,HAS_PERMS_BY_NAME(DB_NAME(), 'DATABASE', 'VIEW DEFINITION')) AS can_view_definition, IS_SRVROLEMEMBER('sysadmin') AS is_sysadmin"
+            "SELECT DB_NAME() AS database_name, ORIGINAL_LOGIN() AS login_name, USER_NAME() AS database_user, CONVERT(nvarchar(128), SERVERPROPERTY('ProductVersion')) AS server_version, CONVERT(int,SERVERPROPERTY('ProductMajorVersion')) AS product_major_version, CONVERT(int,SERVERPROPERTY('EngineEdition')) AS engine_edition, CONVERT(bit,HAS_PERMS_BY_NAME(DB_NAME(), 'DATABASE', 'VIEW DEFINITION')) AS can_view_definition, IS_SRVROLEMEMBER('sysadmin') AS is_sysadmin, IS_MEMBER('db_owner') AS is_db_owner, IS_MEMBER('db_ddladmin') AS is_db_ddladmin, IS_MEMBER('db_securityadmin') AS is_db_securityadmin, IS_MEMBER('db_accessadmin') AS is_db_accessadmin"
         ).await.map_err(db_error)?.into_first_result().await.map_err(db_error)?;
         let row = rows.first().ok_or_else(|| error("sql_server_identity_unavailable", "SQL Server did not return authenticated connection identity metadata."))?;
         let database = row.get::<&str,_>("database_name").unwrap_or_default();
         if database != self.database_name {
             return Err(error("sql_server_database_mismatch", "The authenticated connection reached a different SQL Server database."));
+        }
+        let sysadmin = row.get::<i32,_>("is_sysadmin").unwrap_or(0) == 1;
+        let elevated_database_role = ["is_db_owner", "is_db_ddladmin", "is_db_securityadmin", "is_db_accessadmin"]
+            .iter()
+            .any(|column| row.get::<i32,_>(*column).unwrap_or(0) == 1);
+        if sysadmin || elevated_database_role {
+            return Err(error("unsafe_sql_server_inspection_principal", "Use a dedicated read-only SQL Server inspection principal; sysadmin and database owner/DDL/security/access administration roles are rejected."));
         }
         Ok(client)
     }
