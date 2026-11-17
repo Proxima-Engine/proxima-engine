@@ -152,7 +152,8 @@ fn generate(spec: &Value) -> Result<String, Box<dyn Error>> {
     if tables.is_empty() { return Err("tables array cannot be empty".into()); }
     if tables.len()>100 { return Err("at most 100 tables may be generated in one policy spec".into()); }
     let mut seen_tables=HashSet::new();
-    let mut out=String::from("-- Agata Proxima generated SQL. Review and apply through migrations.\n-- Tenant identity is bound to current_user, not a client-writable GUC.\nBEGIN;\nSET LOCAL search_path = pg_catalog, pg_temp;\n");
+    let mut required_role_prefix:Option<String>=None;
+    let mut out=String::from("-- Agata Proxima generated SQL. Review and apply through migrations.\n-- Tenant identity is bound to current_user, not a client-writable GUC.\n-- All role mappings must use one Engine prefix plus the normalized verified tenant ID.\nBEGIN;\nSET LOCAL search_path = pg_catalog, pg_temp;\n");
     for t in tables {
         let schema=t["schema"].as_str().ok_or("schema required")?;
         let name=t["table"].as_str().ok_or("table required")?;
@@ -175,10 +176,23 @@ fn generate(spec: &Value) -> Result<String, Box<dyn Error>> {
         for tenant in tenants {
             let id=tenant["tenant_id"].as_str().ok_or("tenant_id required")?;
             let role=tenant["role"].as_str().ok_or("role required")?;
-            if id.is_empty()||id.len()>256||id.contains('\0')||!valid_role_name(role)
+            if id.is_empty()||id.len()>128||!id.bytes().all(|byte|byte.is_ascii_alphanumeric()||byte==b'-'||byte==b'_')||!valid_role_name(role)
                 || !tenant_ids.insert(id)||!role_names.insert(role) {
                 return Err(format!("{schema}.{name}: invalid or duplicate tenant-to-role mapping").into());
             }
+            let normalized_id=id.replace('-', "_");
+            if !role.ends_with(&normalized_id) {
+                return Err(format!("{schema}.{name}: role {role} does not match the Engine prefix-plus-tenant-ID contract").into());
+            }
+            let prefix_length=role.len().saturating_sub(normalized_id.len());
+            let role_prefix=&role[..prefix_length];
+            if role_prefix.is_empty()||!role_prefix.bytes().all(|byte|byte.is_ascii_alphanumeric()||byte==b'_') {
+                return Err(format!("{schema}.{name}: role {role} has an invalid Engine prefix").into());
+            }
+            if required_role_prefix.as_deref().is_some_and(|expected|expected!=role_prefix) {
+                return Err(format!("{schema}.{name}: all tenant roles must use one shared PROXIMA_TENANT_ROLE_PREFIX").into());
+            }
+            required_role_prefix=Some(role_prefix.to_owned());
             predicates.push(format!("({} = {} AND current_user = {})",ident(column),literal(id),literal(role)));
             roles.push(ident(role));
         }
@@ -307,6 +321,8 @@ $agata_proxima_preflight$;
         out.push_str(&preflight);
         out.push_str(&format!("\nALTER TABLE {target} ENABLE ROW LEVEL SECURITY;\nALTER TABLE {target} FORCE ROW LEVEL SECURITY;\nCREATE POLICY {} ON {target} FOR ALL TO {} USING ({predicate}) WITH CHECK ({predicate});\n",ident(policy),roles.join(", ")));
     }
+    let prefix=required_role_prefix.ok_or("policy spec did not define an Engine role prefix")?;
+    out.push_str(&format!("\\n-- Required PROXIMA_TENANT_ROLE_PREFIX: {prefix}\\n"));
     out.push_str("\nCOMMIT;\n");
     Ok(out)
 }
