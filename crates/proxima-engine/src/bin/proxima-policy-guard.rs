@@ -7,6 +7,7 @@ use proxima_engine::mongodb_adapter::MongoCatalogAdapter;
 use proxima_engine::redis_adapter::RedisCatalogAdapter;
 use proxima_engine::sql_server_adapter::SqlServerCatalogAdapter;
 use proxima_engine::cockroach_adapter::{CockroachCatalogAdapter, CockroachConnector};
+use proxima_engine::sqlite_adapter::SqliteCatalogAdapter;
 use proxima_engine::native_policy_plans::{compile_mongodb_database_boundary, compile_mysql_database_boundary, compile_redis_acl, compile_sql_server};
 use std::{collections::HashSet, env, error::Error, fs, io::BufReader, path::Path, str::FromStr, time::Duration};
 use tokio_postgres::config::SslMode;
@@ -578,6 +579,54 @@ async fn main() -> Result<(),Box<dyn Error>> {
         if decision != AccessDecision::Allow { std::process::exit(2); }
       },
 
+
+      Some("discover-sqlite") => {
+        if args.next().is_some() { return Err("usage: proxima-policy-guard discover-sqlite".into()); }
+        let database_path = env::var("PROXIMA_SQLITE_ADAPTER_DATABASE_PATH")
+            .map_err(|_| "set PROXIMA_SQLITE_ADAPTER_DATABASE_PATH to the absolute registered SQLite file path")?;
+        let uri = env::var("PROXIMA_SQLITE_ADAPTER_DATABASE_URI")
+            .map_err(|_| "set PROXIMA_SQLITE_ADAPTER_DATABASE_URI to a sqlite:// URI for the same file")?;
+        let target_id = env::var("PROXIMA_SQLITE_ADAPTER_TARGET_ID")
+            .map_err(|_| "set PROXIMA_SQLITE_ADAPTER_TARGET_ID to the registered non-secret target ID")?;
+        let adapter = SqliteCatalogAdapter::new(target_id.clone(), database_path.clone(), uri)?;
+        let snapshot = adapter.discover(&DiscoveryRequest {
+            target: AdapterTarget { target_id, database_name: database_path, namespace: None },
+            namespace: None,
+        }).await?;
+        println!("{}", serde_json::to_string_pretty(&json!({
+            "adapter": adapter.descriptor(),
+            "discovery": snapshot,
+            "access_decision": "deny",
+            "note": "SQLite discovery is read-only schema and filesystem inventory. SQLite has no native row-level security or tenant users; no traffic is authorized."
+        }))?);
+      },
+      Some("inspect-sqlite-policy") => {
+        let path = args.next().ok_or("usage: proxima-policy-guard inspect-sqlite-policy <policy.json>")?;
+        if args.next().is_some() { return Err("only one policy file may be supplied".into()); }
+        let policy: TenantSecurityPolicy = serde_json::from_slice(&fs::read(&path)?)?;
+        policy.validate().map_err(|error| format!("invalid policy: {error:?}"))?;
+        let database_path = env::var("PROXIMA_SQLITE_ADAPTER_DATABASE_PATH")
+            .map_err(|_| "set PROXIMA_SQLITE_ADAPTER_DATABASE_PATH to the absolute registered SQLite file path")?;
+        let uri = env::var("PROXIMA_SQLITE_ADAPTER_DATABASE_URI")
+            .map_err(|_| "set PROXIMA_SQLITE_ADAPTER_DATABASE_URI to a sqlite:// URI for the same file")?;
+        let target_id = env::var("PROXIMA_SQLITE_ADAPTER_TARGET_ID")
+            .map_err(|_| "set PROXIMA_SQLITE_ADAPTER_TARGET_ID to the registered non-secret target ID")?;
+        let adapter = SqliteCatalogAdapter::new(target_id.clone(), database_path.clone(), uri)?;
+        let request = InspectionRequest {
+            target: AdapterTarget { target_id, database_name: database_path, namespace: None },
+            policy,
+        };
+        let snapshot = adapter.inspect(&request).await?;
+        let verification = adapter.verify(&request.policy, &snapshot).await?;
+        let decision = verification.access_decision();
+        println!("{}", serde_json::to_string_pretty(&json!({
+            "adapter": adapter.descriptor(),
+            "snapshot": snapshot,
+            "verification": verification,
+            "access_decision": decision
+        }))?);
+        if decision != AccessDecision::Allow { std::process::exit(2); }
+      },
       Some("discover-cockroachdb") => {
         let namespace = args.next();
         if args.next().is_some() { return Err("usage: proxima-policy-guard discover-cockroachdb [schema]".into()); }
@@ -731,7 +780,7 @@ async fn main() -> Result<(),Box<dyn Error>> {
         let spec:Value=serde_json::from_slice(&fs::read(Path::new(&path))?)?;
         print!("{}",generate(&spec)?);
       },
-      _ => return Err("usage: proxima-policy-guard <adapters|audit|generate|validate-policy|compile-plan|discover-postgres|discover-cockroachdb|discover-mysql|discover-mariadb|inspect-mysql-policy|inspect-mariadb-policy|discover-mongodb|inspect-mongodb-policy|discover-redis|inspect-redis-policy|discover-sql-server|inspect-sql-server-policy|inspect-policy>".into())
+      _ => return Err("usage: proxima-policy-guard <adapters|audit|generate|validate-policy|compile-plan|discover-postgres|discover-sqlite|inspect-sqlite-policy|discover-cockroachdb|discover-mysql|discover-mariadb|inspect-mysql-policy|inspect-mariadb-policy|discover-mongodb|inspect-mongodb-policy|discover-redis|inspect-redis-policy|discover-sql-server|inspect-sql-server-policy|inspect-policy>".into())
     }
     Ok(())
 }
