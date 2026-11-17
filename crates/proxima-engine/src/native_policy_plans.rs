@@ -55,8 +55,9 @@ pub fn compile_sql_server(policy: &TenantSecurityPolicy) -> Result<CompiledPolic
         let suffix = hex::encode(&digest[..8]);
         let function_name = format!("{schema}.[proxima_tenant_{suffix}]");
         let policy_name = format!("{schema}.[proxima_policy_{suffix}]");
+        let claim = policy.tenant_identity_claim.replace('\'', "''");
         let mut statements = vec![format!(
-            "CREATE OR ALTER FUNCTION {function_name}(@row_tenant_key nvarchar(450))\nRETURNS TABLE WITH SCHEMABINDING AS\nRETURN SELECT 1 AS allowed\nWHERE @row_tenant_key = CONVERT(nvarchar(450), SESSION_CONTEXT(N'tenant_id'));"
+            "CREATE OR ALTER FUNCTION {function_name}(@row_tenant_key nvarchar(450))\nRETURNS TABLE WITH SCHEMABINDING AS\nRETURN SELECT 1 AS allowed\nWHERE @row_tenant_key = CONVERT(nvarchar(450), SESSION_CONTEXT(N'{claim}'));"
         )];
         if resource.operations.contains(&Operation::Read) {
             statements.push(format!("ADD FILTER PREDICATE {function_name}({tenant_key}) ON {schema}.{table}"));
@@ -192,7 +193,7 @@ pub fn compile_redis_acl(policy: &TenantSecurityPolicy) -> Result<CompiledPolicy
         if resource.operations.contains(&Operation::Read) { commands.push("+@read"); }
         if resource.operations.iter().any(|op| matches!(op, Operation::Create | Operation::Update | Operation::Delete)) { commands.push("+@write"); }
         if commands.is_empty() { return Err(error("empty_privilege_set", "No supported Redis command category was requested.")); }
-        let mut acl_template = vec!["reset".to_string(), "on".to_string(), format!("~{pattern}")];
+        let mut acl_template = vec!["reset".to_string(), "on".to_string(), ">${secret_manager_generated_password}".to_string(), format!("~{pattern}")];
         acl_template.extend(commands.iter().map(|value| value.to_string()));
         changes.push(resource_change(resource, "redis_acl_user_template", json!({
             "acl_template": acl_template,
