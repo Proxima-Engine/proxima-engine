@@ -5,7 +5,7 @@ use tokio_postgres_rustls::MakeRustlsConnect;
 
 struct TableFinding {
     schema: String, table: String, owner: String,
-    rls_enabled: bool, rls_forced: bool, owner_bypasses_rls: bool,
+    rls_enabled: bool, rls_forced: bool, owner_has_elevated_privileges: bool,
     public_select: bool, public_write_or_truncate: bool, truncate_grant: bool, bypass_role_grant: bool,
     policy_count: i64, permissive_policy_count: i64, security_definer_routines: i64,
 }
@@ -104,7 +104,7 @@ async fn inspect(url: &str) -> Result<Vec<TableFinding>, Box<dyn Error>> {
     "#, &[]).await?;
     Ok(rows.into_iter().map(|r| TableFinding {
         schema:r.get(0), table:r.get(1), owner:r.get(2), rls_enabled:r.get(3),
-        rls_forced:r.get(4), owner_bypasses_rls:r.get(5), public_select:r.get(6),
+        rls_forced:r.get(4), owner_has_elevated_privileges:r.get(5), public_select:r.get(6),
         public_write_or_truncate:r.get(7), truncate_grant:r.get(8), bypass_role_grant:r.get(9),
         policy_count:r.get(10), permissive_policy_count:r.get(11), security_definer_routines:r.get(12)
     }).collect())
@@ -114,7 +114,7 @@ fn report(rows: &[TableFinding]) -> Value {
         let mut issues: Vec<&str> = Vec::new();
         if !f.rls_enabled { issues.push("rls_disabled"); }
         if f.rls_enabled && !f.rls_forced { issues.push("rls_not_forced"); }
-        if !f.rls_forced || f.owner_bypasses_rls { issues.push("table_owner_bypasses_rls"); }
+        if !f.rls_forced || f.owner_has_elevated_privileges { issues.push("table_owner_has_elevated_privileges"); }
         if f.public_select { issues.push("public_select_grant"); }
         if f.public_write_or_truncate { issues.push("public_write_or_truncate_grant"); }
         if f.truncate_grant { issues.push("non_owner_truncate_grant"); }
@@ -124,7 +124,7 @@ fn report(rows: &[TableFinding]) -> Value {
         if f.security_definer_routines > 0 { issues.push("security_definer_routines_require_review"); }
         json!({"schema":f.schema,"table":f.table,"owner":f.owner,
           "rls_enabled":f.rls_enabled,"rls_forced":f.rls_forced,
-          "owner_bypasses_rls":f.owner_bypasses_rls,"public_select":f.public_select,
+          "owner_has_elevated_privileges":f.owner_has_elevated_privileges,"public_select":f.public_select,
           "public_write_or_truncate":f.public_write_or_truncate,"truncate_grant":f.truncate_grant,"bypass_role_grant":f.bypass_role_grant,
           "policy_count":f.policy_count,"permissive_policy_count":f.permissive_policy_count,
           "security_definer_routines":f.security_definer_routines,"findings":issues})
@@ -312,10 +312,10 @@ mod tests {
    assert!(!sql.contains("DROP POLICY"));
    assert!(sql.contains("policy name already exists"));
  }
- #[test] fn flags_non_forced_owner_bypass() {
-   let rows=vec![TableFinding{schema:"public".into(),table:"orders".into(),owner:"app_owner".into(),rls_enabled:true,rls_forced:false,owner_bypasses_rls:false,public_select:false,public_write_or_truncate:false,truncate_grant:false,bypass_role_grant:false,policy_count:1,permissive_policy_count:1,security_definer_routines:0}];
+ #[test] fn flags_non_forced_rls_and_owner_privileges() {
+   let rows=vec![TableFinding{schema:"public".into(),table:"orders".into(),owner:"app_owner".into(),rls_enabled:true,rls_forced:false,owner_has_elevated_privileges:false,public_select:false,public_write_or_truncate:false,truncate_grant:false,bypass_role_grant:false,policy_count:1,permissive_policy_count:1,security_definer_routines:0}];
    let value=report(&rows);
-   assert!(value["tables"][0]["findings"].as_array().unwrap().iter().any(|v|v=="table_owner_bypasses_rls"));
+   assert!(value["tables"][0]["findings"].as_array().unwrap().iter().any(|v|v=="table_owner_has_elevated_privileges"));
  }
  #[test] fn rejects_empty_mapping() {
    let spec=json!({"tables":[{"schema":"public","table":"orders","tenant_column":"tenant_id","tenants":[]}]});
