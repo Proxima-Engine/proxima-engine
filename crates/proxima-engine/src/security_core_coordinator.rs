@@ -4,7 +4,10 @@
 //! deliberately does not apply generated policy: native changes require a
 //! separately authorized deployment workflow.
 
+use crate::connection_admission::ConnectionAdmissionGate;
 use crate::database_adapter::{AdapterError, AdapterRegistry, AdapterTarget, CompiledPolicy, DriftReport, InspectionRequest, InspectionSnapshot};
+use crate::policy_evidence::{EvidenceError, PolicyEvidenceAuthority, SignedPolicyAdmission, SignedPolicyEvidence};
+use crate::tenant_identity::VerifiedTenantIdentity;
 use crate::security_core::{AccessDecision, DatabaseKind, InspectionCompleteness, SecurityFinding, SecurityPosture, TenantSecurityPolicy, VerificationReport, SECURITY_MODEL_VERSION};
 use std::collections::HashSet;
 
@@ -22,10 +25,18 @@ pub enum SecurityCoreError {
     DriftFingerprintMismatch,
     InvalidFingerprint,
     DuplicateCompiledResource(String),
+    Admission(EvidenceError),
+    IdentityScopeMismatch,
+    EvidenceScopeMismatch,
+    EvidenceCoverageIncomplete,
 }
 
 impl From<AdapterError> for SecurityCoreError {
     fn from(error: AdapterError) -> Self { Self::Adapter(error) }
+}
+
+impl From<EvidenceError> for SecurityCoreError {
+    fn from(error: EvidenceError) -> Self { Self::Admission(error) }
 }
 
 pub struct SecurityCoreCoordinator { registry: AdapterRegistry }
@@ -70,6 +81,12 @@ impl SecurityCoreCoordinator {
     /// Inspect and semantically verify native state. Any missing resource or
     /// operation, incomplete inspection, finding, or identity mismatch denies.
     pub async fn inspect_and_verify(&self, kind: DatabaseKind, request: &InspectionRequest) -> Result<VerificationReport, SecurityCoreError> {
+        self.inspect_and_verify_snapshot(kind, request).await.map(|(report, _)| report)
+    }
+
+    /// Inspect and semantically verify native state. Any missing resource or
+    /// operation, incomplete inspection, finding, or identity mismatch denies.
+    async fn inspect_and_verify_snapshot(&self, kind: DatabaseKind, request: &InspectionRequest) -> Result<(VerificationReport, InspectionSnapshot), SecurityCoreError> {
         request.policy.validate().map_err(|_| SecurityCoreError::InvalidPolicy)?;
         let adapter = self.registry.get(kind).ok_or(SecurityCoreError::AdapterUnavailable(kind))?;
         let snapshot = adapter.inspect(request).await?;
@@ -112,9 +129,74 @@ impl SecurityCoreCoordinator {
         }
         // Preserve the adapter's model version: an unknown version must never
         // be normalized into the current model and accidentally accepted.
-        if report.access_decision() != AccessDecision::Allow { return Ok(report); }
-        Ok(report)
+        if report.access_decision() != AccessDecision::Allow {
+            return Ok((report, snapshot));
+        }
+        Ok((report, snapshot))
     }
+
+    /// Perform current native inspection, bind signed probe evidence to that
+    /// exact inspection and consume both the verified tenant identity and the
+    /// admission exactly once. The generic evidence format is resource-agnostic,
+    /// so this path fails closed for multi-resource policies until per-resource
+    /// semantic evidence is available.
+    pub async fn inspect_and_admit(
+        &self,
+        kind: DatabaseKind,
+        request: &InspectionRequest,
+        identity: &VerifiedTenantIdentity,
+        evidence_authority: &PolicyEvidenceAuthority,
+        evidence: &SignedPolicyEvidence,
+        admission: &SignedPolicyAdmission,
+        gate: &ConnectionAdmissionGate,
+        connection_id: &str,
+        now_unix: i64,
+    ) -> Result<AccessDecision, SecurityCoreError> {
+        if identity.database_kind() != kind
+            || identity.target_id() != request.target.target_id
+            || identity.policy_id() != request.policy.policy_id
+            || identity.policy_revision() != request.policy.revision
+        {
+            return Err(SecurityCoreError::IdentityScopeMismatch);
+        }
+        if request.policy.resources.len() != 1 {
+            return Err(SecurityCoreError::EvidenceCoverageIncomplete);
+        }
+
+        let (report, snapshot) = self.inspect_and_verify_snapshot(kind, request).await?;
+        if report.access_decision() != AccessDecision::Allow {
+            return Ok(AccessDecision::Deny);
+        }
+        evidence_authority.verify_evidence(evidence)?;
+        let payload = &evidence.payload;
+        let current_fingerprint = snapshot.fingerprint.as_deref()
+            .ok_or(SecurityCoreError::EvidenceScopeMismatch)?;
+        if payload.database_kind != kind
+            || payload.policy_id != request.policy.policy_id
+            || payload.policy_revision != request.policy.revision
+            || payload.target_id != request.target.target_id
+            || payload.tenant_id != identity.tenant_id()
+            || payload.fingerprint != current_fingerprint
+        {
+            return Err(SecurityCoreError::EvidenceScopeMismatch);
+        }
+        let required_operations: HashSet<_> = request.policy.resources[0].operations.iter().copied().collect();
+        let evidenced_operations: HashSet<_> = payload.verified_operations.iter().copied().collect();
+        if required_operations.len() != request.policy.resources[0].operations.len()
+            || evidenced_operations != required_operations
+        {
+            return Err(SecurityCoreError::EvidenceCoverageIncomplete);
+        }
+        gate.consume_for_identity(
+            evidence_authority,
+            admission,
+            evidence,
+            identity,
+            connection_id,
+            now_unix,
+        ).map_err(SecurityCoreError::Admission)
+    }
+
 
     pub async fn detect_drift(&self, kind: DatabaseKind, target: &AdapterTarget, previous_fingerprint: Option<&str>) -> Result<DriftReport, SecurityCoreError> {
         let adapter = self.registry.get(kind).ok_or(SecurityCoreError::AdapterUnavailable(kind))?;
