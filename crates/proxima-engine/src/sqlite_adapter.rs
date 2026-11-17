@@ -19,7 +19,7 @@ use sqlx::{
     sqlite::{SqliteConnectOptions, SqliteConnection},
     Connection, Row,
 };
-use std::{path::{Path, PathBuf}, str::FromStr, time::Duration};
+use std::{path::PathBuf, str::FromStr, time::Duration};
 
 pub struct SqliteCatalogAdapter {
     target_id: String,
@@ -460,7 +460,7 @@ fn db_error(error: sqlx::Error) -> AdapterError {
     AdapterError {
         code: "sqlite_catalog_query_failed".into(),
         detail: "The read-only SQLite catalog operation failed.".into(),
-        retryable: matches!(error, sqlx::Error::PoolTimedOut | sqlx::Error::Io(_) | sqlx::Error::Database(_)),
+        retryable: matches!(error, sqlx::Error::PoolTimedOut | sqlx::Error::Io(_)),
     }
 }
 
