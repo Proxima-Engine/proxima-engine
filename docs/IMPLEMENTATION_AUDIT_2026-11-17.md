@@ -93,3 +93,5 @@ The generic Engine evidence authority now refuses admission unless every declare
 The evidence fixture tests now model positive and negative coverage for read, create, update and delete. Regression tests cover missing per-operation negative probes, duplicate check identifiers and duplicate operation declarations. These checks validate the evidence contract; they do not themselves execute database probes. A trusted native verifier must still perform the operations and sign the resulting evidence. Tests were authored but not executed.
 
 The signed evidence payload validator also bounds policy/target/tenant identifiers, finding/check counts, finding and check text, resource identifiers and operation counts, and rejects NUL-bearing values. Regression coverage includes oversized tenant identifiers and finding details.
+
+The read-only PostgreSQL inspection path also checks that each policy-declared tenant ownership column exists on the registered relation and is NOT NULL; missing or nullable tenant keys become explicit findings rather than being inferred from RLS policy presence.
