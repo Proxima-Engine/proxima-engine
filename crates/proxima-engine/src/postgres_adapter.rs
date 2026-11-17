@@ -105,6 +105,7 @@ impl DatabaseAdapter for PostgresCatalogAdapter {
             capabilities: AdapterCapabilities {
                 schema_inspection: true,
                 policy_generation: true,
+                drift_detection: true,
                 ..AdapterCapabilities::default()
             },
             status_note: "Concrete read-only catalog inspection and review-only RLS policy generation are implemented. Semantic verification, controlled deployment, drift response and runtime admission are not production-complete.",
