@@ -38,7 +38,7 @@ pub struct AdapterCapabilities {
     pub signed_security_evidence: bool,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct AdapterDescriptor {
     pub kind: DatabaseKind,
     pub name: &'static str,
@@ -104,7 +104,7 @@ pub fn adapter_catalog() -> Vec<AdapterDescriptor> {
     ]
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ResourceKind {
     Table,
