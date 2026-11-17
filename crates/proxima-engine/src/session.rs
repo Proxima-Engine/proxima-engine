@@ -21,6 +21,8 @@ pub struct EstablishedSession {
     pub tenant_context: Option<TenantContext>,
     /// Database selected by the PostgreSQL startup packet after Engine role routing.
     pub database_name: String,
+    /// Withheld until policy admission and durable emergency audit complete.
+    pub ready_for_query: Option<Vec<u8>>,
 }
 
 pub async fn establish(
@@ -48,8 +50,8 @@ pub async fn establish(
                 "PostgreSQL startup packet received"
             );
             forward_startup(&mut upstream, &startup).await?;
-            broker_startup_authentication(&mut client, &mut upstream).await?;
-            Ok((client, upstream, EstablishedSession { tenant_context, database_name }))
+            let ready_for_query = broker_startup_authentication(&mut client, &mut upstream).await?;
+            Ok((client, upstream, EstablishedSession { tenant_context, database_name, ready_for_query: Some(ready_for_query) }))
         }
         StartupPacket::SslRequest => {
             upstream
@@ -71,6 +73,8 @@ pub async fn establish(
                     upstream,
                     EstablishedSession {
                         tenant_context: None,
+                        database_name: String::new(),
+                        ready_for_query: None,
                     },
                 ));
             }
@@ -87,9 +91,14 @@ pub async fn establish(
                         verifier,
                         tenant_role_prefix,
                     )?;
+                    let database_name = startup.parameters.iter()
+                        .find(|(key, _)| key == "database")
+                        .map(|(_, value)| value.clone())
+                        .or_else(|| startup.parameters.iter().find(|(key, _)| key == "user").map(|(_, value)| value.clone()))
+                        .unwrap_or_default();
                     forward_startup(&mut upstream, &startup).await?;
-                    broker_startup_authentication(&mut client, &mut upstream).await?;
-                    Ok((client, upstream, EstablishedSession { tenant_context }))
+                    let ready_for_query = broker_startup_authentication(&mut client, &mut upstream).await?;
+                    Ok((client, upstream, EstablishedSession { tenant_context, database_name, ready_for_query: Some(ready_for_query) }))
                 }
                 other => Err(io::Error::new(
                     io::ErrorKind::InvalidData,
@@ -114,6 +123,8 @@ pub async fn establish(
                 upstream,
                 EstablishedSession {
                     tenant_context: None,
+                    database_name: String::new(),
+                    ready_for_query: None,
                 },
             ))
         }
@@ -271,12 +282,11 @@ fn extract_tenant_token_from_options(value: &str) -> io::Result<(String, Option<
 async fn broker_startup_authentication(
     client: &mut dyn PgStream,
     upstream: &mut dyn PgStream,
-) -> io::Result<()> {
+) -> io::Result<Vec<u8>> {
     let mut authenticated = false;
 
     loop {
         let frame = read_backend_frame(upstream).await?;
-        client.write_all(&frame).await?;
 
         let message = parse_backend_frame(&frame)
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.to_string()))?
@@ -317,8 +327,10 @@ async fn broker_startup_authentication(
                     "PostgreSQL session became ready without AuthenticationOk",
                 ));
             }
-            return Ok(());
+            return Ok(frame);
         }
+
+        client.write_all(&frame).await?;
     }
 }
 
