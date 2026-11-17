@@ -134,3 +134,19 @@ For policy inspection, use `inspect-mysql-policy policy.json` or `inspect-mariad
 The Engine crate exposes `MongoCatalogAdapter` for a registered MongoDB database. Its URI must explicitly enable TLS or use `mongodb+srv://`; insecure certificate/hostname options and explicit TLS disablement are rejected. Discovery records visible collections/views, collection validators/options, view definitions and the authenticated account's effective privileges from `connectionStatus`. The inventory is marked incomplete because MongoDB metadata visibility is privilege-scoped.
 
 The adapter checks whether a collection validator declares and requires the configured tenant ownership field, but this is not a substitute for enforcing document-level authorization. MongoDB database roles do not automatically filter documents by tenant. Independent authenticated tenant probes and a trusted runtime enforcement boundary remain mandatory before admission.
+
+Use the Policy Guard commands to inventory a registered database or inspect a policy:
+
+```bash
+PROXIMA_MONGODB_ADAPTER_URI='mongodb+srv://...' \
+PROXIMA_MONGODB_ADAPTER_TARGET_ID='registered-target-id' \
+PROXIMA_MONGODB_ADAPTER_DATABASE_NAME='application_db' \
+cargo run -p proxima-engine --bin proxima-policy-guard -- discover-mongodb
+
+PROXIMA_MONGODB_ADAPTER_URI='mongodb+srv://...' \
+PROXIMA_MONGODB_ADAPTER_TARGET_ID='registered-target-id' \
+PROXIMA_MONGODB_ADAPTER_DATABASE_NAME='application_db' \
+cargo run -p proxima-engine --bin proxima-policy-guard -- inspect-mongodb-policy policy.json
+```
+
+Both commands return a deny decision until a native document-level enforcement boundary and independent positive/negative tenant probes exist. The URI must not disable TLS or certificate/hostname verification; keep credentials in a protected environment variable.
