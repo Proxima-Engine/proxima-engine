@@ -1161,6 +1161,9 @@ where
             pending.advance(total_length);
         }
         if pending.len() > 16 * 1024 * 1024 + 5 {
+            if tenant_enforced {
+                return Err(io::Error::new(io::ErrorKind::InvalidData,"PostgreSQL frontend frame exceeded the inspection limit"));
+            }
             pending.clear();
         }
         writer.write_all(&buffer[..size]).await?;
@@ -1194,7 +1197,9 @@ where
             }
             let frame_length = i32::from_be_bytes(pending[1..5].try_into().unwrap());
             if frame_length < 4 || frame_length as usize > 16 * 1024 * 1024 {
-                // Preserve wire behavior: observer failures never mutate or suppress forwarded bytes.
+                if tenant_enforced {
+                    return Err(io::Error::new(io::ErrorKind::InvalidData,"invalid or oversized PostgreSQL frontend frame in tenant-bound session"));
+                }
                 pending.clear();
                 break;
             }
@@ -1214,14 +1219,15 @@ where
             }
             if tenant_enforced && matches!(pending[0], b'Q' | b'P') {
                 let frame = &pending[..total_length];
-                if let Some(sql) = sql_guard::sql_from_frontend_frame(frame) {
-                    if sql_guard::blocks_tenant_session_mutation(sql) {
-                        warn!("blocked SQL that attempts to change tenant-bound PostgreSQL session security state");
-                        return Err(io::Error::new(
-                            io::ErrorKind::PermissionDenied,
-                            "tenant-bound PostgreSQL sessions cannot change database roles or disable row security",
-                        ));
-                    }
+                let Some(sql) = sql_guard::sql_from_frontend_frame(frame) else {
+                    return Err(io::Error::new(io::ErrorKind::InvalidData,"could not safely inspect PostgreSQL query frame in tenant-bound session"));
+                };
+                if sql_guard::blocks_tenant_session_mutation(sql) {
+                    warn!("blocked SQL that attempts to change tenant-bound PostgreSQL session security state");
+                    return Err(io::Error::new(
+                        io::ErrorKind::PermissionDenied,
+                        "tenant-bound PostgreSQL sessions cannot change database roles, weaken row security, or mutate policy boundaries",
+                    ));
                 }
             }
             if matches!(pending[0], b'Q' | b'E') {
