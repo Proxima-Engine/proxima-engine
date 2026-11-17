@@ -78,7 +78,13 @@ pub fn compile_sql_server(policy: &TenantSecurityPolicy) -> Result<CompiledPolic
         let create_policy = if predicate_lines.is_empty() {
             String::new()
         } else {
-            format!("CREATE SECURITY POLICY {policy_name}\n    {}\nWITH (STATE = ON, SCHEMABINDING = ON);", predicate_lines.join(",\n    "))
+            let schema_name = resource.resource.namespace.as_deref().unwrap_or("dbo");
+            let schema_literal = schema_name.replace('\'', "''");
+            let policy_short_name = format!("proxima_policy_{suffix}");
+            format!(
+                "IF NOT EXISTS (SELECT 1 FROM sys.security_policies WHERE name = N'{policy_short_name}' AND schema_id = SCHEMA_ID(N'{schema_literal}'))\nBEGIN\n    CREATE SECURITY POLICY {policy_name}\n        {}\n    WITH (STATE = ON, SCHEMABINDING = ON);\nEND;",
+                predicate_lines.join(",\n        ")
+            )
         };
         let mut batches = vec![statements[0].clone()];
         if !create_policy.is_empty() { batches.push(create_policy); }
@@ -185,10 +191,94 @@ pub fn compile_redis_acl(policy: &TenantSecurityPolicy) -> Result<CompiledPolicy
     policy.validate().map_err(|e| error("invalid_policy", &format!("The shared policy is invalid: {e:?}")))?;
     let mut changes = Vec::new();
     for resource in &policy.resources {
-        if !resource.tenant_key.contains("${tenant_id}") || resource.tenant_key.matches("${tenant_id}").count() != 1 {
+        let Some((prefix, suffix)) = resource.tenant_key.split_once("${tenant_id}") else {
             return Err(error("redis_tenant_key_pattern_required", "Redis tenant_key must contain exactly one literal ${tenant_id} placeholder, for example tenant:${tenant_id}:*."));
+        };
+        if resource.tenant_key.matches("${tenant_id}").count() != 1
+            || prefix.is_empty()
+            || prefix.contains('*')
+            || !suffix.starts_with(':')
+            || !resource.tenant_key.chars().all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, ':' | '_' | '-' | '*' | '
+        let mut commands = Vec::new();
+        if resource.operations.contains(&Operation::Read) { commands.push("+@read"); }
+        if resource.operations.iter().any(|op| matches!(op, Operation::Create | Operation::Update | Operation::Delete)) { commands.push("+@write"); }
+        if commands.is_empty() { return Err(error("empty_privilege_set", "No supported Redis command category was requested.")); }
+        let mut acl_template = vec!["reset".to_string(), "on".to_string(), ">${secret_manager_generated_password}".to_string(), format!("~{pattern}")];
+        acl_template.extend(commands.iter().map(|value| value.to_string()));
+        changes.push(resource_change(resource, "redis_acl_user_template", json!({
+            "acl_template": acl_template,
+            "username_template": "proxima:${tenant_id}",
+            "password_source": "unique_secret_from_secret_manager",
+            "transport": "TLS_required_outside_local_development",
+            "limitations": [
+                "The trusted gateway must authenticate the tenant and select the matching Redis ACL user.",
+                "Every key must follow the tenant key pattern; unscoped keys and keyless commands need separate policy review.",
+                "Redis ACL categories are broad command groups; production adapters must reduce them to a tested command allowlist.",
+                "ACL users, selectors, key patterns, channels, scripts, functions, modules and replication/admin commands require inspection."
+            ]
+        })));
+    }
+    Ok(CompiledPolicy { database_kind: DatabaseKind::Redis, policy_id: policy.policy_id.clone(), revision: policy.revision, changes, requires_approval: true })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::security_core::{ResourceRef, SECURITY_MODEL_VERSION};
+
+    fn policy(kind: ResourceKind, tenant_key: &str) -> TenantSecurityPolicy {
+        TenantSecurityPolicy {
+            schema_version: SECURITY_MODEL_VERSION.into(),
+            policy_id: "tenant-boundary".into(),
+            revision: 1,
+            tenant_identity_claim: "tenant_id".into(),
+            resources: vec![ProtectedResource {
+                resource: ResourceRef { namespace: Some("app".into()), name: "records".into(), kind },
+                tenant_key: tenant_key.into(),
+                operations: vec![Operation::Read, Operation::Create, Operation::Update, Operation::Delete],
+            }],
         }
-        let pattern = resource.tenant_key.replace('\\', "\\\\").replace(' ', "\\ ");
+    }
+
+    #[test]
+    fn sql_server_plan_uses_filter_and_block_predicates() {
+        let compiled = compile_sql_server(&policy(ResourceKind::Table, "tenant_id")).unwrap();
+        assert_eq!(compiled.database_kind, DatabaseKind::SqlServer);
+        let batches = compiled.changes[0].definition["batches"].as_array().unwrap();
+        let ddl = batches.iter().filter_map(|batch| batch.as_str()).collect::<Vec<_>>().join("\n");
+        assert!(ddl.contains("SESSION_CONTEXT(N'tenant_id')"));
+        assert!(ddl.contains("FILTER PREDICATE"));
+        assert!(ddl.contains("AFTER INSERT"));
+        assert!(ddl.contains("BEFORE UPDATE"));
+        assert!(ddl.contains("BEFORE DELETE"));
+        assert_eq!(batches.len(), 2);
+    }
+
+    #[test]
+    fn mysql_family_template_explicitly_requires_database_per_tenant() {
+        let compiled = compile_mysql_database_boundary(&policy(ResourceKind::Table, "tenant_id"), DatabaseKind::MySql).unwrap();
+        assert_eq!(compiled.database_kind, DatabaseKind::MySql);
+        assert_eq!(compiled.changes[0].definition["required_isolation_model"], "one_database_per_tenant");
+        assert_eq!(compiled.changes[0].definition["shared_table_row_level_isolation"], false);
+    }
+
+    #[test]
+    fn mongodb_template_does_not_claim_document_level_security() {
+        let compiled = compile_mongodb_database_boundary(&policy(ResourceKind::Collection, "tenant_id")).unwrap();
+        assert_eq!(compiled.changes[0].definition["shared_collection_document_level_isolation"], false);
+    }
+
+    #[test]
+    fn redis_requires_explicit_tenant_key_pattern() {
+        assert!(compile_redis_acl(&policy(ResourceKind::Keyspace, "tenant:${tenant_id}:*")).is_ok());
+        assert_eq!(compile_redis_acl(&policy(ResourceKind::Keyspace, "tenant_id")).unwrap_err().code, "redis_tenant_key_pattern_required");
+    }
+}
+ | '{' | '}'))
+        {
+            return Err(error("unsafe_redis_key_pattern", "Redis tenant key patterns must have a literal non-wildcard prefix, exactly one tenant placeholder, a colon-delimited suffix, and only safe ACL pattern characters."));
+        }
+        let pattern = resource.tenant_key.clone();
         let mut commands = Vec::new();
         if resource.operations.contains(&Operation::Read) { commands.push("+@read"); }
         if resource.operations.iter().any(|op| matches!(op, Operation::Create | Operation::Update | Operation::Delete)) { commands.push("+@write"); }
