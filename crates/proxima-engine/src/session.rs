@@ -40,11 +40,7 @@ pub async fn establish(
         } => {
             let (startup, tenant_context) =
                 prepare_startup(protocol_version, parameters, verifier, tenant_role_prefix)?;
-            let database_name = startup.parameters.iter()
-                .find(|(key, _)| key == "database")
-                .map(|(_, value)| value.clone())
-                .or_else(|| startup.parameters.iter().find(|(key, _)| key == "user").map(|(_, value)| value.clone()))
-                .unwrap_or_default();
+            let database_name = database_name_from_startup(&startup);
             debug!(
                 tenant_bound = tenant_context.is_some(),
                 "PostgreSQL startup packet received"
@@ -91,11 +87,7 @@ pub async fn establish(
                         verifier,
                         tenant_role_prefix,
                     )?;
-                    let database_name = startup.parameters.iter()
-                        .find(|(key, _)| key == "database")
-                        .map(|(_, value)| value.clone())
-                        .or_else(|| startup.parameters.iter().find(|(key, _)| key == "user").map(|(_, value)| value.clone()))
-                        .unwrap_or_default();
+                    let database_name = database_name_from_startup(&startup);
                     forward_startup(&mut upstream, &startup).await?;
                     let ready_for_query = broker_startup_authentication(&mut client, &mut upstream).await?;
                     Ok((client, upstream, EstablishedSession { tenant_context, database_name, ready_for_query: Some(ready_for_query) }))
@@ -132,6 +124,17 @@ pub async fn establish(
             io::ErrorKind::InvalidData,
             "unsupported PostgreSQL startup packet",
         )),
+    }
+}
+
+fn database_name_from_startup(startup: &StartupPacket) -> String {
+    match startup {
+        StartupPacket::Startup { parameters, .. } => parameters.iter()
+            .find(|(key, _)| key == "database")
+            .map(|(_, value)| value.clone())
+            .or_else(|| parameters.iter().find(|(key, _)| key == "user").map(|(_, value)| value.clone()))
+            .unwrap_or_default(),
+        _ => String::new(),
     }
 }
 
