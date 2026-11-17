@@ -61,15 +61,27 @@ impl PostgresCatalogAdapter {
 
     async fn connect_checked(&self) -> Result<Client, AdapterError> {
         let client = (self.connect)().await?;
+        client.batch_execute("SET default_transaction_read_only = on; SET statement_timeout = '10s'; SET lock_timeout = '2s'; SET search_path = pg_catalog, pg_temp;")
+            .await.map_err(db_error)?;
         let row = client.query_one(
-            "SELECT current_database(), current_user, to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"')",
+            "SELECT current_database(), current_user, r.rolsuper, r.rolbypassrls, r.rolcreaterole, r.rolcreatedb, r.rolreplication FROM pg_catalog.pg_roles r WHERE r.rolname=current_user",
             &[],
         ).await.map_err(db_error)?;
         let actual_database: String = row.get(0);
         if actual_database != self.database_name {
             return Err(error("postgres_database_mismatch", "The authenticated connection reached a different database."));
         }
-        let _authenticated_role: String = row.get(1);
+        let elevated = (2..7).any(|index| row.get::<_, bool>(index));
+        if elevated {
+            return Err(error("unsafe_inspection_role", "The inspection role must not be SUPERUSER, BYPASSRLS, CREATEROLE, CREATEDB or REPLICATION."));
+        }
+        let unsafe_privileges: bool = client.query_one(
+            "SELECT has_database_privilege(current_user,current_database(),'CREATE') OR EXISTS (SELECT 1 FROM pg_catalog.pg_namespace n WHERE n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname NOT LIKE 'pg_%' AND has_schema_privilege(current_user,n.oid,'CREATE')) OR EXISTS (SELECT 1 FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE c.relkind IN ('r','p','v','m') AND n.nspname NOT IN ('pg_catalog','information_schema') AND (has_table_privilege(current_user,c.oid,'INSERT') OR has_table_privilege(current_user,c.oid,'UPDATE') OR has_table_privilege(current_user,c.oid,'DELETE') OR has_table_privilege(current_user,c.oid,'TRUNCATE')))",
+            &[],
+        ).await.map_err(db_error)?.get(0);
+        if unsafe_privileges {
+            return Err(error("unsafe_inspection_role", "The inspection role must be read-only and have no database/schema CREATE or table write privileges."));
+        }
         Ok(client)
     }
 }
@@ -110,7 +122,7 @@ impl DatabaseAdapter for PostgresCatalogAdapter {
                 }
                 let schema = protected.resource.namespace.as_deref().unwrap_or("public");
                 let row = client.query_opt(
-                    "SELECT c.relrowsecurity, c.relforcerowsecurity, owner.rolsuper, owner.rolbypassrls, (SELECT count(*)::bigint FROM pg_catalog.pg_policies p WHERE p.schemaname=n.nspname AND p.tablename=c.relname), c.relkind::text FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace JOIN pg_catalog.pg_roles owner ON owner.oid=c.relowner WHERE n.nspname=$1 AND c.relname=$2 AND c.relkind IN ('r','p')",
+                    "SELECT c.relrowsecurity, c.relforcerowsecurity, (WITH RECURSIVE owner_roles(role_oid) AS (SELECT c.relowner UNION SELECT am.roleid FROM pg_catalog.pg_auth_members am JOIN owner_roles parent ON am.member=parent.role_oid) SELECT EXISTS(SELECT 1 FROM owner_roles roles JOIN pg_catalog.pg_roles inherited ON inherited.oid=roles.role_oid WHERE inherited.rolsuper OR inherited.rolbypassrls)), (SELECT count(*)::bigint FROM pg_catalog.pg_policies p WHERE p.schemaname=n.nspname AND p.tablename=c.relname), c.relkind::text, COALESCE((SELECT string_agg(concat_ws(':',p.polname,p.polcmd,p.polpermissive::text,COALESCE(pg_catalog.pg_get_expr(p.polqual,p.polrelid),''),COALESCE(pg_catalog.pg_get_expr(p.polwithcheck,p.polrelid),''),COALESCE((SELECT string_agg(COALESCE(role_name.rolname,'PUBLIC'),',' ORDER BY COALESCE(role_name.rolname,'PUBLIC')) FROM unnest(p.polroles) policy_role(role_oid) LEFT JOIN pg_catalog.pg_roles role_name ON role_name.oid=policy_role.role_oid),'')), E'\\n' ORDER BY p.polname) FROM pg_catalog.pg_policy p WHERE p.polrelid=c.oid),''), COALESCE(c.relacl::text,'<default>') FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=$1 AND c.relname=$2 AND c.relkind IN ('r','p')",
                     &[&schema, &protected.resource.name.as_str()],
                 ).await.map_err(db_error)?;
 
@@ -130,14 +142,15 @@ impl DatabaseAdapter for PostgresCatalogAdapter {
 
                 let rls_enabled: bool = row.get(0);
                 let rls_forced: bool = row.get(1);
-                let owner_superuser: bool = row.get(2);
-                let owner_bypass: bool = row.get(3);
-                let policy_count: i64 = row.get(4);
-                let relkind: String = row.get(5);
+                let owner_bypasses_rls: bool = row.get(2);
+                let policy_count: i64 = row.get(3);
+                let relkind: String = row.get(4);
+                let policy_definitions: String = row.get(5);
+                let relation_acl: String = row.get(6);
                 let mut findings = Vec::new();
                 if !rls_enabled { findings.push(finding("rls_disabled", &protected.resource, "Row-level security is disabled.")); }
                 if !rls_forced { findings.push(finding("rls_not_forced", &protected.resource, "Table-owner access is not forced through row-level security.")); }
-                if owner_superuser || owner_bypass { findings.push(finding("owner_bypasses_rls", &protected.resource, "The relation owner has SUPERUSER or BYPASSRLS.")); }
+                if owner_bypasses_rls { findings.push(finding("owner_bypasses_rls", &protected.resource, "The relation owner or an inherited role has SUPERUSER or BYPASSRLS.")); }
                 if policy_count == 0 { findings.push(finding("no_native_policies", &protected.resource, "No PostgreSQL row-security policies are attached to this relation.")); }
                 if relkind == "p" { findings.push(finding("partitioned_relation_requires_child_audit", &protected.resource, "Partitioned tables require independent inspection of every directly addressable child partition.")); }
                 // A policy count is not proof of tenant semantics. Never turn
@@ -145,15 +158,16 @@ impl DatabaseAdapter for PostgresCatalogAdapter {
                 findings.push(finding("semantic_verification_required", &protected.resource, "Native policy expressions and cross-tenant allow/deny behavior have not been independently verified."));
                 let state = json!({
                     "schema": schema, "table": protected.resource.name, "rls_enabled": rls_enabled,
-                    "rls_forced": rls_forced, "owner_superuser": owner_superuser,
-                    "owner_bypassrls": owner_bypass, "policy_count": policy_count, "relkind": relkind
+                    "rls_forced": rls_forced, "owner_bypasses_rls": owner_bypasses_rls,
+                    "policy_count": policy_count, "policy_definitions": policy_definitions,
+                    "relation_acl": relation_acl, "relkind": relkind
                 });
                 let digest = sha256(&serde_json::to_vec(&state).map_err(|_| error("fingerprint_serialization_failed", "Could not serialize PostgreSQL catalog state."))?);
                 fingerprint_rows.push(state);
                 resources.push(ResourceInspection {
                     resource: protected.clone(),
                     completeness: InspectionCompleteness::Complete,
-                    posture: if rls_enabled && rls_forced && !owner_superuser && !owner_bypass && policy_count > 0 { SecurityPosture::NeedsAttention } else { SecurityPosture::Blocked },
+                    posture: if rls_enabled && rls_forced && !owner_bypasses_rls && policy_count > 0 { SecurityPosture::NeedsAttention } else { SecurityPosture::Blocked },
                     verified_operations: Vec::new(),
                     findings,
                     fingerprint: Some(digest),
@@ -276,13 +290,14 @@ impl DatabaseAdapter for PostgresCatalogAdapter {
             }
             let client = self.connect_checked().await?;
             let rows = client.query(
-                "SELECT n.nspname, c.relname, c.relrowsecurity, c.relforcerowsecurity, COALESCE((SELECT string_agg(p.polname || ':' || p.polcmd || ':' || p.polpermissive::text, ',' ORDER BY p.polname) FROM pg_catalog.pg_policy p WHERE p.polrelid=c.oid), '') FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE c.relkind IN ('r','p') AND n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname NOT LIKE 'pg_%' ORDER BY n.nspname,c.relname",
+                "SELECT n.nspname, c.relname, pg_catalog.pg_get_userbyid(c.relowner), c.relrowsecurity, c.relforcerowsecurity, COALESCE((SELECT string_agg(concat_ws(':',p.polname,p.polcmd,p.polpermissive::text,COALESCE(pg_catalog.pg_get_expr(p.polqual,p.polrelid),''),COALESCE(pg_catalog.pg_get_expr(p.polwithcheck,p.polrelid),''),COALESCE((SELECT string_agg(COALESCE(role_name.rolname,'PUBLIC'),',' ORDER BY COALESCE(role_name.rolname,'PUBLIC')) FROM unnest(p.polroles) policy_role(role_oid) LEFT JOIN pg_catalog.pg_roles role_name ON role_name.oid=policy_role.role_oid),'')), E'\\n' ORDER BY p.polname) FROM pg_catalog.pg_policy p WHERE p.polrelid=c.oid), ''), COALESCE(c.relacl::text,'<default>'), (WITH RECURSIVE owner_roles(role_oid) AS (SELECT c.relowner UNION SELECT am.roleid FROM pg_catalog.pg_auth_members am JOIN owner_roles parent ON am.member=parent.role_oid) SELECT EXISTS(SELECT 1 FROM owner_roles roles JOIN pg_catalog.pg_roles inherited ON inherited.oid=roles.role_oid WHERE inherited.rolsuper OR inherited.rolbypassrls)) FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE c.relkind IN ('r','p') AND n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname NOT LIKE 'pg_%' ORDER BY n.nspname,c.relname",
                 &[],
             ).await.map_err(db_error)?;
             let state: Vec<serde_json::Value> = rows.into_iter().map(|row| json!({
                 "schema": row.get::<_, String>(0), "table": row.get::<_, String>(1),
-                "rls_enabled": row.get::<_, bool>(2), "rls_forced": row.get::<_, bool>(3),
-                "policies": row.get::<_, String>(4)
+                "owner": row.get::<_, String>(2), "rls_enabled": row.get::<_, bool>(3),
+                "rls_forced": row.get::<_, bool>(4), "policies": row.get::<_, String>(5),
+                "acl": row.get::<_, String>(6), "owner_bypasses_rls": row.get::<_, bool>(7)
             })).collect();
             let fingerprint = sha256(&serde_json::to_vec(&state).map_err(|_| error("fingerprint_serialization_failed", "Could not serialize PostgreSQL catalog state."))?);
             let clock = client.query_one("SELECT to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"')", &[]).await.map_err(db_error)?;
@@ -294,7 +309,13 @@ impl DatabaseAdapter for PostgresCatalogAdapter {
                 completeness: InspectionCompleteness::Complete,
                 previous_fingerprint: previous_fingerprint.map(str::to_owned),
                 observed_fingerprint: Some(fingerprint),
-                findings: Vec::new(),
+                findings: if previous_fingerprint.is_some_and(|previous| previous != fingerprint) {
+                    vec![SecurityFinding {
+                        code: "native_catalog_fingerprint_changed".into(),
+                        resource: None,
+                        detail: "The observed PostgreSQL relation, ownership, ACL, or row-security policy definition differs from the accepted fingerprint.".into(),
+                    }]
+                } else { Vec::new() },
                 observed_at,
             })
         })
