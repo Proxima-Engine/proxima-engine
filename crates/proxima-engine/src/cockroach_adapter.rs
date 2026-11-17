@@ -139,8 +139,8 @@ impl CockroachCatalogAdapter {
                 owner: None,
                 attributes: json!({
                     "table_type": table_type,
-                    "columns": column_state,
-                    "privileges": privilege_state,
+                    "columns": column_state.clone(),
+                    "privileges": privilege_state.clone(),
                 }),
             });
             state.push(json!({
