@@ -321,7 +321,9 @@ impl PolicyAdmissionClient {
             || payload.issued_at > timestamp + 30
             || payload.issued_at < timestamp - 30
             || payload.expires_at <= timestamp
+            || payload.expires_at <= payload.issued_at
             || payload.expires_at > payload.issued_at + 15
+            || payload.decision == "allow" && payload.policy_revision.is_none()
         {
             return Err(io::Error::new(io::ErrorKind::PermissionDenied,
                 "Policy admission response is stale or bound to a different node, target, database, or tenant"));
