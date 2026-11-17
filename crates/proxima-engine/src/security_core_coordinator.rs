@@ -109,3 +109,156 @@ impl SecurityCoreCoordinator {
         Ok(())
     }
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::database_adapter::{AdapterFuture, DatabaseAdapter, ResourceInspection};
+    use crate::security_core::{
+        AdapterCapabilities, AdapterDescriptor, AdapterMaturity, Operation,
+        ProtectedResource, ResourceKind, ResourceRef, SECURITY_MODEL_VERSION,
+    };
+
+    struct FixtureAdapter { omit_read: bool }
+
+    impl DatabaseAdapter for FixtureAdapter {
+        fn descriptor(&self) -> AdapterDescriptor {
+            AdapterDescriptor {
+                kind: DatabaseKind::PostgreSql,
+                name: "fixture-postgresql",
+                maturity: AdapterMaturity::Supported,
+                capabilities: AdapterCapabilities {
+                    schema_inspection: true,
+                    tenant_identity_enforcement: true,
+                    policy_semantic_verification: true,
+                    policy_generation: true,
+                    controlled_policy_deployment: true,
+                    drift_detection: true,
+                    runtime_fail_closed_admission: true,
+                    signed_security_evidence: true,
+                },
+                status_note: "test fixture",
+            }
+        }
+
+        fn inspect<'a>(&'a self, request: &'a InspectionRequest) -> AdapterFuture<'a, Result<InspectionSnapshot, AdapterError>> {
+            let mut operations = request.policy.resources[0].operations.clone();
+            if self.omit_read { operations.retain(|operation| *operation != Operation::Read); }
+            let resource = request.policy.resources[0].clone();
+            Box::pin(async move {
+                Ok(InspectionSnapshot {
+                    database_kind: DatabaseKind::PostgreSql,
+                    target: request.target.clone(),
+                    completeness: InspectionCompleteness::Complete,
+                    posture: SecurityPosture::Verified,
+                    resources: vec![ResourceInspection {
+                        resource,
+                        completeness: InspectionCompleteness::Complete,
+                        posture: SecurityPosture::Verified,
+                        verified_operations: operations,
+                        findings: Vec::new(),
+                        fingerprint: Some("a".repeat(64)),
+                    }],
+                    findings: Vec::new(),
+                    fingerprint: Some("a".repeat(64)),
+                    observed_at: "2026-11-17T00:00:00Z".into(),
+                })
+            })
+        }
+
+        fn compile_policy(&self, policy: &TenantSecurityPolicy) -> Result<CompiledPolicy, AdapterError> {
+            Ok(CompiledPolicy {
+                database_kind: DatabaseKind::PostgreSql,
+                policy_id: policy.policy_id.clone(),
+                revision: policy.revision,
+                changes: policy.resources.iter().map(|resource| crate::database_adapter::NativePolicyChange {
+                    resource: resource.clone(),
+                    action: "reviewed_change".into(),
+                    definition: serde_json::json!({"kind":"fixture"}),
+                }).collect(),
+                requires_approval: true,
+            })
+        }
+
+        fn verify<'a>(&'a self, _policy: &'a TenantSecurityPolicy, _snapshot: &'a InspectionSnapshot) -> AdapterFuture<'a, Result<VerificationReport, AdapterError>> {
+            Box::pin(async {
+                Ok(VerificationReport {
+                    model_version: SECURITY_MODEL_VERSION.into(),
+                    posture: SecurityPosture::Verified,
+                    inspection: InspectionCompleteness::Complete,
+                    findings: Vec::new(),
+                })
+            })
+        }
+
+        fn detect_drift<'a>(&'a self, target: &'a AdapterTarget, previous_fingerprint: Option<&'a str>) -> AdapterFuture<'a, Result<DriftReport, AdapterError>> {
+            Box::pin(async move {
+                Ok(DriftReport {
+                    database_kind: DatabaseKind::PostgreSql,
+                    target: target.clone(),
+                    detected: previous_fingerprint.is_some_and(|value| value != "a".repeat(64)),
+                    completeness: InspectionCompleteness::Complete,
+                    previous_fingerprint: previous_fingerprint.map(str::to_owned),
+                    observed_fingerprint: Some("a".repeat(64)),
+                    findings: Vec::new(),
+                    observed_at: "2026-11-17T00:00:00Z".into(),
+                })
+            })
+        }
+    }
+
+    fn request() -> InspectionRequest {
+        InspectionRequest {
+            target: AdapterTarget {
+                target_id: "fixture-target".into(),
+                database_name: "app".into(),
+                namespace: Some("public".into()),
+            },
+            policy: TenantSecurityPolicy {
+                schema_version: SECURITY_MODEL_VERSION.into(),
+                policy_id: "tenant-boundary".into(),
+                revision: 1,
+                tenant_identity_claim: "tenant_id".into(),
+                resources: vec![ProtectedResource {
+                    resource: ResourceRef {
+                        namespace: Some("public".into()),
+                        name: "records".into(),
+                        kind: ResourceKind::Table,
+                    },
+                    tenant_key: "tenant_id".into(),
+                    operations: vec![Operation::Read, Operation::Create, Operation::Update, Operation::Delete],
+                }],
+            },
+        }
+    }
+
+    fn coordinator(omit_read: bool) -> SecurityCoreCoordinator {
+        let mut registry = AdapterRegistry::default();
+        registry.register(std::sync::Arc::new(FixtureAdapter { omit_read })).unwrap();
+        SecurityCoreCoordinator::new(registry)
+    }
+
+    #[tokio::test]
+    async fn complete_native_operation_coverage_allows() {
+        let coordinator = coordinator(false);
+        let report = coordinator.inspect_and_verify(DatabaseKind::PostgreSql, &request()).await.unwrap();
+        assert_eq!(report.access_decision(), AccessDecision::Allow);
+    }
+
+    #[tokio::test]
+    async fn missing_native_operation_coverage_denies() {
+        let coordinator = coordinator(true);
+        let report = coordinator.inspect_and_verify(DatabaseKind::PostgreSql, &request()).await.unwrap();
+        assert_eq!(report.access_decision(), AccessDecision::Deny);
+        assert!(report.findings.iter().any(|finding| finding.code == "operation_not_verified"));
+    }
+
+    #[test]
+    fn compilation_requires_approval_and_covers_each_policy_resource() {
+        let coordinator = coordinator(false);
+        let compiled = coordinator.compile(DatabaseKind::PostgreSql, &request().policy).unwrap();
+        assert!(compiled.requires_approval);
+        assert_eq!(compiled.changes.len(), 1);
+    }
+}
