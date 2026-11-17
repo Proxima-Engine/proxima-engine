@@ -4,7 +4,7 @@
 
 <h1 align="center">Agata Proxima</h1>
 <p align="center"><strong>Database-independent tenant-security infrastructure.</strong></p>
-<p align="center">Agata Proxima defines a common tenant-security contract. Proxima Engine currently implements its PostgreSQL wire-protocol path and review-only native policy-plan compilers for SQL Server, MySQL, MariaDB, MongoDB and Redis. Those five database families are in development, not production-supported adapters; CockroachDB, SQLite, Oracle, DynamoDB, Cassandra, Elasticsearch/OpenSearch and VAULTDB remain planned.</p>
+<p align="center">Agata Proxima defines a common tenant-security contract. Proxima Engine currently implements its PostgreSQL wire-protocol runtime, review-only native policy-plan compilers for SQL Server, MySQL, MariaDB, MongoDB and Redis, and read-only native discovery adapters for those databases plus CockroachDB, SQLite and Elasticsearch/OpenSearch. Every non-PostgreSQL adapter remains in development and is not production-supported.</p>
 
 <p align="center">
   <a href="https://github.com/Proxima-Engine/proxima-engine/actions/workflows/ci.yml">Continuous integration</a> ·
@@ -37,7 +37,7 @@ https://github.com/user-attachments/assets/bca488eb-829c-4672-bbe9-b25878e5401c
 
 ## What is Agata Proxima?
 
-Agata Proxima is designed as an independent tenant-security platform. Proxima Security Core defines a database-neutral contract for tenant identity, protected resources, policy requirements, verification posture and fail-closed decisions. Database-specific adapters translate that contract into native controls. PostgreSQL is the first runtime integration. Review-only native policy-plan compilers now exist for SQL Server, MySQL, MariaDB, MongoDB and Redis, but their database connection, identity-binding, inspection, deployment, semantic verification, drift and runtime-admission layers remain outstanding. CockroachDB, SQLite, Oracle, DynamoDB, Cassandra, Elasticsearch/OpenSearch and VAULTDB remain planned. VAULTDB is an Agata-owned embedded-engine research project without a Proxima tenant-security implementation.
+Agata Proxima is designed as an independent tenant-security platform. Proxima Security Core defines a database-neutral contract for tenant identity, protected resources, policy requirements, verification posture and fail-closed decisions. Database-specific adapters translate that contract into native controls. PostgreSQL is the first runtime integration. Review-only native policy-plan compilers exist for SQL Server, MySQL, MariaDB, MongoDB and Redis. Native catalog discovery and drift-inspection adapters now exist for SQL Server, MySQL/MariaDB, MongoDB, Redis, CockroachDB, SQLite and Elasticsearch/OpenSearch. These non-PostgreSQL adapters remain in development: controlled policy deployment, independently executed tenant-isolation probes, tenant-principal binding, runtime fail-closed admission and signed data-plane evidence are not complete. Oracle, DynamoDB, Cassandra and VAULTDB remain planned. VAULTDB is an Agata-owned embedded-engine research project without a Proxima tenant-security implementation.
 
 The product has two cooperating components:
 
