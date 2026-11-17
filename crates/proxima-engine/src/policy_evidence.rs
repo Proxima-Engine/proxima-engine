@@ -440,6 +440,22 @@ mod tests {
     }
 
     #[test]
+    fn oversized_evidence_identity_and_findings_are_rejected() {
+        let authority = authority();
+        let mut payload = evidence_payload();
+        payload.tenant_id = "t".repeat(129);
+        assert_eq!(authority.sign_evidence(payload).unwrap_err().code, "invalid_evidence_payload");
+
+        let mut payload = evidence_payload();
+        payload.findings.push(SecurityFinding {
+            code: "finding".into(),
+            resource: None,
+            detail: "d".repeat(2049),
+        });
+        assert_eq!(authority.sign_evidence(payload).unwrap_err().code, "invalid_evidence_payload");
+    }
+
+    #[test]
     fn short_signing_keys_are_rejected() {
         let result = PolicyEvidenceAuthority::new(vec![1; 16], vec![2; 32]);
         assert!(matches!(result, Err(error) if error.code == "signing_key_too_short"));
