@@ -8,6 +8,7 @@
 use crate::security_core::{DatabaseKind, Operation, ProtectedResource, ResourceKind, TenantSecurityPolicy};
 use crate::database_adapter::{AdapterError, CompiledPolicy, NativePolicyChange};
 use serde_json::json;
+use sha2::{Digest, Sha256};
 
 fn error(code: &str, detail: &str) -> AdapterError {
     AdapterError { code: code.into(), detail: detail.into(), retryable: false }
@@ -46,10 +47,14 @@ pub fn compile_sql_server(policy: &TenantSecurityPolicy) -> Result<CompiledPolic
         let schema = sql_server_ident(resource.resource.namespace.as_deref().unwrap_or("dbo"))?;
         let table = sql_server_ident(&resource.resource.name)?;
         let tenant_key = sql_server_ident(&resource.tenant_key)?;
-        let suffix = hex::encode(policy.policy_id.as_bytes());
-        let suffix = &suffix[..suffix.len().min(16)];
-        let function_name = format!("[{}].[proxima_tenant_{}]", schema.trim_matches(&['[', ']'][..]), suffix);
-        let policy_name = format!("[{}].[proxima_policy_{}]", schema.trim_matches(&['[', ']'][..]), suffix);
+        if resource.operations.contains(&Operation::Execute) {
+            return Err(error("unsupported_operation", "SQL Server table RLS does not compile execute operations; use a separately reviewed module policy."));
+        }
+        let identity = format!("{}:{}:{}", policy.policy_id, resource.resource.namespace.as_deref().unwrap_or("dbo"), resource.resource.name);
+        let digest = Sha256::digest(identity.as_bytes());
+        let suffix = hex::encode(&digest[..8]);
+        let function_name = format!("{schema}.[proxima_tenant_{suffix}]");
+        let policy_name = format!("{schema}.[proxima_policy_{suffix}]");
         let mut statements = vec![format!(
             "CREATE OR ALTER FUNCTION {function_name}(@row_tenant_key nvarchar(450))\nRETURNS TABLE WITH SCHEMABINDING AS\nRETURN SELECT 1 AS allowed\nWHERE @row_tenant_key = CONVERT(nvarchar(450), SESSION_CONTEXT(N'tenant_id'));"
         )];
@@ -74,10 +79,10 @@ pub fn compile_sql_server(policy: &TenantSecurityPolicy) -> Result<CompiledPolic
         } else {
             format!("CREATE SECURITY POLICY {policy_name}\n    {}\nWITH (STATE = ON, SCHEMABINDING = ON);", predicate_lines.join(",\n    "))
         };
-        let mut ddl = statements[0].clone();
-        if !create_policy.is_empty() { ddl.push_str("\n"); ddl.push_str(&create_policy); }
+        let mut batches = vec![statements[0].clone()];
+        if !create_policy.is_empty() { batches.push(create_policy); }
         changes.push(resource_change(resource, "sql_server_create_or_alter_rls", json!({
-            "ddl": ddl,
+            "batches": batches,
             "required_session_context": policy.tenant_identity_claim,
             "session_context_must_be_set_by": "trusted_authenticated_application_or_gateway",
             "requires_operator_approval": true,
@@ -113,7 +118,10 @@ pub fn compile_mysql_database_boundary(policy: &TenantSecurityPolicy, kind: Data
         let sql = if grants.is_empty() { return Err(error("empty_privilege_set", "No supported table operations were requested.")); }
             else { format!("GRANT {} ON \x60${{tenant_database}}\x60.{table} TO '${{tenant_principal}}'@'%';", grants.join(", ")) };
         changes.push(resource_change(resource, "mysql_family_per_tenant_database_grant_template", json!({
-            "sql_template": sql,
+            "sql_template": [
+                "CREATE USER '\${tenant_principal}'@'%' IDENTIFIED BY '\${secret_manager_generated_password}';",
+                sql
+            ],
             "required_isolation_model": "one_database_per_tenant",
             "database_placeholder": "${tenant_database}",
             "principal_placeholder": "${tenant_principal}",
@@ -223,12 +231,14 @@ mod tests {
     fn sql_server_plan_uses_filter_and_block_predicates() {
         let compiled = compile_sql_server(&policy(ResourceKind::Table, "tenant_id")).unwrap();
         assert_eq!(compiled.database_kind, DatabaseKind::SqlServer);
-        let ddl = compiled.changes[0].definition["ddl"].as_str().unwrap();
+        let batches = compiled.changes[0].definition["batches"].as_array().unwrap();
+        let ddl = batches.iter().filter_map(|batch| batch.as_str()).collect::<Vec<_>>().join("\n");
         assert!(ddl.contains("SESSION_CONTEXT(N'tenant_id')"));
         assert!(ddl.contains("FILTER PREDICATE"));
         assert!(ddl.contains("AFTER INSERT"));
         assert!(ddl.contains("BEFORE UPDATE"));
         assert!(ddl.contains("BEFORE DELETE"));
+        assert_eq!(batches.len(), 2);
     }
 
     #[test]
