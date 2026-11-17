@@ -129,8 +129,8 @@ pub fn adapter_catalog() -> Vec<AdapterDescriptor> {
             kind: DatabaseKind::MongoDb,
             name: "MongoDB",
             maturity: AdapterMaturity::InDevelopment,
-            capabilities: AdapterCapabilities { policy_generation: true, ..AdapterCapabilities::default() },
-            status_note: "Reviewable database-per-tenant collection-role templates exist. Shared-collection document-level enforcement and native runtime verification are not implemented.",
+            capabilities: AdapterCapabilities { schema_inspection: true, policy_generation: true, drift_detection: true, ..AdapterCapabilities::default() },
+            status_note: "TLS-verified collection, validator, view and effective privilege discovery are implemented. Document ownership enforcement, independent tenant probes, controlled deployment and runtime admission are not implemented.",
         },
         AdapterDescriptor {
             kind: DatabaseKind::CockroachDb,
