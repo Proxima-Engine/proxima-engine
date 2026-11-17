@@ -279,6 +279,20 @@ fn policy_admission_evidence_is_consistent(
     payload.policy_revision == maximum_revision
 }
 
+#[cfg(test)]
+mod admission_requirement_tests {
+    use super::parse_policy_admission_required;
+
+    #[test]
+    fn admission_is_required_by_default_and_values_must_be_explicit() {
+        assert_eq!(parse_policy_admission_required(None).unwrap(), true);
+        assert_eq!(parse_policy_admission_required(Some(" yes ")).unwrap(), true);
+        assert_eq!(parse_policy_admission_required(Some("0")).unwrap(), false);
+        assert_eq!(parse_policy_admission_required(Some("false")).unwrap(), false);
+        assert!(parse_policy_admission_required(Some("sometimes")).is_err());
+    }
+}
+
 /// Per-connection fail-closed check against the Control Plane's latest verified
 /// PostgreSQL posture. Every response is bound to a fresh one-time request ID,
 /// node, target, database and tenant; it includes signed per-registration
@@ -293,13 +307,34 @@ struct PolicyAdmissionClient {
     signing_key: Vec<u8>,
 }
 
+fn parse_policy_admission_required(value: Option<&str>) -> io::Result<bool> {
+    match value.map(str::trim).map(str::to_ascii_lowercase).as_deref() {
+        // Tenant traffic requires a live, signed posture decision by default.
+        // Local development may explicitly opt out with false/0/no.
+        None | Some("1") | Some("true") | Some("yes") => Ok(true),
+        Some("0") | Some("false") | Some("no") => Ok(false),
+        Some(_) => Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "PROXIMA_POLICY_ADMISSION_REQUIRED must be true/false, yes/no, or 1/0",
+        )),
+    }
+}
+
 impl PolicyAdmissionClient {
     fn from_env(tenant_role_prefix: &str) -> io::Result<Option<Self>> {
         let url = std::env::var("PROXIMA_NODE_POLICY_STATUS_URL").ok()
             .filter(|value| !value.trim().is_empty());
-        let required = std::env::var("PROXIMA_POLICY_ADMISSION_REQUIRED")
-            .map(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
-            .unwrap_or(false);
+        let required_env = std::env::var("PROXIMA_POLICY_ADMISSION_REQUIRED");
+        let required = match required_env {
+            Ok(value) => parse_policy_admission_required(Some(&value))?,
+            Err(std::env::VarError::NotPresent) => parse_policy_admission_required(None)?,
+            Err(std::env::VarError::NotUnicode(_)) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "PROXIMA_POLICY_ADMISSION_REQUIRED is not valid Unicode",
+                ));
+            }
+        };
         let Some(url) = url else {
             if required {
                 return Err(io::Error::new(io::ErrorKind::InvalidInput,
