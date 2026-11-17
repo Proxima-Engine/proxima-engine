@@ -343,7 +343,7 @@ impl DatabaseAdapter for PostgresCatalogAdapter {
             // role attributes, inherited memberships, and persistent role
             // settings can all widen access or disable row security.
             let role_rows = client.query(
-                "SELECT r.rolname, r.rolsuper, r.rolbypassrls, r.rolcreaterole, r.rolcreatedb, r.rolreplication, r.rolcanlogin, r.rolinherit, r.rolvaliduntil::text, COALESCE(array_to_string(s.setconfig, E'\\n' ORDER BY s.setconfig::text), '') FROM pg_catalog.pg_roles r LEFT JOIN pg_catalog.pg_db_role_setting s ON s.setrole=r.oid ORDER BY r.rolname, s.setdatabase",
+                "SELECT r.rolname, r.rolsuper, r.rolbypassrls, r.rolcreaterole, r.rolcreatedb, r.rolreplication, r.rolcanlogin, r.rolinherit, r.rolvaliduntil::text, COALESCE(s.setconfig::text, '') FROM pg_catalog.pg_roles r LEFT JOIN pg_catalog.pg_db_role_setting s ON s.setrole=r.oid ORDER BY r.rolname, s.setdatabase",
                 &[],
             ).await.map_err(db_error)?;
             state.extend(role_rows.into_iter().map(|row| json!({
