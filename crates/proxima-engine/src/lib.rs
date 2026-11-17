@@ -11,3 +11,4 @@ pub mod tenant;
 pub mod tls;
 pub mod sql_guard;
 pub mod security_core;
+pub mod database_adapter;
