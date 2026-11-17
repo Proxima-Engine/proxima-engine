@@ -766,5 +766,21 @@ mod tenant_database_grant_tests {
             &["GRANT 'tenant_role'@'%' TO 'tenant_a'@'%'".to_owned()],
             "tenant_a",
         ));
+        assert!(!grants_are_scoped_to_database(
+            &["GRANT SELECT ON `tenant_a_extra`.* TO 'tenant_a'@'%'".to_owned()],
+            "tenant_a",
+        ));
+        assert!(!grants_are_scoped_to_database(
+            &["GRANT SELECT ON `tenant_a`.* TO 'tenant_a'@'%' WITH GRANT OPTION".to_owned()],
+            "tenant_a",
+        ));
+        assert!(!grants_are_scoped_to_database(
+            &["unrecognized grant output".to_owned()],
+            "tenant_a",
+        ));
+        assert!(!grants_are_scoped_to_database(
+            &["GRANT USAGE ON *.* TO 'tenant_a'@'%'".to_owned()],
+            &format!("tenant{}a", char::from(0)),
+        ));
     }
 }
