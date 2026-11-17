@@ -353,7 +353,7 @@ async fn main() -> Result<(),Box<dyn Error>> {
       },
       Some("compile-plan") => {
         let database = args.next().ok_or("usage: proxima-policy-guard compile-plan <postgresql|sql_server|mysql|mariadb|mongodb|redis> <policy.json>")?;
-        let path = args.next().ok_or("usage: proxima-policy-guard compile-plan <sql_server|mysql|mariadb|mongodb|redis> <policy.json>")?;
+        let path = args.next().ok_or("usage: proxima-policy-guard compile-plan <postgresql|sql_server|mysql|mariadb|mongodb|redis> <policy.json>")?;
         let source = fs::read_to_string(&path)?;
         let policy: TenantSecurityPolicy = serde_json::from_str(&source)?;
         let compiled = match database.as_str() {
