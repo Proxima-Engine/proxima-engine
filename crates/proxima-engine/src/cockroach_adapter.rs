@@ -180,7 +180,7 @@ impl DatabaseAdapter for CockroachCatalogAdapter {
             name: "CockroachDB catalog adapter",
             maturity: AdapterMaturity::InDevelopment,
             capabilities: AdapterCapabilities { schema_inspection: true, drift_detection: true, ..AdapterCapabilities::default() },
-            status_note: "TLS-verified PostgreSQL-wire catalog discovery covers non-system tables, views, columns and effective table grants with bounded fingerprints. CockroachDB-native tenant enforcement, policy deployment, independent semantic probes and runtime admission are not implemented; PostgreSQL RLS behavior is not assumed.",
+            status_note: "TLS-verified PostgreSQL-wire catalog discovery covers non-system tables, views, columns and visible table grants with bounded fingerprints. CockroachDB-native tenant enforcement, policy deployment, independent semantic probes and runtime admission are not implemented; PostgreSQL RLS behavior is not assumed.",
         }
     }
 
@@ -210,23 +210,27 @@ impl DatabaseAdapter for CockroachCatalogAdapter {
                 };
                 let columns = resource.attributes.get("columns").and_then(|value| value.as_array()).cloned().unwrap_or_default();
                 let tenant_column = columns.iter().find(|column| column.get("name").and_then(|value| value.as_str()) == Some(required.tenant_key.as_str()));
+                let mut resource_findings = Vec::new();
                 if tenant_column.is_none() {
-                    findings.push(SecurityFinding {
+                    resource_findings.push(SecurityFinding {
                         code: "cockroach_tenant_key_missing".into(),
                         resource: Some(required.resource.clone()),
                         detail: "The declared tenant ownership column does not exist in the native table metadata.".into(),
                     });
+                } else if tenant_column.and_then(|column| column.get("nullable")).and_then(|value| value.as_bool()) == Some(true) {
+                    resource_findings.push(SecurityFinding {
+                        code: "cockroach_tenant_key_nullable".into(),
+                        resource: Some(required.resource.clone()),
+                        detail: "The declared tenant ownership column permits NULL values; rows without a tenant owner cannot be assigned safely.".into(),
+                    });
                 }
+                findings.extend(resource_findings.iter().cloned());
                 inspected.push(ResourceInspection {
                     resource: required.clone(),
                     completeness: discovery.completeness,
                     posture: SecurityPosture::NeedsAttention,
                     verified_operations: Vec::new(),
-                    findings: if tenant_column.is_none() { vec![SecurityFinding {
-                        code: "cockroach_tenant_key_missing".into(),
-                        resource: Some(required.resource.clone()),
-                        detail: "The declared tenant ownership column does not exist.".into(),
-                    }] } else { Vec::new() },
+                    findings: resource_findings,
                     fingerprint: discovery.fingerprint.clone(),
                 });
             }
