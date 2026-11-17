@@ -90,10 +90,13 @@ The admission endpoint denies when the last fingerprint check is older than
 must have their latest revision applied and verified as protected. A tenant
 with no registered protected resources is denied when admission is enabled.
 
-This is a connection-admission gate. It prevents new sessions from entering
-when the hosted posture is unknown or unsafe; it does not terminate sessions
-that were already established before a later drift event. Existing-session
-revocation and live query interruption remain a separate runtime control.
+The Engine rechecks active tenant sessions every five seconds. Decisions are
+shared through a bounded five-second per-tenant cache, so multiple sessions
+for the same tenant do not each generate a Control Plane request. If posture
+becomes unknown, unsafe, stale, or unreachable, the Engine closes affected
+sessions instead of allowing them to continue. The PostgreSQL startup
+`ReadyForQuery` message is withheld until the first signed admission succeeds,
+so a denied connection is never reported as ready to the client.
 
 ## Scope boundary
 
