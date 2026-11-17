@@ -89,6 +89,59 @@ pub async fn bind_verified_tenant_context(
     Ok(())
 }
 
+/// Open a dedicated SQL Server session for one verified tenant. This
+/// connects with the application's least-privilege database principal, checks
+/// the selected database, binds read-only SESSION_CONTEXT values, and only then
+/// returns the connection for application statements.
+pub async fn connect_tenant_session(
+    connection_string: &str,
+    target: &AdapterTarget,
+    identity: &VerifiedTenantIdentity,
+) -> Result<Client<Compat<TcpStream>>, AdapterError> {
+    // Reuse the catalog adapter's strict connection-string validation, but do
+    // not use its read-only inspection login checks for the application login.
+    let _validated = SqlServerCatalogAdapter::new(
+        target.target_id.clone(),
+        target.database_name.clone(),
+        connection_string.to_owned(),
+    )?;
+    if identity.database_kind() != DatabaseKind::SqlServer
+        || identity.target_id() != target.target_id
+        || identity.expires_at_unix() <= std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|_| error("tenant_identity_clock_invalid", "The system clock is before the Unix epoch."))?
+            .as_secs() as i64
+    {
+        return Err(error("tenant_identity_scope_mismatch", "The verified tenant identity is expired or belongs to a different SQL Server target."));
+    }
+
+    let mut config = Config::from_ado_string(connection_string)
+        .map_err(|_| error("invalid_sql_server_connection_config", "The SQL Server connection string could not be parsed."))?;
+    config.encryption(EncryptionLevel::Required);
+    let tcp = tokio::time::timeout(Duration::from_secs(10), TcpStream::connect(config.get_addr()))
+        .await
+        .map_err(|_| error("sql_server_connection_timeout", "SQL Server TCP connection exceeded the ten-second deadline."))?
+        .map_err(db_error)?;
+    tcp.set_nodelay(true).map_err(db_error)?;
+    let mut client = tokio::time::timeout(Duration::from_secs(15), Client::connect(config, tcp.compat_write()))
+        .await
+        .map_err(|_| error("sql_server_tls_login_timeout", "SQL Server encrypted login exceeded the fifteen-second deadline."))?
+        .map_err(db_error)?;
+
+    let rows = client.simple_query("SELECT DB_NAME() AS database_name")
+        .await.map_err(db_error)?
+        .into_first_result().await.map_err(db_error)?;
+    let connected_database = rows.first()
+        .and_then(|row| row.get::<&str, _>("database_name"))
+        .ok_or_else(|| error("sql_server_identity_unavailable", "SQL Server did not return the selected database name."))?;
+    if !connected_database.eq_ignore_ascii_case(&target.database_name) {
+        return Err(error("sql_server_database_mismatch", "The tenant session connected to a different SQL Server database than requested."));
+    }
+
+    bind_verified_tenant_context(&mut client, target, identity).await?;
+    Ok(client)
+}
+
 pub struct SqlServerCatalogAdapter {
     target_id: String,
     database_name: String,
