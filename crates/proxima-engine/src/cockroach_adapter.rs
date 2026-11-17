@@ -148,7 +148,15 @@ impl CockroachCatalogAdapter {
                 "columns": column_state, "privileges": privilege_state,
             }));
         }
-        let completeness = if truncated { InspectionCompleteness::Incomplete } else { InspectionCompleteness::Complete };
+        // This adapter does not yet enumerate database/schema ACLs, role memberships,
+        // ownership or effective inherited privileges, so its security inventory is
+        // incomplete even when every relation fits within the relation-count bound.
+        let completeness = InspectionCompleteness::Incomplete;
+        findings.push(SecurityFinding {
+            code: "cockroach_security_catalog_scope_incomplete".into(),
+            resource: None,
+            detail: "Discovery currently captures visible table grants only. Database/schema privileges, role memberships, relation ownership and effective inherited privileges are not yet inventoried.".into(),
+        });
         if truncated {
             findings.push(SecurityFinding {
                 code: "cockroach_discovery_limit_reached".into(),
