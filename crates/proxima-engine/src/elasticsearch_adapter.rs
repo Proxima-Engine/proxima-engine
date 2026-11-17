@@ -466,6 +466,28 @@ mod tests {
     }
 
     #[test]
+    fn distinguishes_tenant_scoped_and_broad_dls_roles() {
+        let roles = json!({
+            "tenant_reader": {
+                "indices": [{
+                    "names": ["tenant-*"],
+                    "privileges": ["read"],
+                    "query": { "term": { "tenant_id": "{{_user.metadata.tenant_id}}" } }
+                }]
+            },
+            "legacy_reader": {
+                "index_permissions": [{
+                    "index_patterns": ["tenant-*"],
+                    "allowed_actions": ["read"],
+                    "dls": ""
+                }]
+            }
+        });
+        assert_eq!(dls_role_coverage(&roles, "tenant-acme", "tenant_id"), (2, 1, 1));
+        assert_eq!(dls_role_coverage(&roles, "other-acme", "tenant_id"), (0, 0, 0));
+    }
+
+    #[test]
     fn strips_credentials_from_user_catalog() {
         let users = json!({ "alice": { "password": "secret", "roles": ["reader"], "metadata": { "token": "secret" } } });
         let sanitized = sanitize_user_catalog(users);
