@@ -3,8 +3,8 @@
 </p>
 
 <h1 align="center">Agata Proxima</h1>
-<p align="center"><strong>Security infrastructure for multi-tenant PostgreSQL applications.</strong></p>
-<p align="center">Proxima Engine is a Rust PostgreSQL-protocol gateway that verifies signed tenant context and routes each database session to its tenant-specific PostgreSQL role.</p>
+<p align="center"><strong>Database-independent tenant-security infrastructure.</strong></p>
+<p align="center">Agata Proxima defines a common tenant-security contract. Proxima Engine currently implements the PostgreSQL wire-protocol adapter, verifying signed tenant context and binding each accepted session to a tenant-specific PostgreSQL role. Other native database adapters are planned, not yet supported.</p>
 
 <p align="center">
   <a href="https://github.com/Agata-Proxima/proxima-engine/actions/workflows/ci.yml">Continuous integration</a> ·
@@ -37,15 +37,15 @@ https://github.com/user-attachments/assets/bca488eb-829c-4672-bbe9-b25878e5401c
 
 ## What is Agata Proxima?
 
-Agata Proxima provides security infrastructure for applications that serve multiple customers from a shared PostgreSQL environment. Its core job is to make tenant identity part of the database connection boundary and route each verified tenant session to a dedicated PostgreSQL role.
+Agata Proxima is designed as an independent tenant-security platform. Proxima Security Core defines a database-neutral contract for tenant identity, protected resources, policy requirements, verification posture and fail-closed decisions. Database-specific adapters translate that contract into native controls. PostgreSQL is the first adapter implemented by Proxima Engine; other adapters remain planned until their native inspection and enforcement paths are built and tested.
 
 The product has two cooperating components:
 
-### Proxima Engine — public, open-source data plane
+### Proxima Engine — public, open-source enforcement runtime
 
 Proxima Engine is a Rust service that sits between an application's existing PostgreSQL driver and PostgreSQL. It speaks the PostgreSQL wire protocol, so applications keep their existing database drivers and connect to the Engine endpoint.
 
-The Engine provides:
+The current PostgreSQL Engine adapter provides:
 
 - **Signed tenant-context verification.** Validates tenant tokens using HMAC-SHA256, including token format, tenant identifier, expiry, and signature. Missing or invalid context is rejected when tenant enforcement is enabled.
 - **Tenant-to-role routing.** Maps the verified tenant identity to a configured PostgreSQL role and establishes a tenant-bound upstream database session.
@@ -55,7 +55,7 @@ The Engine provides:
 - **Operational visibility.** Exposes local health and status routes plus Prometheus metrics.
 - **Developer tooling.** Includes a Python standard-library CLI, local identity bootstrap, tenant-token generation, integration examples, and repeatable PostgreSQL tests.
 
-### Agata Proxima Cloud — hosted management product
+### Agata Proxima Cloud — hosted security management product
 
 Agata Proxima Cloud is the separate hosted control plane for organization workflows, teams, plans, billing, registered nodes, and hosted management. It coordinates authorized Engine nodes while database traffic remains in the customer environment.
 
