@@ -1122,6 +1122,26 @@ async fn main() -> io::Result<()> {
 }
 
 #[allow(clippy::too_many_arguments)]
+async fn write_startup_error(
+    client: &mut BoxedPgStream,
+    code: &str,
+    message: &str,
+) -> io::Result<()> {
+    let mut payload = Vec::new();
+    for (tag, value) in [(b'S', "FATAL"), (b'V', "FATAL"), (b'C', code), (b'M', message)] {
+        payload.push(tag);
+        payload.extend(value.bytes().filter(|byte| *byte != 0));
+        payload.push(0);
+    }
+    payload.push(0);
+    let length = i32::try_from(payload.len() + 4)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "PostgreSQL startup error frame is too large"))?;
+    client.write_all(&[b'E']).await?;
+    client.write_all(&length.to_be_bytes()).await?;
+    client.write_all(&payload).await?;
+    client.flush().await
+}
+
 async fn handle_connection(
     mut client: TcpStream,
     peer: std::net::SocketAddr,
@@ -1190,7 +1210,14 @@ async fn handle_connection(
         establish(client, upstream, verifier, tenant_role_prefix).await?;
 
     if let (Some(admission), Some(context)) = (policy_admission, session.tenant_context.as_ref()) {
-        admission.authorize(&session.database_name, &context.tenant_id).await?;
+        if let Err(error) = admission.authorize(&session.database_name, &context.tenant_id).await {
+            let _ = write_startup_error(
+                &mut client,
+                "28000",
+                "Tenant policy posture is not verified; connection denied.",
+            ).await;
+            return Err(error);
+        }
     }
 
     if let Some(context) = session.tenant_context.as_ref().filter(|c| c.emergency) {
