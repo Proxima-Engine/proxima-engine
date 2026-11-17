@@ -117,7 +117,7 @@ Regression tests cover database-kind validation, target bounds and capability ma
 
 Added a MongoDB Rust-driver adapter requiring verified TLS and rejecting insecure TLS URI options. It connects to the registered database, obtains authenticated effective privilege information, enumerates visible collections and views, captures collection options/validators and view metadata, and fingerprints the inventory. Policy inspection checks tenant ownership validator declarations and required fields, but explicitly records that MongoDB database-level roles do not provide document-level tenant filtering. Discovery is marked incomplete where authenticated visibility is privilege-scoped; verification always denies pending independent positive/negative document probes and runtime principal binding. The adapter remains in development.
 
-The Policy Guard now exposes `discover-mongodb` and `inspect-mongodb-policy` using explicit target/URI environment variables; both retain deny semantics. Regression tests cover TLS URI enforcement and capability maturity. Driver API compatibility, live MongoDB catalog permissions and tests were not executed in this session.
+The adapter now applies bounded server-selection and connect deadlines, and policy inspection checks that tenant ownership has an explicit BSON type, is required, and is protected by strict validation with error action. The Policy Guard exposes `discover-mongodb` and `inspect-mongodb-policy` using explicit target/URI environment variables; both retain deny semantics. Regression tests cover TLS URI enforcement and capability maturity. Driver API compatibility, live MongoDB catalog permissions and tests were not executed in this session.
 
 
 ## 13. Native Redis ACL discovery adapter — 17 November 2026
