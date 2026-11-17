@@ -8,7 +8,7 @@ The compilers live in `crates/proxima-engine/src/native_policy_plans.rs` and are
 
 | Database | Generated native plan | Required security model | Not provided |
 |---|---|---|---|
-| SQL Server | RLS inline predicate function plus filter and block predicate security policy | Trusted, authenticated `SESSION_CONTEXT` tenant claim | Session-context bootstrap, catalog inspection, ownership/bypass analysis, deployment, semantic verification, drift and runtime admission |
+| SQL Server | RLS inline predicate-function template plus filter and block predicate security-policy template | Trusted, authenticated `SESSION_CONTEXT` tenant claim | Session-context bootstrap, catalog inspection, ownership/bypass analysis, deployment, semantic verification, drift and runtime admission |
 | MySQL | User and table-grant SQL template | One database and principal per tenant | Native row-level security; shared-table isolation; live privilege inspection |
 | MariaDB | User and table-grant SQL template | One database and principal per tenant | Native row-level security; shared-table isolation; live privilege inspection |
 | MongoDB | Custom collection-role template | One database per tenant | Document-level filtering inside a shared collection; live role inspection |
@@ -16,7 +16,7 @@ The compilers live in `crates/proxima-engine/src/native_policy_plans.rs` and are
 
 ### SQL Server
 
-The generated RLS predicate compares the configured tenant ownership column with the configured claim in SQL Server `SESSION_CONTEXT`. Read operations generate a filter predicate. Insert, update and delete operations generate corresponding block predicates, including before/after update checks.
+The generated RLS predicate compares the configured tenant ownership column with the configured claim in SQL Server `SESSION_CONTEXT`. Read operations generate a filter predicate. Insert, update and delete operations generate corresponding block predicates, including before/after update checks. The function parameter includes a `<VERIFIED_COLUMN_TYPE>` placeholder because the exact native type must come from a live catalog inspection; the output is not executable until that substitution is performed. Function and policy DDL are separate batches, and an existing policy requires an explicit reviewed `ALTER SECURITY POLICY` revision.
 
 This is only safe when the tenant context is set by a trusted authenticated gateway and cannot be set or overwritten by an untrusted client. The compiler cannot prove that condition. The generated function and security policy must be inspected after deployment, and elevated principals, ownership chaining, module signing and bypass paths must be audited.
 
@@ -30,7 +30,7 @@ MongoDB RBAC controls database and collection privileges; it does not automatica
 
 ### Redis
 
-The ACL template binds a tenant-specific principal to a key pattern containing the literal `${tenant_id}` placeholder, for example `tenant:${tenant_id}:*`. The trusted gateway must select the corresponding ACL principal after authenticating the tenant. Redis command categories are broad, so production support requires a narrow, tested command allowlist and inspection of keyless commands, scripts, functions, channels, modules and administrative privileges.
+The ACL template binds a tenant-specific principal to a key pattern containing the literal `${tenant_id}` placeholder, for example `tenant:${tenant_id}:*`. The trusted gateway must select the corresponding ACL principal after authenticating the tenant. The template uses a narrow baseline core-command allowlist instead of broad ACL categories. Production support still requires inspection of command key specifications, multi-key behavior, keyless commands, scripts, functions, channels, modules and administrative privileges.
 
 ## Why these are not yet called supported
 
