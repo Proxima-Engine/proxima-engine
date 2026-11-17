@@ -306,7 +306,7 @@ mod tests {
     #[tokio::test]
     async fn mismatched_native_tenant_key_denies_admission() {
         let mut registry = AdapterRegistry::default();
-        registry.register(std::sync::Arc::new(FixtureAdapter { omit_read: false, wrong_tenant_key: true })).unwrap();
+        registry.register(std::sync::Arc::new(FixtureAdapter { omit_read: false, wrong_tenant_key: true, lie_about_previous: false })).unwrap();
         let coordinator = SecurityCoreCoordinator::new(registry);
         let report = coordinator.inspect_and_verify(DatabaseKind::PostgreSql, &request()).await.unwrap();
         assert_eq!(report.access_decision(), AccessDecision::Deny);
