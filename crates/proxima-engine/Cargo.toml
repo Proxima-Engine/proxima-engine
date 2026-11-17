@@ -24,6 +24,7 @@ tokio-postgres = "0.7"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "mysql"] }
 mongodb = "3"
 chrono = { version = "0.4", features = ["serde"] }
+redis = { version = "0.27", default-features = false, features = ["tokio-rustls-comp"] }
 tokio-postgres-rustls = { version = "0.14", features = ["aws-lc-rs", "webpki-roots"] }
 sqlparser = "0.64"
 webpki-roots = "1"
