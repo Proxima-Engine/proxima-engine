@@ -184,3 +184,21 @@ cargo run -p proxima-engine --bin proxima-policy-guard -- inspect-sql-server-pol
 ```
 
 Inspection checks tenant columns and nullability, enabled FILTER/BLOCK predicates for the declared operations, and the referenced predicate-function definition for SESSION_CONTEXT and schema binding. It still denies admission: a database client can set SESSION_CONTEXT unless a trusted application/gateway boundary prevents it, and independent positive/negative tenant probes are required. Keep the connection string in a protected environment variable.
+
+## Native CockroachDB catalog discovery
+
+CockroachDB discovery uses the PostgreSQL wire protocol with TLS certificate verification, but a separate CockroachDB adapter and explicit server-identity check. It inventories non-system tables and views, columns, and table grants from the target database. The inventory is bounded to 10,000 relations; exceeding that limit marks discovery incomplete. It fingerprints the discovered catalog for drift comparison.
+
+The adapter does not assume PostgreSQL row-level security semantics and does not generate or deploy policies. Its descriptor exposes schema inspection and drift detection only; verification always denies until CockroachDB-specific tenant authorization, trusted identity binding and independent cross-tenant probes exist.
+
+```bash
+PROXIMA_COCKROACH_ADAPTER_DATABASE_URL='postgresql://...' \
+PROXIMA_COCKROACH_ADAPTER_TARGET_ID='registered-target-id' \
+PROXIMA_COCKROACH_ADAPTER_DATABASE_NAME='application_db' \
+cargo run -p proxima-engine --bin proxima-policy-guard -- discover-cockroachdb
+
+# Optional schema-scoped inventory
+cargo run -p proxima-engine --bin proxima-policy-guard -- discover-cockroachdb public
+```
+
+The connector uses the same verified root-store configuration as PostgreSQL discovery. Credentials must remain in a protected environment variable; discovery is read-only and does not authorize application traffic.
