@@ -165,6 +165,9 @@ pub fn compile_mongodb_database_boundary(policy: &TenantSecurityPolicy) -> Resul
         if resource.resource.kind != ResourceKind::Collection {
             return Err(error("unsupported_resource_kind", "MongoDB boundary templates accept collections only."));
         }
+        if resource.operations.contains(&Operation::Execute) {
+            return Err(error("unsupported_operation", "MongoDB command, aggregation, map-reduce and change-stream execution require a separately reviewed command policy."));
+        }
         let database = resource.resource.namespace.as_deref().ok_or_else(|| error("tenant_database_required", "MongoDB collection policy requires a database namespace."))?;
         identifier(database, 63)?;
         identifier(&resource.resource.name, 120)?;
@@ -347,6 +350,14 @@ mod tests {
     fn mongodb_template_does_not_claim_document_level_security() {
         let compiled = compile_mongodb_database_boundary(&policy(ResourceKind::Collection, "tenant_id")).unwrap();
         assert_eq!(compiled.changes[0].definition["shared_collection_document_level_isolation"], false);
+    }
+
+    #[test]
+    fn mongodb_template_rejects_execute_instead_of_silently_dropping_it() {
+        let mut requested = policy(ResourceKind::Collection, "tenant_id");
+        requested.resources[0].operations = vec![Operation::Read, Operation::Execute];
+        let error = compile_mongodb_database_boundary(&requested).unwrap_err();
+        assert_eq!(error.code, "unsupported_operation");
     }
 
     #[test]
