@@ -193,14 +193,21 @@ pub fn compile_redis_acl(policy: &TenantSecurityPolicy) -> Result<CompiledPolicy
     policy.validate().map_err(|e| error("invalid_policy", &format!("The shared policy is invalid: {e:?}")))?;
     let mut changes = Vec::new();
     for resource in &policy.resources {
-        let Some((prefix, suffix)) = resource.tenant_key.split_once("${tenant_id}") else {
+        let pattern = &resource.tenant_key;
+        let Some((prefix, suffix)) = pattern.split_once("${tenant_id}") else {
             return Err(error("redis_tenant_key_pattern_required", "Redis tenant_key must contain exactly one literal ${tenant_id} placeholder, for example tenant:${tenant_id}:*."));
         };
-        if resource.tenant_key.matches("${tenant_id}").count() != 1
+        if pattern.matches("${tenant_id}").count() != 1
             || prefix.is_empty()
             || prefix.contains('*')
             || !suffix.starts_with(':')
-            || !resource.tenant_key.chars().all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, ':' | '_' | '-' | '*' | '
+            || !pattern.chars().all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, ':' | '_' | '-' | '*' | '$' | '{' | '}'))
+        {
+            return Err(error("unsafe_redis_key_pattern", "Redis key patterns must be a bounded tenant-prefixed pattern with one tenant placeholder and no whitespace, glob escape, or command syntax."));
+        }
+        if resource.resource.kind != ResourceKind::Keyspace && resource.resource.kind != ResourceKind::Table {
+            return Err(error("unsupported_resource_kind", "Redis policy resources must represent a keyspace or logical key collection."));
+        }
         let mut commands: Vec<&str> = Vec::new();
         if resource.operations.contains(&Operation::Read) {
             commands.extend([
@@ -216,8 +223,15 @@ pub fn compile_redis_acl(policy: &TenantSecurityPolicy) -> Result<CompiledPolicy
                 "+zadd", "+zrem", "+xadd", "+xdel"
             ]);
         }
-        if commands.is_empty() { return Err(error("empty_privilege_set", "No supported Redis command category was requested.")); }
-        let mut acl_template = vec!["reset".to_string(), "on".to_string(), ">${secret_manager_generated_password}".to_string(), format!("~{pattern}")];
+        if commands.is_empty() {
+            return Err(error("empty_privilege_set", "No supported Redis command category was requested."));
+        }
+        let mut acl_template = vec![
+            "reset".to_string(),
+            "on".to_string(),
+            ">${secret_manager_generated_password}".to_string(),
+            format!("~{pattern}"),
+        ];
         acl_template.extend(commands.iter().map(|value| value.to_string()));
         changes.push(resource_change(resource, "redis_acl_user_template", json!({
             "acl_template": acl_template,
@@ -227,8 +241,8 @@ pub fn compile_redis_acl(policy: &TenantSecurityPolicy) -> Result<CompiledPolicy
             "limitations": [
                 "The trusted gateway must authenticate the tenant and select the matching Redis ACL user.",
                 "Every key must follow the tenant key pattern; unscoped keys and keyless commands need separate policy review.",
-                "The generated ACL uses a narrow baseline core-command allowlist; production adapters must validate command key specifications, multi-key behavior, modules, scripts and version-specific commands.",
-                "ACL users, selectors, key patterns, channels, scripts, functions, modules and replication/admin commands require inspection."
+                "This template is a database ACL boundary, not proof of command-level isolation for every Redis module or server version.",
+                "ACL users, selectors, key patterns, channels, scripts, functions, modules and replication/admin commands require native inspection."
             ]
         })));
     }
