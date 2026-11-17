@@ -66,3 +66,12 @@ The PostgreSQL listener's active admission path consumes the Cloud node-key-sign
 The Cloud registration validator additionally rejects distinct tenant IDs that normalize to one PostgreSQL role and rejects derived role names exceeding PostgreSQL's 63-byte identifier limit. Regression tests were added. The Cloud tenant-role migration was repaired to remove malformed duplicated legacy-collision SQL and now quarantines ambiguous mappings, records drift, and preserves fail-closed behavior.
 
 No Rust/frontend builds, tests, migration execution, live PostgreSQL acceptance, or GitHub Actions were run. These changes are committed to the development branches but remain uncompiled and unvalidated. PostgreSQL remains in development; the five compiler-only databases and all other planned targets remain unsupported.
+
+
+## 7. PostgreSQL drift fingerprint expansion — 17 November 2026
+
+The concrete Engine PostgreSQL catalog adapter now includes additional native security and schema metadata in its drift fingerprint: database-wide role attributes and validity, database-scoped persistent role settings, role memberships and admin-option state, relation ownership/ACL/RLS/policy definitions, columns and defaults, constraints and validation state, indexes and validity/readiness, non-internal triggers and enabled state, view/materialized-view definitions/options/ACLs, and SECURITY DEFINER routine ownership, settings, arguments and definitions.
+
+This closes a material blind spot in the earlier relation-only fingerprint: role grants, inherited membership, persistent settings, routine changes, and schema-object changes can alter effective authorization without changing a table's own RLS policy or ACL. The fingerprint is still a drift signal, not semantic proof. It does not promote PostgreSQL to supported, and independent authenticated positive/negative tenant probes, controlled deployment and full local acceptance remain required.
+
+The SQL changes have been committed but were not compiled or executed against PostgreSQL in this session. Validate catalog-query permissions and compatibility against the supported PostgreSQL major versions before accepting the adapter.
