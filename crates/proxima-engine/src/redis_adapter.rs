@@ -183,6 +183,9 @@ impl DatabaseAdapter for RedisCatalogAdapter {
                 if !matches!(protected.resource.kind, ResourceKind::Keyspace | ResourceKind::Table) {
                     return Err(error("unsupported_redis_resource_kind", "Redis policies must target a keyspace or logical key collection."));
                 }
+                if protected.operations.contains(&Operation::Execute) {
+                    return Err(error("unsupported_redis_execute_operation", "Redis script and function execution requires a separate native command policy."));
+                }
                 let Some((prefix, suffix)) = protected.tenant_key.split_once(placeholder) else {
                     return Err(error("redis_tenant_key_pattern_required", "Redis policy key patterns must contain a tenant placeholder."));
                 };
@@ -380,6 +383,14 @@ mod tests {
         let sanitized = sanitize_acl_line(line);
         assert!(!sanitized.contains("secret-hash"));
         assert!(sanitized.contains("<credential-redacted>"));
+    }
+
+    #[test]
+    fn parses_read_only_and_write_only_key_patterns_separately() {
+        let (_, read_tokens) = parse_acl_line("user reader on %R~tenant:* +get").unwrap();
+        let (_, write_tokens) = parse_acl_line("user writer on %W~tenant:* +set").unwrap();
+        assert!(read_tokens.iter().any(|token| token == "%R~tenant:*"));
+        assert!(write_tokens.iter().any(|token| token == "%W~tenant:*"));
     }
 
     #[test]
