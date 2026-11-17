@@ -195,7 +195,7 @@ impl DatabaseAdapter for RedisCatalogAdapter {
                 let explicit_command_coverage = matching.iter().any(|resource| {
                     let rules = resource.attributes["command_rules"].as_array();
                     rules.is_some_and(|rules| required_commands.iter().all(|command| {
-                        rules.iter().any(|rule| rule.as_str() == Some(&format!("+{command}")))
+                        rules.iter().any(|rule| rule.as_str().is_some_and(|value| value == format!("+{command}")))
                     }))
                 });
                 if !explicit_command_coverage {
