@@ -163,7 +163,18 @@ impl DatabaseAdapter for PostgresCatalogAdapter {
                 let public_write: bool = row.get(10);
                 let tenant_column_exists: bool = row.get(11);
                 let tenant_column_not_null: bool = row.get(12);
+                let unsafe_dependent_views: i64 = client.query_one(
+                    "WITH RECURSIVE target_relation(oid) AS (SELECT c.oid FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=$1 AND c.relname=$2), dependent_views(view_oid) AS (SELECT rewrite.ev_class FROM pg_catalog.pg_depend dependency JOIN pg_catalog.pg_rewrite rewrite ON dependency.classid='pg_rewrite'::regclass AND dependency.objid=rewrite.oid CROSS JOIN target_relation target WHERE dependency.refclassid='pg_class'::regclass AND dependency.refobjid=target.oid UNION SELECT rewrite.ev_class FROM pg_catalog.pg_depend dependency JOIN pg_catalog.pg_rewrite rewrite ON dependency.classid='pg_rewrite'::regclass AND dependency.objid=rewrite.oid JOIN dependent_views parent ON dependency.refobjid=parent.view_oid WHERE dependency.refclassid='pg_class'::regclass) SELECT count(*)::bigint FROM dependent_views dependency JOIN pg_catalog.pg_class view_relation ON view_relation.oid=dependency.view_oid JOIN pg_catalog.pg_namespace view_namespace ON view_namespace.oid=view_relation.relnamespace WHERE view_relation.relkind IN ('v','m') AND view_namespace.nspname NOT IN ('pg_catalog','information_schema') AND view_namespace.nspname NOT LIKE 'pg_%' AND (view_relation.relkind='m' OR NOT COALESCE(view_relation.reloptions @> ARRAY['security_invoker=true'],false))",
+                    &[&schema, &protected.resource.name.as_str()],
+                ).await.map_err(db_error)?.get(0);
+                let security_definer_routines: i64 = client.query_one(
+                    "SELECT count(*)::bigint FROM pg_catalog.pg_proc routine JOIN pg_catalog.pg_namespace routine_schema ON routine_schema.oid=routine.pronamespace WHERE routine.prosecdef AND routine.prokind IN ('f','p') AND routine_schema.nspname NOT IN ('pg_catalog','information_schema') AND routine_schema.nspname NOT LIKE 'pg_%'",
+                    &[],
+                ).await.map_err(db_error)?.get(0);
+
                 let mut findings = Vec::new();
+                if unsafe_dependent_views > 0 { findings.push(finding("unsafe_dependent_view", &protected.resource, "A dependent view is not security-invoker or is materialized; it requires separate protection and review.")); }
+                if security_definer_routines > 0 { findings.push(finding("security_definer_routine_requires_review", &protected.resource, "Application SECURITY DEFINER routines exist and require explicit privilege and tenant-boundary review.")); }
                 if !rls_enabled { findings.push(finding("rls_disabled", &protected.resource, "Row-level security is disabled.")); }
                 if !rls_forced { findings.push(finding("rls_not_forced", &protected.resource, "Table-owner access is not forced through row-level security.")); }
                 if owner_bypasses_rls { findings.push(finding("owner_bypasses_rls", &protected.resource, "The relation owner or an inherited role has SUPERUSER or BYPASSRLS.")); }
@@ -184,6 +195,8 @@ impl DatabaseAdapter for PostgresCatalogAdapter {
                     "bypass_grantee": bypass_grantee, "public_select": public_select,
                     "public_write": public_write, "tenant_column_exists": tenant_column_exists,
                     "tenant_column_not_null": tenant_column_not_null, "tenant_column": protected.tenant_key,
+                    "unsafe_dependent_views": unsafe_dependent_views,
+                    "security_definer_routines": security_definer_routines,
                     "relkind": relkind
                 });
                 let digest = sha256(&serde_json::to_vec(&state).map_err(|_| error("fingerprint_serialization_failed", "Could not serialize PostgreSQL catalog state."))?);
