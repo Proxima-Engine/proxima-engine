@@ -225,7 +225,8 @@ struct PolicyAdmissionClient {
 
 impl PolicyAdmissionClient {
     fn from_env(tenant_role_prefix: &str) -> io::Result<Option<Self>> {
-        let url = std::env::var("PROXIMA_NODE_POLICY_STATUS_URL").ok();
+        let url = std::env::var("PROXIMA_NODE_POLICY_STATUS_URL").ok()
+            .filter(|value| !value.trim().is_empty());
         let required = std::env::var("PROXIMA_POLICY_ADMISSION_REQUIRED")
             .map(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
             .unwrap_or(false);
