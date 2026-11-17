@@ -313,6 +313,13 @@ mod tests {
         PolicyEvidenceAuthority::new(vec![7; 32], vec![9; 32]).unwrap()
     }
 
+    fn semantic_checks() -> Vec<EvidenceCheck> {
+        ["read", "create", "update", "delete"].into_iter().flat_map(|operation| [
+            EvidenceCheck { check_id: format!("own_tenant_allow:{operation}"), passed: true, detail: format!("own-tenant {operation} probe passed") },
+            EvidenceCheck { check_id: format!("cross_tenant_deny:{operation}"), passed: true, detail: format!("cross-tenant {operation} probe denied") },
+        ]).collect()
+    }
+
     fn evidence_payload() -> PolicyEvidencePayload {
         PolicyEvidencePayload {
             model_version: SECURITY_MODEL_VERSION.into(),
@@ -327,10 +334,7 @@ mod tests {
             verified_operations: vec![Operation::Read, Operation::Create, Operation::Update, Operation::Delete],
             fingerprint: "a".repeat(64),
             observed_at_unix: 1_800_000_000,
-            checks: vec![
-                EvidenceCheck { check_id: "tenant-a-allow".into(), passed: true, detail: "own tenant access allowed".into() },
-                EvidenceCheck { check_id: "tenant-b-deny".into(), passed: true, detail: "cross-tenant access denied".into() },
-            ],
+            checks: semantic_checks(),
         }
     }
 
