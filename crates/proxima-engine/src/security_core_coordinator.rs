@@ -156,7 +156,7 @@ mod tests {
         ProtectedResource, ResourceKind, ResourceRef, SECURITY_MODEL_VERSION,
     };
 
-    struct FixtureAdapter { omit_read: bool }
+    struct FixtureAdapter { omit_read: bool, wrong_tenant_key: bool }
 
     impl DatabaseAdapter for FixtureAdapter {
         fn descriptor(&self) -> AdapterDescriptor {
@@ -181,7 +181,8 @@ mod tests {
         fn inspect<'a>(&'a self, request: &'a InspectionRequest) -> AdapterFuture<'a, Result<InspectionSnapshot, AdapterError>> {
             let mut operations = request.policy.resources[0].operations.clone();
             if self.omit_read { operations.retain(|operation| *operation != Operation::Read); }
-            let resource = request.policy.resources[0].clone();
+            let mut resource = request.policy.resources[0].clone();
+            if self.wrong_tenant_key { resource.tenant_key = "account_id".into(); }
             Box::pin(async move {
                 Ok(InspectionSnapshot {
                     database_kind: DatabaseKind::PostgreSql,
@@ -271,7 +272,7 @@ mod tests {
 
     fn coordinator(omit_read: bool) -> SecurityCoreCoordinator {
         let mut registry = AdapterRegistry::default();
-        registry.register(std::sync::Arc::new(FixtureAdapter { omit_read })).unwrap();
+        registry.register(std::sync::Arc::new(FixtureAdapter { omit_read, wrong_tenant_key: false })).unwrap();
         SecurityCoreCoordinator::new(registry)
     }
 
@@ -288,6 +289,16 @@ mod tests {
         let report = coordinator.inspect_and_verify(DatabaseKind::PostgreSql, &request()).await.unwrap();
         assert_eq!(report.access_decision(), AccessDecision::Deny);
         assert!(report.findings.iter().any(|finding| finding.code == "operation_not_verified"));
+    }
+
+    #[tokio::test]
+    async fn mismatched_native_tenant_key_denies_admission() {
+        let mut registry = AdapterRegistry::default();
+        registry.register(std::sync::Arc::new(FixtureAdapter { omit_read: false, wrong_tenant_key: true })).unwrap();
+        let coordinator = SecurityCoreCoordinator::new(registry);
+        let report = coordinator.inspect_and_verify(DatabaseKind::PostgreSql, &request()).await.unwrap();
+        assert_eq!(report.access_decision(), AccessDecision::Deny);
+        assert!(report.findings.iter().any(|finding| finding.code == "tenant_ownership_key_mismatch"));
     }
 
     #[test]
