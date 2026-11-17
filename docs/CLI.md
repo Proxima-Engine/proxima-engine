@@ -79,3 +79,17 @@ python -m unittest discover -s tests_cli -v
 ```
 
 For the full Rust and PostgreSQL verification path, see [Verification](VERIFICATION.md).
+
+## Review-only multi-database policy plans
+
+The `compile-plan` command generates a JSON policy plan for the current early non-PostgreSQL compilers. It does not connect to a database or apply changes.
+
+```bash
+proxima-policy-guard compile-plan sql_server policy.json
+proxima-policy-guard compile-plan mysql policy.json
+proxima-policy-guard compile-plan mariadb policy.json
+proxima-policy-guard compile-plan mongodb policy.json
+proxima-policy-guard compile-plan redis policy.json
+```
+
+Redirect output to a file for review, for example `proxima-policy-guard compile-plan sql_server policy.json > sql-server-plan.json`. SQL Server plans contain a `<VERIFIED_COLUMN_TYPE>` placeholder that must be resolved by a future live catalog inspector; do not execute the plan as-is. MySQL/MariaDB and MongoDB templates require one database per tenant. Redis requires a keyspace resource whose `tenant_key` uses a strict tenant-specific pattern such as `tenant:${tenant_id}:*`. These are policy-generation templates only, not live adapters or production support.
