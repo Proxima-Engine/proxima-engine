@@ -9,7 +9,7 @@ use crate::database_adapter::{
 use crate::native_policy_plans::compile_redis_acl;
 use crate::security_core::{
     AdapterCapabilities, AdapterDescriptor, AdapterMaturity, DatabaseKind,
-    InspectionCompleteness, ResourceKind, ResourceRef, SecurityFinding,
+    InspectionCompleteness, Operation, ResourceKind, ResourceRef, SecurityFinding,
     SecurityPosture, TenantSecurityPolicy, VerificationReport, SECURITY_MODEL_VERSION,
 };
 use redis::{aio::MultiplexedConnection, Client};
@@ -191,6 +191,21 @@ impl DatabaseAdapter for RedisCatalogAdapter {
                 if discovery.resources.iter().any(|resource| resource.name == "*" || resource.name == "**") {
                     resource_findings.push(finding("redis_unrestricted_key_pattern", &protected.resource, "At least one Redis ACL user has unrestricted key access."));
                 }
+                let required_commands = required_commands(&protected.operations);
+                let explicit_command_coverage = matching.iter().any(|resource| {
+                    let rules = resource.attributes["command_rules"].as_array();
+                    rules.is_some_and(|rules| required_commands.iter().all(|command| {
+                        rules.iter().any(|rule| rule.as_str() == Some(&format!("+{command}")))
+                    }))
+                });
+                if !explicit_command_coverage {
+                    resource_findings.push(finding("redis_acl_command_coverage_incomplete", &protected.resource, "No single tenant ACL user explicitly grants every command required by this policy; command categories are not treated as proof of least-privilege coverage."));
+                }
+                if matching.iter().any(|resource| resource.attributes["command_rules"].as_array().is_some_and(|rules| {
+                    rules.iter().filter_map(|rule| rule.as_str()).any(|rule| matches!(rule, "+@all" | "+@write" | "+@admin"))
+                })) {
+                    resource_findings.push(finding("redis_acl_broad_command_category", &protected.resource, "A matching ACL user grants a broad command category; review and replace category grants with an explicit command allowlist."));
+                }
                 resource_findings.push(finding("redis_tenant_operation_probe_required", &protected.resource, "ACL inspection cannot prove that scripts, functions, modules and keyless commands respect tenant boundaries."));
                 let resource_fingerprint = digest(&serde_json::to_vec(&matching.iter().map(|resource| &resource.attributes).collect::<Vec<_>>())
                     .map_err(|_| error("fingerprint_serialization_failed", "Could not serialize Redis ACL resource metadata."))?);
@@ -261,6 +276,23 @@ impl DatabaseAdapter for RedisCatalogAdapter {
     }
 }
 
+fn required_commands(operations: &[Operation]) -> Vec<&'static str> {
+    let mut commands = Vec::new();
+    for operation in operations {
+        let required: &[&str] = match operation {
+            Operation::Read => &["get","mget","exists","ttl","pttl","type","strlen","getrange","hget","hmget","hgetall","hexists","hlen","lrange","llen","lindex","scard","smembers","sismember","zrange","zscore","zcard","xrange","xlen"],
+            Operation::Create => &["set","mset","hset","lpush","rpush","sadd","zadd","xadd"],
+            Operation::Update => &["set","mset","expire","pexpire","persist","incr","decr","hset","lpush","rpush","sadd","zadd","xadd"],
+            Operation::Delete => &["del","unlink","hdel","lpop","rpop","srem","zrem","xdel"],
+            Operation::Execute => &[],
+        };
+        commands.extend_from_slice(required);
+    }
+    commands.sort_unstable();
+    commands.dedup();
+    commands
+}
+
 fn parse_acl_line(line: &str) -> Option<(&str, Vec<String>)> {
     let mut parts = line.split_whitespace();
     if parts.next()? != "user" { return None; }
@@ -319,6 +351,14 @@ mod tests {
         let sanitized = sanitize_acl_line(line);
         assert!(!sanitized.contains("secret-hash"));
         assert!(sanitized.contains("<credential-redacted>"));
+    }
+
+    #[test]
+    fn maps_policy_operations_to_explicit_redis_commands() {
+        let commands = required_commands(&[Operation::Read, Operation::Delete]);
+        assert!(commands.contains(&"get"));
+        assert!(commands.contains(&"del"));
+        assert!(!commands.contains(&"set"));
     }
 
     #[test]
