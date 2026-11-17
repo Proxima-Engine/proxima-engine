@@ -108,10 +108,13 @@ so a denied connection is never reported as ready to the client.
 
 ## Signed evidence boundary
 
-The hosted admission endpoint persists each node-key-signed decision, its
-one-time request ID, per-registration verification checks, SHA-256 payload
-digest, and signature for 90 days. The dashboard exposes the latest 100
-decisions per target. This proves which Control Plane posture decision was
+Every request ID is reserved in a short-lived nonce table for 15 minutes to
+reject replay. To avoid writing one audit row for every five-second active-
+session recheck, the Control Plane stores at most one signed posture snapshot
+per node/target/tenant/posture per minute. Each snapshot contains the request
+ID, per-registration verification checks, SHA-256 payload digest and HMAC
+signature, and is retained for 90 days. The dashboard exposes the latest 100
+snapshots per target. This proves which Control Plane posture decision was
 issued to a node and what checks informed it; it is not a substitute for
 independent positive and cross-tenant negative data-plane probes.
 
