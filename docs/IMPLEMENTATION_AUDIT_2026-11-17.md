@@ -140,3 +140,9 @@ PostgreSQL discovery and policy inspection now include declarative partition par
 SQL Server discovery also fingerprints partition schemes/functions/range boundaries, and inspection flags RLS predicate functions or table triggers that execute under an explicit EXECUTE AS principal.
 
 MongoDB tenant-field validation now also rejects validators whose BSON type constraint explicitly permits null, rather than treating a merely present bsonType declaration as sufficient.
+
+## CockroachDB discovery adapter added after the initial audit
+
+- Added a separate CockroachDB adapter over the PostgreSQL wire protocol with an injected connector, read-only session settings, server identity validation, database-target binding, bounded discovery, native `information_schema` table/view/column/table-grant inventory, deterministic catalog fingerprinting and drift comparison.
+- The adapter is deliberately marked `in_development` and exposes only schema inspection and drift detection. It does not reuse PostgreSQL RLS assumptions, compile or deploy policy, claim tenant enforcement, or return a verified posture.
+- CockroachDB native authorization, authenticated tenant binding, independent positive/negative probes, controlled policy deployment, signed evidence and runtime admission remain unimplemented. The module has authored unit tests only; no Rust build, tests or live CockroachDB validation were run.
