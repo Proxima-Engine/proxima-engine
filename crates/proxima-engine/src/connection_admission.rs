@@ -5,7 +5,7 @@
 //! per process. Reconnects require fresh evidence and a fresh envelope.
 
 use crate::policy_evidence::{
-    AdmissionExpectation, EvidenceError, PolicyEvidenceAuthority, PolicyEvidencePayload,
+    AdmissionExpectation, EvidenceError, PolicyEvidenceAuthority,
     SignedPolicyAdmission, SignedPolicyEvidence,
 };
 use crate::security_core::AccessDecision;
