@@ -17,7 +17,7 @@ use crate::security_core::{
 use reqwest::{header::{HeaderMap, HeaderValue, AUTHORIZATION}, redirect::Policy, Client, Url};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::time::Duration;
+use std::{str::FromStr, time::Duration};
 
 pub struct ElasticsearchCatalogAdapter {
     target_id: String,
@@ -122,7 +122,8 @@ impl ElasticsearchCatalogAdapter {
         let version = root.pointer("/version/number").and_then(Value::as_str).unwrap_or("unknown").to_owned();
         let tagline = root.get("tagline").and_then(Value::as_str).unwrap_or_default();
         let distribution = root.pointer("/version/distribution").and_then(Value::as_str).unwrap_or_default();
-        let kind = if distribution.eq_ignore_ascii_case("opensearch") || tagline.to_ascii_lowercase().contains("opensearch") {
+        let is_opensearch = distribution.eq_ignore_ascii_case("opensearch") || tagline.to_ascii_lowercase().contains("opensearch");
+        let kind = if is_opensearch {
             DatabaseKind::Elasticsearch
         } else if root.get("version").is_some() {
             DatabaseKind::Elasticsearch
@@ -172,7 +173,7 @@ impl ElasticsearchCatalogAdapter {
                 detail: "The cluster index inventory exceeded 10,000 entries; discovery is incomplete.".into(),
             });
         }
-        let (roles, role_mappings, users, security_api) = if distribution.eq_ignore_ascii_case("opensearch") || tagline.to_ascii_lowercase().contains("opensearch") {
+        let (roles, role_mappings, users, security_api) = if is_opensearch {
             let roles = self.get_optional_json(self.url_for(&["_plugins", "_security", "api", "roles"])?).await?;
             let mappings = self.get_optional_json(self.url_for(&["_plugins", "_security", "api", "rolesmapping"])?).await?;
             let users = self.get_optional_json(self.url_for(&["_plugins", "_security", "api", "internalusers"])?).await?;
@@ -183,7 +184,7 @@ impl ElasticsearchCatalogAdapter {
             (roles, None, users, "elasticsearch_security")
         };
         let security_visible = roles.is_some() && users.is_some()
-            && (!distribution.eq_ignore_ascii_case("opensearch") || role_mappings.is_some());
+            && (!is_opensearch || role_mappings.is_some());
         if !security_visible {
             findings.push(SecurityFinding {
                 code: "elasticsearch_security_catalog_unavailable".into(),
