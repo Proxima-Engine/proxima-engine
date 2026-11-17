@@ -67,7 +67,8 @@
                   "view",
                   "collection",
                   "procedure",
-                  "function"
+                  "function",
+                  "keyspace"
                 ]
               }
             }
