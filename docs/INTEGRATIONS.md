@@ -26,7 +26,7 @@ psql "host=127.0.0.1 port=6432 dbname=appdb user=proxima sslmode=disable" \
   -c "SELECT current_user, current_database();"
 ```
 
-The client username is the proxy login name. The Engine derives the upstream PostgreSQL username from the signed tenant ID. The supplied password must authenticate as that tenant's upstream database role.
+The client username is the proxy login name. The Engine derives the upstream PostgreSQL username from the signed tenant ID using one global `PROXIMA_TENANT_ROLE_PREFIX` (default `proxima_tenant_`) plus the tenant ID with hyphens normalized to underscores. The supplied password must authenticate as that tenant's upstream database role. Cloud policy registration enforces the same prefix and returns the required value; configure the Control Plane and Engine identically.
 
 ## Node.js — node-postgres (`pg`)
 
