@@ -1,0 +1,440 @@
+//! SQL Server catalog adapter.
+//!
+//! The adapter requires encrypted TDS with certificate validation, inventories
+//! native principals/permissions/RLS predicates and fails closed until the
+//! SESSION_CONTEXT trust boundary and independent tenant probes are verified.
+
+use crate::database_adapter::{
+    AdapterError, AdapterFuture, AdapterTarget, CompiledPolicy, DatabaseAdapter,
+    DiscoveryRequest, DiscoverySnapshot, DiscoveredResource, DriftReport,
+    InspectionRequest, InspectionSnapshot, ResourceInspection,
+};
+use crate::native_policy_plans::compile_sql_server;
+use crate::security_core::{
+    AdapterCapabilities, AdapterDescriptor, AdapterMaturity, DatabaseKind,
+    InspectionCompleteness, Operation, ResourceKind, ResourceRef, SecurityFinding,
+    SecurityPosture, TenantSecurityPolicy, VerificationReport, SECURITY_MODEL_VERSION,
+};
+use serde_json::json;
+use sha2::{Digest, Sha256};
+use std::time::Duration;
+use tiberius::{Client, Config, EncryptionLevel};
+use tokio::net::TcpStream;
+use tokio_util::compat::TokioAsyncWriteCompatExt;
+
+pub struct SqlServerCatalogAdapter {
+    target_id: String,
+    database_name: String,
+    connection_string: String,
+}
+
+impl SqlServerCatalogAdapter {
+    pub fn new(target_id: impl Into<String>, database_name: impl Into<String>, connection_string: impl Into<String>) -> Result<Self, AdapterError> {
+        let target_id = target_id.into();
+        let database_name = database_name.into();
+        let connection_string = connection_string.into();
+        if target_id.trim().is_empty() || target_id.len() > 256 || target_id.contains('\0')
+            || database_name.trim().is_empty() || database_name.len() > 128 || database_name.contains('\0')
+            || connection_string.trim().is_empty() || connection_string.len() > 4096 {
+            return Err(error("invalid_sql_server_target", "A bounded target ID, database name and connection string are required."));
+        }
+        let normalized = connection_string.to_ascii_lowercase().replace(' ', "");
+        if normalized.contains("trustservercertificate=true") || normalized.contains("encrypt=false") {
+            return Err(error("sql_server_tls_verification_required", "SQL Server connections must require encryption and certificate/hostname verification; TrustServerCertificate=true and Encrypt=false are forbidden."));
+        }
+        Config::from_ado_string(&connection_string)
+            .map_err(|_| error("invalid_sql_server_connection_config", "The SQL Server connection string could not be parsed."))?;
+        Ok(Self { target_id, database_name, connection_string })
+    }
+
+    fn validate_target(&self, target: &AdapterTarget) -> Result<(), AdapterError> {
+        if target.target_id != self.target_id || target.database_name != self.database_name {
+            return Err(error("sql_server_target_mismatch", "The request does not match this adapter's registered SQL Server target."));
+        }
+        Ok(())
+    }
+
+    async fn connect_checked(&self) -> Result<Client<tokio_util::compat::Compat<TcpStream>>, AdapterError> {
+        let mut config = Config::from_ado_string(&self.connection_string)
+            .map_err(|_| error("invalid_sql_server_connection_config", "The SQL Server connection string could not be parsed."))?;
+        config.encryption(EncryptionLevel::Required);
+        let address = config.get_addr();
+        let tcp = tokio::time::timeout(Duration::from_secs(10), TcpStream::connect(address))
+            .await.map_err(|_| error("sql_server_connection_timeout", "SQL Server TCP connection exceeded the ten-second deadline."))?
+            .map_err(db_error)?;
+        tcp.set_nodelay(true).map_err(db_error)?;
+        let mut client = tokio::time::timeout(Duration::from_secs(15), Client::connect(config, tcp.compat_write()))
+            .await.map_err(|_| error("sql_server_tls_login_timeout", "SQL Server encrypted login exceeded the fifteen-second deadline."))?
+            .map_err(db_error)?;
+        let rows = client.simple_query(
+            "SELECT DB_NAME() AS database_name, ORIGINAL_LOGIN() AS login_name, USER_NAME() AS database_user, CONVERT(nvarchar(128), SERVERPROPERTY('ProductVersion')) AS server_version, HAS_PERMS_BY_NAME(DB_NAME(), 'DATABASE', 'VIEW DEFINITION') AS can_view_definition, IS_SRVROLEMEMBER('sysadmin') AS is_sysadmin"
+        ).await.map_err(db_error)?.into_first_result().await.map_err(db_error)?;
+        let row = rows.first().ok_or_else(|| error("sql_server_identity_unavailable", "SQL Server did not return authenticated connection identity metadata."))?;
+        let database = row.get::<&str,_>("database_name").unwrap_or_default();
+        if database != self.database_name {
+            return Err(error("sql_server_database_mismatch", "The authenticated connection reached a different SQL Server database."));
+        }
+        Ok(client)
+    }
+
+    async fn discover_inner(&self, request: &DiscoveryRequest) -> Result<DiscoverySnapshot, AdapterError> {
+        self.validate_target(&request.target)?;
+        if request.namespace.as_ref().is_some_and(|schema| schema.trim().is_empty() || schema.len() > 128 || schema.contains('\0')) {
+            return Err(error("invalid_sql_server_schema", "The requested SQL Server schema name is invalid."));
+        }
+        let mut client = self.connect_checked().await?;
+        let identity_rows = client.simple_query(
+            "SELECT DB_NAME() AS database_name, ORIGINAL_LOGIN() AS login_name, USER_NAME() AS database_user, CONVERT(nvarchar(128), SERVERPROPERTY('ProductVersion')) AS server_version, HAS_PERMS_BY_NAME(DB_NAME(), 'DATABASE', 'VIEW DEFINITION') AS can_view_definition, IS_SRVROLEMEMBER('sysadmin') AS is_sysadmin"
+        ).await.map_err(db_error)?.into_first_result().await.map_err(db_error)?;
+        let identity = identity_rows.first().ok_or_else(|| error("sql_server_identity_unavailable", "SQL Server identity metadata was unavailable."))?;
+        let can_view_definition = identity.get::<bool,_>("can_view_definition").unwrap_or(false);
+        let is_sysadmin = identity.get::<i32,_>("is_sysadmin").unwrap_or(0) == 1;
+        let mut resources = Vec::new();
+
+        let table_rows = client.simple_query(
+            "SELECT s.name AS schema_name,t.name AS object_name,t.object_id,t.temporal_type_desc,t.is_memory_optimized,t.is_filetable,t.is_tracked_by_cdc FROM sys.tables t JOIN sys.schemas s ON s.schema_id=t.schema_id ORDER BY s.name,t.name"
+        ).await.map_err(db_error)?.into_first_result().await.map_err(db_error)?;
+        for row in table_rows {
+            let schema = row.get::<&str,_>("schema_name").unwrap_or_default().to_owned();
+            if request.namespace.as_deref().is_some_and(|wanted| wanted != schema) { continue; }
+            let name = row.get::<&str,_>("object_name").unwrap_or_default().to_owned();
+            let object_id = row.get::<i32,_>("object_id").unwrap_or_default();
+            let columns = client.query(
+                "SELECT c.name,TYPE_NAME(c.user_type_id) AS data_type,c.is_nullable,c.is_computed,c.is_identity FROM sys.columns c WHERE c.object_id=@P1 ORDER BY c.column_id",
+                &[&object_id],
+            ).await.map_err(db_error)?.into_first_result().await.map_err(db_error)?;
+            let permissions = client.query(
+                "SELECT principal.name AS grantee,permission.permission_name,permission.state_desc,permission.minor_id,column_info.name AS column_name FROM sys.database_permissions permission LEFT JOIN sys.database_principals principal ON principal.principal_id=permission.grantee_principal_id LEFT JOIN sys.columns column_info ON column_info.object_id=permission.major_id AND column_info.column_id=permission.minor_id WHERE permission.class_desc='OBJECT_OR_COLUMN' AND permission.major_id=@P1 ORDER BY principal.name,permission.permission_name,permission.minor_id",
+                &[&object_id],
+            ).await.map_err(db_error)?.into_first_result().await.map_err(db_error)?;
+            let predicates = client.query(
+                "SELECT policy.name AS policy_name,policy.is_enabled,policy.is_schema_bound,predicate.predicate_type_desc,predicate.operation_desc,predicate.predicate_definition FROM sys.security_policies policy JOIN sys.security_predicates predicate ON predicate.object_id=policy.object_id WHERE predicate.target_object_id=@P1 ORDER BY policy.name,predicate.operation_desc",
+                &[&object_id],
+            ).await.map_err(db_error)?.into_first_result().await.map_err(db_error)?;
+            let triggers = client.query(
+                "SELECT trigger_info.name,trigger_info.is_disabled,trigger_info.is_instead_of_trigger,module.definition FROM sys.triggers trigger_info LEFT JOIN sys.sql_modules module ON module.object_id=trigger_info.object_id WHERE trigger_info.parent_id=@P1 ORDER BY trigger_info.name",
+                &[&object_id],
+            ).await.map_err(db_error)?.into_first_result().await.map_err(db_error)?;
+            resources.push(DiscoveredResource {
+                namespace: Some(schema),
+                name,
+                kind: ResourceKind::Table,
+                owner: None,
+                attributes: json!({
+                    "temporal_type": row.get::<&str,_>("temporal_type_desc").unwrap_or_default(),
+                    "memory_optimized": row.get::<bool,_>("is_memory_optimized").unwrap_or(false),
+                    "is_filetable": row.get::<bool,_>("is_filetable").unwrap_or(false),
+                    "change_data_capture": row.get::<bool,_>("is_tracked_by_cdc").unwrap_or(false),
+                    "columns": columns.iter().map(|column| json!({
+                        "name": column.get::<&str,_>("name").unwrap_or_default(),
+                        "type": column.get::<&str,_>("data_type").unwrap_or_default(),
+                        "nullable": column.get::<bool,_>("is_nullable").unwrap_or(true),
+                        "computed": column.get::<bool,_>("is_computed").unwrap_or(false),
+                        "identity": column.get::<bool,_>("is_identity").unwrap_or(false)
+                    })).collect::<Vec<_>>(),
+                    "permissions": permissions.iter().map(|permission| json!({
+                        "grantee": permission.get::<&str,_>("grantee").unwrap_or_default(),
+                        "permission": permission.get::<&str,_>("permission_name").unwrap_or_default(),
+                        "state": permission.get::<&str,_>("state_desc").unwrap_or_default(),
+                        "column_id": permission.get::<i32,_>("minor_id").unwrap_or_default(),
+                        "column": permission.get::<&str,_>("column_name")
+                    })).collect::<Vec<_>>(),
+                    "security_predicates": predicates.iter().map(|predicate| json!({
+                        "policy": predicate.get::<&str,_>("policy_name").unwrap_or_default(),
+                        "enabled": predicate.get::<bool,_>("is_enabled").unwrap_or(false),
+                        "schema_bound": predicate.get::<bool,_>("is_schema_bound").unwrap_or(false),
+                        "predicate_type": predicate.get::<&str,_>("predicate_type_desc").unwrap_or_default(),
+                        "operation": predicate.get::<&str,_>("operation_desc").unwrap_or_default(),
+                        "definition": predicate.get::<&str,_>("predicate_definition")
+                    })).collect::<Vec<_>>(),
+                    "triggers": triggers.iter().map(|trigger| json!({
+                        "name": trigger.get::<&str,_>("name").unwrap_or_default(),
+                        "disabled": trigger.get::<bool,_>("is_disabled").unwrap_or(false),
+                        "instead_of": trigger.get::<bool,_>("is_instead_of_trigger").unwrap_or(false),
+                        "definition": trigger.get::<&str,_>("definition")
+                    })).collect::<Vec<_>>()
+                }),
+            });
+        }
+
+        let view_rows = client.simple_query(
+            "SELECT s.name AS schema_name,v.name AS object_name,v.object_id,v.with_check_option,OBJECTPROPERTY(v.object_id,'IsSchemaBound') AS is_schema_bound,m.definition,USER_NAME(o.principal_id) AS owner_name FROM sys.views v JOIN sys.schemas s ON s.schema_id=v.schema_id JOIN sys.objects o ON o.object_id=v.object_id LEFT JOIN sys.sql_modules m ON m.object_id=v.object_id ORDER BY s.name,v.name"
+        ).await.map_err(db_error)?.into_first_result().await.map_err(db_error)?;
+        for row in view_rows {
+            let schema = row.get::<&str,_>("schema_name").unwrap_or_default().to_owned();
+            if request.namespace.as_deref().is_some_and(|wanted| wanted != schema) { continue; }
+            resources.push(DiscoveredResource {
+                namespace: Some(schema),
+                name: row.get::<&str,_>("object_name").unwrap_or_default().to_owned(),
+                kind: ResourceKind::View,
+                owner: row.get::<&str,_>("owner_name").map(str::to_owned),
+                attributes: json!({
+                    "with_check_option": row.get::<bool,_>("with_check_option").unwrap_or(false),
+                    "schema_bound": row.get::<bool,_>("is_schema_bound").unwrap_or(false),
+                    "definition": row.get::<&str,_>("definition")
+                }),
+            });
+        }
+
+        let routine_rows = client.simple_query(
+            "SELECT s.name AS schema_name,o.name AS object_name,o.type_desc,USER_NAME(o.principal_id) AS owner_name,m.definition,m.execute_as_principal_id,m.is_schema_bound FROM sys.objects o JOIN sys.schemas s ON s.schema_id=o.schema_id LEFT JOIN sys.sql_modules m ON m.object_id=o.object_id WHERE o.type IN ('P','FN','IF','TF','FS','FT') ORDER BY s.name,o.name"
+        ).await.map_err(db_error)?.into_first_result().await.map_err(db_error)?;
+        for row in routine_rows {
+            let schema = row.get::<&str,_>("schema_name").unwrap_or_default().to_owned();
+            if request.namespace.as_deref().is_some_and(|wanted| wanted != schema) { continue; }
+            let type_desc = row.get::<&str,_>("type_desc").unwrap_or_default();
+            let kind = if type_desc.contains("PROCEDURE") { ResourceKind::Procedure } else { ResourceKind::Function };
+            resources.push(DiscoveredResource {
+                namespace: Some(schema),
+                name: row.get::<&str,_>("object_name").unwrap_or_default().to_owned(),
+                kind,
+                owner: row.get::<&str,_>("owner_name").map(str::to_owned),
+                attributes: json!({
+                    "type": type_desc,
+                    "definition": row.get::<&str,_>("definition"),
+                    "execute_as_principal_id": row.get::<i32,_>("execute_as_principal_id"),
+                    "schema_bound": row.get::<bool,_>("is_schema_bound").unwrap_or(false)
+                }),
+            });
+        }
+
+        let principals = client.simple_query(
+            "SELECT principal.name,principal.type_desc,principal.authentication_type_desc,principal.is_fixed_role,principal.default_schema_name FROM sys.database_principals principal WHERE principal.type NOT IN ('A','R') OR principal.is_fixed_role=1 ORDER BY principal.name"
+        ).await.map_err(db_error)?.into_first_result().await.map_err(db_error)?;
+        let role_memberships = client.simple_query(
+            "SELECT role_principal.name AS role_name,member_principal.name AS member_name FROM sys.database_role_members membership JOIN sys.database_principals role_principal ON role_principal.principal_id=membership.role_principal_id JOIN sys.database_principals member_principal ON member_principal.principal_id=membership.member_principal_id ORDER BY role_principal.name,member_principal.name"
+        ).await.map_err(db_error)?.into_first_result().await.map_err(db_error)?;
+        let database_permissions = client.simple_query(
+            "SELECT principal.name AS grantee,permission.permission_name,permission.state_desc FROM sys.database_permissions permission JOIN sys.database_principals principal ON principal.principal_id=permission.grantee_principal_id WHERE permission.class_desc='DATABASE' ORDER BY principal.name,permission.permission_name"
+        ).await.map_err(db_error)?.into_first_result().await.map_err(db_error)?;
+        let can_view_definition = identity.get::<bool,_>("can_view_definition").unwrap_or(false);
+        let is_sysadmin = identity.get::<i32,_>("is_sysadmin").unwrap_or(0) == 1;
+        let target_attributes = json!({
+            "database": identity.get::<&str,_>("database_name").unwrap_or_default(),
+            "original_login": identity.get::<&str,_>("login_name").unwrap_or_default(),
+            "database_user": identity.get::<&str,_>("database_user").unwrap_or_default(),
+            "server_version": identity.get::<&str,_>("server_version").unwrap_or_default(),
+            "can_view_definition": can_view_definition,
+            "is_sysadmin": is_sysadmin,
+            "principals": principals.iter().map(|principal| json!({
+                "name": principal.get::<&str,_>("name").unwrap_or_default(),
+                "type": principal.get::<&str,_>("type_desc").unwrap_or_default(),
+                "authentication": principal.get::<&str,_>("authentication_type_desc").unwrap_or_default(),
+                "fixed_role": principal.get::<bool,_>("is_fixed_role").unwrap_or(false),
+                "default_schema": principal.get::<&str,_>("default_schema_name")
+            })).collect::<Vec<_>>(),
+            "role_memberships": role_memberships.iter().map(|membership| json!({
+                "role": membership.get::<&str,_>("role_name").unwrap_or_default(),
+                "member": membership.get::<&str,_>("member_name").unwrap_or_default()
+            })).collect::<Vec<_>>(),
+            "database_permissions": database_permissions.iter().map(|permission| json!({
+                "grantee": permission.get::<&str,_>("grantee").unwrap_or_default(),
+                "permission": permission.get::<&str,_>("permission_name").unwrap_or_default(),
+                "state": permission.get::<&str,_>("state_desc").unwrap_or_default()
+            })).collect::<Vec<_>>(),
+            "encrypted_transport_required": true
+        });
+        let fingerprint = digest(&serde_json::to_vec(&json!({"target":target_attributes,"resources":resources}))
+            .map_err(|_| error("fingerprint_serialization_failed", "Could not serialize SQL Server catalog state."))?);
+        let mut findings = Vec::new();
+        if !can_view_definition && !is_sysadmin {
+            findings.push(SecurityFinding {
+                code: "sql_server_catalog_visibility_incomplete".into(),
+                resource: None,
+                detail: "The inspection principal lacks database VIEW DEFINITION and is not sysadmin; catalog visibility may be filtered.".into(),
+            });
+        }
+        if is_sysadmin {
+            findings.push(SecurityFinding {
+                code: "sql_server_inspection_principal_sysadmin".into(),
+                resource: None,
+                detail: "The catalog inspection principal is sysadmin. Use a dedicated least-privilege inspection identity for production assessments.".into(),
+            });
+        }
+        Ok(DiscoverySnapshot {
+            database_kind: DatabaseKind::SqlServer,
+            target: request.target.clone(),
+            completeness: if can_view_definition || is_sysadmin { InspectionCompleteness::Complete } else { InspectionCompleteness::Incomplete },
+            target_attributes,
+            resources,
+            findings,
+            fingerprint: Some(fingerprint),
+            observed_at: chrono::Utc::now().to_rfc3339(),
+        })
+    }
+}
+
+impl DatabaseAdapter for SqlServerCatalogAdapter {
+    fn descriptor(&self) -> AdapterDescriptor {
+        AdapterDescriptor {
+            kind: DatabaseKind::SqlServer,
+            name: "Microsoft SQL Server catalog adapter",
+            maturity: AdapterMaturity::InDevelopment,
+            capabilities: AdapterCapabilities { schema_inspection: true, policy_generation: true, drift_detection: true, ..AdapterCapabilities::default() },
+            status_note: "Encrypted TDS catalog discovery covers tables, columns, object permissions, RLS predicates, triggers, views, routines, principals, role membership and database permissions. Trusted SESSION_CONTEXT binding, controlled deployment, independent semantic probes and signed admission remain unavailable.",
+        }
+    }
+
+    fn discover<'a>(&'a self, request: &'a DiscoveryRequest) -> AdapterFuture<'a, Result<DiscoverySnapshot, AdapterError>> {
+        Box::pin(async move { self.discover_inner(request).await })
+    }
+
+    fn inspect<'a>(&'a self, request: &'a InspectionRequest) -> AdapterFuture<'a, Result<InspectionSnapshot, AdapterError>> {
+        Box::pin(async move {
+            self.validate_target(&request.target)?;
+            request.policy.validate().map_err(|_| error("invalid_policy", "The canonical tenant policy failed validation."))?;
+            let discovery = self.discover_inner(&DiscoveryRequest { target: request.target.clone(), namespace: None }).await?;
+            let mut findings = discovery.findings.clone();
+            let mut resources = Vec::with_capacity(request.policy.resources.len());
+            for protected in &request.policy.resources {
+                if protected.resource.kind != ResourceKind::Table {
+                    return Err(error("unsupported_sql_server_policy_resource", "The current SQL Server RLS compiler manages tables only."));
+                }
+                let found = discovery.resources.iter().find(|resource| {
+                    resource.namespace == protected.resource.namespace && resource.name == protected.resource.name
+                        && resource.kind == ResourceKind::Table
+                });
+                let mut resource_findings = Vec::new();
+                let Some(found) = found else {
+                    resource_findings.push(finding("protected_resource_not_found", &protected.resource, "The registered SQL Server table was not visible in sys.tables."));
+                    findings.extend(resource_findings.clone());
+                    resources.push(ResourceInspection {
+                        resource: protected.clone(), completeness: InspectionCompleteness::Incomplete,
+                        posture: SecurityPosture::Blocked, verified_operations: Vec::new(),
+                        findings: resource_findings, fingerprint: None,
+                    });
+                    continue;
+                };
+                let columns = found.attributes["columns"].as_array().cloned().unwrap_or_default();
+                let tenant_column = columns.iter().find(|column| column["name"].as_str() == Some(protected.tenant_key.as_str()));
+                match tenant_column {
+                    None => resource_findings.push(finding("tenant_ownership_column_missing", &protected.resource, "The policy tenant ownership column does not exist.")),
+                    Some(column) if column["nullable"].as_bool() != Some(false) =>
+                        resource_findings.push(finding("tenant_ownership_column_nullable", &protected.resource, "The tenant ownership column permits NULL values.")),
+                    _ => {}
+                }
+                let predicates = found.attributes["security_predicates"].as_array().cloned().unwrap_or_default();
+                let enabled = predicates.iter().any(|predicate| predicate["enabled"].as_bool() == Some(true));
+                if !enabled {
+                    resource_findings.push(finding("sql_server_rls_policy_missing_or_disabled", &protected.resource, "No enabled SQL Server security policy predicate protects this table."));
+                }
+                let has_filter = predicates.iter().any(|predicate| predicate["enabled"].as_bool() == Some(true) && predicate["predicate_type"].as_str() == Some("FILTER"));
+                let has_after_insert = predicates.iter().any(|predicate| predicate["enabled"].as_bool() == Some(true) && predicate["operation"].as_str() == Some("AFTER INSERT"));
+                let has_before_update = predicates.iter().any(|predicate| predicate["enabled"].as_bool() == Some(true) && predicate["operation"].as_str() == Some("BEFORE UPDATE"));
+                let has_after_update = predicates.iter().any(|predicate| predicate["enabled"].as_bool() == Some(true) && predicate["operation"].as_str() == Some("AFTER UPDATE"));
+                let has_before_delete = predicates.iter().any(|predicate| predicate["enabled"].as_bool() == Some(true) && predicate["operation"].as_str() == Some("BEFORE DELETE"));
+                if protected.operations.contains(&Operation::Read) && !has_filter {
+                    resource_findings.push(finding("sql_server_filter_predicate_missing", &protected.resource, "Read operations require an enabled FILTER predicate."));
+                }
+                if protected.operations.contains(&Operation::Create) && !has_after_insert {
+                    resource_findings.push(finding("sql_server_insert_block_predicate_missing", &protected.resource, "Create operations require an AFTER INSERT block predicate."));
+                }
+                if protected.operations.contains(&Operation::Update) && !(has_before_update && has_after_update) {
+                    resource_findings.push(finding("sql_server_update_block_predicates_incomplete", &protected.resource, "Update isolation requires both BEFORE UPDATE and AFTER UPDATE block predicates to prevent cross-tenant row reassignment."));
+                }
+                if protected.operations.contains(&Operation::Delete) && !has_before_delete {
+                    resource_findings.push(finding("sql_server_delete_block_predicate_missing", &protected.resource, "Delete operations require a BEFORE DELETE block predicate."));
+                }
+                if !predicates.is_empty() && !predicates.iter().any(|predicate| predicate["definition"].as_str().is_some_and(|definition| definition.to_ascii_uppercase().contains("SESSION_CONTEXT"))) {
+                    resource_findings.push(finding("sql_server_tenant_context_predicate_missing", &protected.resource, "The enabled RLS predicate definitions do not reference SESSION_CONTEXT; verify that they bind rows to authenticated tenant identity."));
+                }
+                resource_findings.push(finding("sql_server_session_context_trust_unverified", &protected.resource, "SESSION_CONTEXT is settable by a database session unless the application/gateway boundary prevents untrusted callers from setting tenant identity."));
+                let resource_fingerprint = digest(&serde_json::to_vec(&found.attributes)
+                    .map_err(|_| error("fingerprint_serialization_failed", "Could not serialize SQL Server resource inspection."))?);
+                findings.extend(resource_findings.clone());
+                resources.push(ResourceInspection {
+                    resource: protected.clone(),
+                    completeness: discovery.completeness,
+                    posture: SecurityPosture::NeedsAttention,
+                    verified_operations: Vec::new(),
+                    findings: resource_findings,
+                    fingerprint: Some(resource_fingerprint),
+                });
+            }
+            Ok(InspectionSnapshot {
+                database_kind: DatabaseKind::SqlServer,
+                target: request.target.clone(),
+                completeness: discovery.completeness,
+                posture: SecurityPosture::NeedsAttention,
+                resources,
+                findings,
+                fingerprint: discovery.fingerprint,
+                observed_at: discovery.observed_at,
+            })
+        })
+    }
+
+    fn compile_policy(&self, policy: &TenantSecurityPolicy) -> Result<CompiledPolicy, AdapterError> { compile_sql_server(policy) }
+
+    fn verify<'a>(&'a self, policy: &'a TenantSecurityPolicy, snapshot: &'a InspectionSnapshot) -> AdapterFuture<'a, Result<VerificationReport, AdapterError>> {
+        Box::pin(async move {
+            if snapshot.database_kind != DatabaseKind::SqlServer || snapshot.target.target_id != self.target_id
+                || snapshot.target.database_name != self.database_name {
+                return Err(error("sql_server_snapshot_target_mismatch", "The inspection snapshot does not belong to this SQL Server adapter target."));
+            }
+            let mut findings = snapshot.findings.clone();
+            findings.push(SecurityFinding {
+                code: "sql_server_independent_tenant_probes_required".into(),
+                resource: None,
+                detail: format!("{} protected tables require own-tenant allow and cross-tenant deny probes for read/create/update/delete.", policy.resources.len()),
+            });
+            findings.push(SecurityFinding {
+                code: "sql_server_runtime_tenant_binding_unavailable".into(),
+                resource: None,
+                detail: "No trusted SQL Server protocol gateway currently binds authenticated tenant identity to an unforgeable SESSION_CONTEXT value.".into(),
+            });
+            Ok(VerificationReport { model_version: SECURITY_MODEL_VERSION.into(), posture: SecurityPosture::Blocked, inspection: snapshot.completeness, findings })
+        })
+    }
+
+    fn detect_drift<'a>(&'a self, target: &'a AdapterTarget, previous_fingerprint: Option<&'a str>) -> AdapterFuture<'a, Result<DriftReport, AdapterError>> {
+        Box::pin(async move {
+            self.validate_target(target)?;
+            if previous_fingerprint.is_some_and(|value| value.len() != 64 || hex::decode(value).map_or(true, |bytes| bytes.len() != 32)) {
+                return Err(error("invalid_previous_fingerprint", "The previous fingerprint must be a 32-byte hexadecimal SHA-256 digest."));
+            }
+            let snapshot = self.discover_inner(&DiscoveryRequest { target: target.clone(), namespace: None }).await?;
+            Ok(DriftReport {
+                database_kind: DatabaseKind::SqlServer, target: target.clone(),
+                detected: previous_fingerprint.is_some_and(|previous| Some(previous) != snapshot.fingerprint.as_deref()),
+                completeness: snapshot.completeness, previous_fingerprint: previous_fingerprint.map(str::to_owned),
+                observed_fingerprint: snapshot.fingerprint, findings: snapshot.findings, observed_at: snapshot.observed_at,
+            })
+        })
+    }
+}
+
+fn finding(code: &str, resource: &ResourceRef, detail: &str) -> SecurityFinding {
+    SecurityFinding { code: code.into(), resource: Some(resource.clone()), detail: detail.into() }
+}
+
+fn digest(bytes: &[u8]) -> String {
+    let mut hash = Sha256::new();
+    hash.update(bytes);
+    hex::encode(hash.finalize())
+}
+
+fn error(code: &str, detail: &str) -> AdapterError {
+    AdapterError { code: code.into(), detail: detail.into(), retryable: false }
+}
+
+fn db_error(_error: impl std::fmt::Display) -> AdapterError {
+    AdapterError { code: "sql_server_catalog_operation_failed".into(), detail: "The encrypted SQL Server catalog operation failed.".into(), retryable: true }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_unverified_sql_server_transport_options() {
+        assert!(SqlServerCatalogAdapter::new("target", "app", "Server=localhost;Database=app;TrustServerCertificate=true").is_err());
+        assert!(SqlServerCatalogAdapter::new("target", "app", "Server=localhost;Database=app;Encrypt=false").is_err());
+    }
+
+    #[test]
+    fn rejects_invalid_database_target() {
+        assert!(SqlServerCatalogAdapter::new("", "app", "Server=localhost;Database=app").is_err());
+        assert!(SqlServerCatalogAdapter::new("target", "", "Server=localhost;Database=app").is_err());
+    }
+}
