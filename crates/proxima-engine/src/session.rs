@@ -19,6 +19,8 @@ const POSTGRES_IDENTIFIER_MAX_BYTES: usize = 63;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EstablishedSession {
     pub tenant_context: Option<TenantContext>,
+    /// Database selected by the PostgreSQL startup packet after Engine role routing.
+    pub database_name: String,
 }
 
 pub async fn establish(
@@ -36,13 +38,18 @@ pub async fn establish(
         } => {
             let (startup, tenant_context) =
                 prepare_startup(protocol_version, parameters, verifier, tenant_role_prefix)?;
+            let database_name = startup.parameters.iter()
+                .find(|(key, _)| key == "database")
+                .map(|(_, value)| value.clone())
+                .or_else(|| startup.parameters.iter().find(|(key, _)| key == "user").map(|(_, value)| value.clone()))
+                .unwrap_or_default();
             debug!(
                 tenant_bound = tenant_context.is_some(),
                 "PostgreSQL startup packet received"
             );
             forward_startup(&mut upstream, &startup).await?;
             broker_startup_authentication(&mut client, &mut upstream).await?;
-            Ok((client, upstream, EstablishedSession { tenant_context }))
+            Ok((client, upstream, EstablishedSession { tenant_context, database_name }))
         }
         StartupPacket::SslRequest => {
             upstream
