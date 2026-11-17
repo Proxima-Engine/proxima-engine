@@ -148,6 +148,7 @@ impl RedisCatalogAdapter {
         // Exclude volatile INFO server uptime/client metrics and INFO keyspace key counts.
         // Fingerprint only ACL/identity/version state relevant to authorization posture.
         let fingerprint = digest(&serde_json::to_vec(&json!({
+            "target_id": self.target_id,
             "database_index": self.database_index,
             "authenticated_acl_user": whoami,
             "server_version": info_field(&server_info, "redis_version").unwrap_or_else(|| "unknown".into()),
