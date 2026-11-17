@@ -493,3 +493,53 @@ pub fn compile_oracle_vpd(policy: &TenantSecurityPolicy) -> Result<CompiledPolic
     }
     Ok(CompiledPolicy { database_kind: DatabaseKind::Oracle, policy_id: policy.policy_id.clone(), revision: policy.revision, changes, requires_approval: true })
 }
+
+
+#[cfg(test)]
+mod oracle_vpd_tests {
+    use super::*;
+
+    fn oracle_policy() -> TenantSecurityPolicy {
+        TenantSecurityPolicy {
+            schema_version: crate::security_core::SECURITY_MODEL_VERSION.into(),
+            policy_id: "oracle-tenant-boundary".into(),
+            revision: 1,
+            tenant_identity_claim: "tenant_id".into(),
+            resources: vec![ProtectedResource {
+                resource: crate::security_core::ResourceRef {
+                    namespace: Some("APP".into()),
+                    name: "ORDERS".into(),
+                    kind: ResourceKind::Table,
+                },
+                tenant_key: "TENANT_ID".into(),
+                operations: vec![Operation::Read, Operation::Create, Operation::Update, Operation::Delete],
+            }],
+        }
+    }
+
+    #[test]
+    fn oracle_compiles_vpd_with_secure_context_and_write_check() {
+        let compiled = compile_oracle_vpd(&oracle_policy()).unwrap();
+        assert_eq!(compiled.database_kind, DatabaseKind::Oracle);
+        assert!(compiled.requires_approval);
+        let batches = compiled.changes[0].definition["plsql_batches"].as_array().unwrap();
+        let sql = batches.iter().filter_map(|value| value.as_str()).collect::<Vec<_>>().join("\n");
+        assert!(sql.contains("DBMS_RLS.ADD_POLICY"));
+        assert!(sql.contains("SYS_CONTEXT('PROXIMA_TENANT_CTX','TENANT_ID')"));
+        assert!(sql.contains("update_check => TRUE"));
+        assert!(sql.contains("RETURN '1=0'"));
+        assert!(sql.contains("PROXIMA_TRUSTED_ASSERTION_VERIFY"));
+        assert!(sql.contains("statement_types => 'SELECT,INSERT,UPDATE,DELETE'"));
+        assert!(!sql.contains("CLIENT_IDENTIFIER"));
+    }
+
+    #[test]
+    fn oracle_rejects_missing_schema_and_execute_operations() {
+        let mut policy = oracle_policy();
+        policy.resources[0].resource.namespace = None;
+        assert_eq!(compile_oracle_vpd(&policy).unwrap_err().code, "oracle_schema_required");
+        let mut policy = oracle_policy();
+        policy.resources[0].operations.push(Operation::Execute);
+        assert_eq!(compile_oracle_vpd(&policy).unwrap_err().code, "unsupported_operation");
+    }
+}
