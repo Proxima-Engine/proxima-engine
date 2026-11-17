@@ -269,8 +269,10 @@ impl MySqlCatalogAdapter {
             .map(|row| row.try_get::<String,usize>(0).map_err(db_error))
             .collect::<Result<Vec<_>,AdapterError>>()?;
         let elevated_inspection_account = has_elevated_inspection_grants(&account_grant_statements);
-        let active_roles: Option<String> = sqlx::query_scalar("SELECT CURRENT_ROLE()")
-            .fetch_one(&mut connection).await.map_err(db_error)?;
+        let active_roles_result: Result<Option<String>, sqlx::Error> = sqlx::query_scalar("SELECT CURRENT_ROLE()")
+            .fetch_one(&mut connection).await;
+        let active_roles_available = active_roles_result.is_ok();
+        let active_roles = active_roles_result.ok().flatten();
         let global_privileges = sqlx::query(
             "SELECT PRIVILEGE_TYPE,IS_GRANTABLE FROM information_schema.USER_PRIVILEGES ORDER BY PRIVILEGE_TYPE"
         ).fetch_all(&mut connection).await.map_err(db_error)?;
@@ -284,6 +286,7 @@ impl MySqlCatalogAdapter {
             "server_version": target_row.try_get::<String,_>("server_version").map_err(db_error)?,
             "authenticated_account_grants": account_grant_statements,
             "active_roles": active_roles,
+            "active_roles_available": active_roles_available,
             "global_privileges": global_privileges.iter().map(|grant| Ok(json!({
                 "privilege": grant.try_get::<String,_>("PRIVILEGE_TYPE").map_err(db_error)?,
                 "grantable": grant.try_get::<String,_>("IS_GRANTABLE").map_err(db_error)?
