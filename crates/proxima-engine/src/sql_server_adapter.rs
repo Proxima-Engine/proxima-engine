@@ -70,7 +70,7 @@ impl SqlServerCatalogAdapter {
             .await.map_err(|_| error("sql_server_tls_login_timeout", "SQL Server encrypted login exceeded the fifteen-second deadline."))?
             .map_err(db_error)?;
         let rows = client.simple_query(
-            "SELECT DB_NAME() AS database_name, ORIGINAL_LOGIN() AS login_name, USER_NAME() AS database_user, CONVERT(nvarchar(128), SERVERPROPERTY('ProductVersion')) AS server_version, CONVERT(int,SERVERPROPERTY('ProductMajorVersion')) AS product_major_version, CONVERT(bit,HAS_PERMS_BY_NAME(DB_NAME(), 'DATABASE', 'VIEW DEFINITION')) AS can_view_definition, IS_SRVROLEMEMBER('sysadmin') AS is_sysadmin"
+            "SELECT DB_NAME() AS database_name, ORIGINAL_LOGIN() AS login_name, USER_NAME() AS database_user, CONVERT(nvarchar(128), SERVERPROPERTY('ProductVersion')) AS server_version, CONVERT(int,SERVERPROPERTY('ProductMajorVersion')) AS product_major_version, CONVERT(int,SERVERPROPERTY('EngineEdition')) AS engine_edition, CONVERT(bit,HAS_PERMS_BY_NAME(DB_NAME(), 'DATABASE', 'VIEW DEFINITION')) AS can_view_definition, IS_SRVROLEMEMBER('sysadmin') AS is_sysadmin"
         ).await.map_err(db_error)?.into_first_result().await.map_err(db_error)?;
         let row = rows.first().ok_or_else(|| error("sql_server_identity_unavailable", "SQL Server did not return authenticated connection identity metadata."))?;
         let database = row.get::<&str,_>("database_name").unwrap_or_default();
@@ -93,8 +93,9 @@ impl SqlServerCatalogAdapter {
         let can_view_definition = identity.get::<bool,_>("can_view_definition").unwrap_or(false);
         let is_sysadmin = identity.get::<i32,_>("is_sysadmin").unwrap_or(0) == 1;
         let product_major_version = identity.get::<i32,_>("product_major_version").unwrap_or(0);
-        if product_major_version < 13 {
-            return Err(error("sql_server_version_unsupported", "The SQL Server adapter requires SQL Server 2016 (major version 13) or later for native row-level security catalog support."));
+        let engine_edition = identity.get::<i32,_>("engine_edition").unwrap_or(0);
+        if product_major_version < 13 && !matches!(engine_edition, 5 | 8) {
+            return Err(error("sql_server_version_unsupported", "The SQL Server adapter requires SQL Server 2016+ or Azure SQL Database/Managed Instance for native row-level security catalog support."));
         }
         let mut resources = Vec::new();
 
@@ -283,6 +284,7 @@ impl SqlServerCatalogAdapter {
             "database_user": identity.get::<&str,_>("database_user").unwrap_or_default(),
             "server_version": identity.get::<&str,_>("server_version").unwrap_or_default(),
             "product_major_version": product_major_version,
+            "engine_edition": engine_edition,
             "can_view_definition": can_view_definition,
             "is_sysadmin": is_sysadmin,
             "principals": principals.iter().map(|principal| json!({
