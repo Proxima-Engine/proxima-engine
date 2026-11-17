@@ -54,7 +54,7 @@ async fn inspect(url: &str) -> Result<Vec<TableFinding>, Box<dyn Error>> {
         UNION
         SELECT am.roleid FROM pg_auth_members am JOIN member_roles mr ON am.member=mr.role_oid
       )
-      SELECT EXISTS(SELECT 1 FROM member_roles mr JOIN pg_roles r ON r.oid=mr.role_oid WHERE r.rolsuper OR r.rolbypassrls)
+      SELECT EXISTS(SELECT 1 FROM member_roles mr JOIN pg_roles r ON r.oid=mr.role_oid WHERE r.rolsuper OR r.rolbypassrls OR r.rolcreaterole OR r.rolcreatedb OR r.rolreplication)
         OR EXISTS(SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
           WHERE c.relkind IN ('r','p','v','m') AND n.nspname NOT IN ('pg_catalog','information_schema')
             AND (has_table_privilege(current_user,c.oid,'INSERT')
@@ -199,7 +199,7 @@ BEGIN
                AND format_type(a.atttypid,a.atttypmod) NOT LIKE 'character(%')
      THEN RAISE EXCEPTION 'Agata Proxima: tenant key type is unsupported'; END IF;
   IF owner_name = ANY({role_array}) THEN RAISE EXCEPTION 'Agata Proxima: tenant runtime roles must not own the protected table'; END IF;
-  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname=ANY({role_array}) AND (rolsuper OR rolbypassrls))
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname=ANY({role_array}) AND (rolsuper OR rolbypassrls OR rolcreaterole OR rolcreatedb OR rolreplication))
      OR (WITH RECURSIVE member_roles(role_oid) AS (
           SELECT oid FROM pg_roles WHERE rolname=ANY({role_array})
           UNION SELECT am.roleid FROM pg_auth_members am JOIN member_roles mr ON am.member=mr.role_oid
