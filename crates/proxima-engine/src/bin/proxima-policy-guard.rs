@@ -722,6 +722,55 @@ async fn main() -> Result<(),Box<dyn Error>> {
             "note": "CockroachDB discovery is read-only inventory. PostgreSQL RLS semantics are not assumed; tenant isolation is not certified and traffic is not authorized."
         }))?);
       },
+
+      Some("inspect-cockroach-policy") => {
+        let path = args.next().ok_or("usage: proxima-policy-guard inspect-cockroach-policy <policy.json>")?;
+        if args.next().is_some() { return Err("only one policy file may be supplied".into()); }
+        let policy: TenantSecurityPolicy = serde_json::from_slice(&fs::read(&path)?)?;
+        policy.validate().map_err(|error| format!("invalid policy: {error:?}"))?;
+        let url = env::var("PROXIMA_COCKROACH_ADAPTER_DATABASE_URL")
+            .map_err(|_| "set PROXIMA_COCKROACH_ADAPTER_DATABASE_URL to a CockroachDB PostgreSQL-wire URL with verified TLS")?;
+        let target_id = env::var("PROXIMA_COCKROACH_ADAPTER_TARGET_ID")
+            .map_err(|_| "set PROXIMA_COCKROACH_ADAPTER_TARGET_ID to the registered non-secret target ID")?;
+        let database_name = env::var("PROXIMA_COCKROACH_ADAPTER_DATABASE_NAME")
+            .map_err(|_| "set PROXIMA_COCKROACH_ADAPTER_DATABASE_NAME to the expected database name")?;
+        let connector_url = url.clone();
+        let connector: CockroachConnector = std::sync::Arc::new(move || {
+            let connector_url = connector_url.clone();
+            Box::pin(async move {
+                let mut config = tokio_postgres::Config::from_str(&connector_url)
+                    .map_err(|error| AdapterError { code: "invalid_cockroach_connection_config".into(), detail: error.to_string(), retryable: false })?;
+                config.ssl_mode(SslMode::Require);
+                let tls = audit_tls_connector()
+                    .map_err(|error| AdapterError { code: "cockroach_tls_configuration_failed".into(), detail: error.to_string(), retryable: false })?;
+                let (client, connection) = tokio::time::timeout(Duration::from_secs(10), config.connect(tls))
+                    .await
+                    .map_err(|error| AdapterError { code: "cockroach_connection_timeout".into(), detail: error.to_string(), retryable: true })?
+                    .map_err(|error| AdapterError { code: "cockroach_connection_failed".into(), detail: error.to_string(), retryable: error.is_closed() })?;
+                tokio::spawn(async move {
+                    if let Err(error) = connection.await {
+                        eprintln!("CockroachDB inspection connection ended: {error}");
+                    }
+                });
+                Ok(client)
+            }) as AdapterFuture<'static, Result<tokio_postgres::Client, AdapterError>>
+        });
+        let adapter = CockroachCatalogAdapter::new(target_id.clone(), database_name.clone(), connector)?;
+        let request = InspectionRequest {
+            target: AdapterTarget { target_id, database_name, namespace: None },
+            policy,
+        };
+        let snapshot = adapter.inspect(&request).await?;
+        let verification = adapter.verify(&request.policy, &snapshot).await?;
+        let decision = verification.access_decision();
+        println!("{}", serde_json::to_string_pretty(&json!({
+            "adapter": adapter.descriptor(),
+            "snapshot": snapshot,
+            "verification": verification,
+            "access_decision": decision
+        }))?);
+        if decision != AccessDecision::Allow { std::process::exit(2); }
+      },
       Some("discover-sql-server") => {
         if args.next().is_some() { return Err("usage: proxima-policy-guard discover-sql-server".into()); }
         let connection_string = env::var("PROXIMA_SQL_SERVER_ADAPTER_CONNECTION_STRING")
@@ -833,7 +882,7 @@ async fn main() -> Result<(),Box<dyn Error>> {
         let spec:Value=serde_json::from_slice(&fs::read(Path::new(&path))?)?;
         print!("{}",generate(&spec)?);
       },
-      _ => return Err("usage: proxima-policy-guard <adapters|audit|generate|validate-policy|compile-plan|discover-postgres|discover-elasticsearch|inspect-elasticsearch-policy|discover-sqlite|inspect-sqlite-policy|discover-cockroachdb|discover-mysql|discover-mariadb|inspect-mysql-policy|inspect-mariadb-policy|discover-mongodb|inspect-mongodb-policy|discover-redis|inspect-redis-policy|discover-sql-server|inspect-sql-server-policy|inspect-policy>".into())
+      _ => return Err("usage: proxima-policy-guard <adapters|audit|generate|validate-policy|compile-plan|discover-postgres|discover-elasticsearch|inspect-elasticsearch-policy|discover-sqlite|inspect-sqlite-policy|discover-cockroachdb|inspect-cockroach-policy|discover-mysql|discover-mariadb|inspect-mysql-policy|inspect-mariadb-policy|discover-mongodb|inspect-mongodb-policy|discover-redis|inspect-redis-policy|discover-sql-server|inspect-sql-server-policy|inspect-policy>".into())
     }
     Ok(())
 }
