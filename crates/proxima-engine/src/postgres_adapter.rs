@@ -52,7 +52,7 @@ impl PostgresCatalogAdapter {
         {
             return Err(error("invalid_postgres_target", "A bounded target ID and database name are required."));
         }
-        if tenant_role_prefix.is_empty() || tenant_role_prefix.len() > 63
+        if tenant_role_prefix.is_empty() || tenant_role_prefix.len() > 62
             || tenant_role_prefix.contains('\0')
             || !tenant_role_prefix.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
             || !tenant_role_prefix.as_bytes().first().is_some_and(|byte| byte.is_ascii_alphabetic() || *byte == b'_')
@@ -369,6 +369,10 @@ fn sha256(bytes: &[u8]) -> String {
 
 fn quote_ident(value: &str) -> String {
     format!("\"{}\"", value.replace('"', "\"\""))
+}
+
+fn quote_literal(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
 }
 
 fn safe_name(value: &str) -> String {
