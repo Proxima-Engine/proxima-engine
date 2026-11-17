@@ -284,9 +284,16 @@ mod tests {
     }
 
     #[test]
-    fn redis_requires_explicit_tenant_key_pattern() {
-        assert!(compile_redis_acl(&policy(ResourceKind::Keyspace, "tenant:${tenant_id}:*")).is_ok());
-        assert_eq!(compile_redis_acl(&policy(ResourceKind::Keyspace, "tenant_id")).unwrap_err().code, "redis_tenant_key_pattern_required");
+    fn redis_requires_explicit_tenant_key_pattern_and_uses_a_narrow_allowlist() {
+        let compiled = compile_redis_acl(&policy(ResourceKind::Keyspace, "tenant:${tenant_id}:*")).unwrap();
+        let acl = compiled.changes[0].definition["acl_template"].as_array().unwrap();
+        let acl_text = acl.iter().filter_map(|value| value.as_str()).collect::<Vec<_>>().join(" ");
+        assert!(acl_text.contains("+get"));
+        assert!(acl_text.contains("+set"));
+        assert!(!acl_text.contains("+@all"));
+        assert!(!acl_text.contains("+keys"));
+        assert!(compile_redis_acl(&policy(ResourceKind::Keyspace, "tenant_id")).is_err());
+        assert!(compile_redis_acl(&policy(ResourceKind::Keyspace, "*:${tenant_id}:*")).is_err());
     }
 }
  | '{' | '}'))
