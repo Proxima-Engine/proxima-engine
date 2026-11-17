@@ -321,6 +321,13 @@ impl MySqlCatalogAdapter {
                     resource: None,
                     detail: "MySQL/MariaDB information_schema visibility is privilege-filtered; this inventory is limited to objects visible to the authenticated account and cannot certify full database coverage.".into(),
                 }];
+                if !active_roles_available {
+                    findings.push(SecurityFinding {
+                        code: "mysql_active_role_state_unavailable".into(),
+                        resource: None,
+                        detail: "The server did not expose CURRENT_ROLE(); active role state must be reviewed through the authenticated account's grants before accepting an inventory.".into(),
+                    });
+                }
                 if table_inventory_truncated || routine_inventory_truncated {
                     findings.push(SecurityFinding {
                         code: "mysql_catalog_inventory_truncated".into(),
