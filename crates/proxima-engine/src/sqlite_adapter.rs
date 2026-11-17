@@ -111,7 +111,7 @@ impl SqliteCatalogAdapter {
         }
         let mut connection = self.connect_checked().await?;
         let schema_rows = sqlx::query(
-            "SELECT type,name,tbl_name,sql FROM sqlite_schema \
+            "SELECT type,name,tbl_name,sql FROM sqlite_master \
              WHERE type IN ('table','view') AND name NOT LIKE 'sqlite_%' \
              ORDER BY type,name LIMIT 10001"
         ).fetch_all(&mut connection).await.map_err(db_error)?;
@@ -136,7 +136,7 @@ impl SqliteCatalogAdapter {
                     .bind(&name).fetch_all(&mut connection).await.map_err(db_error)?
             } else { Vec::new() };
             let foreign_keys = if kind == ResourceKind::Table {
-                sqlx::query("SELECT id,seq,"table","from","to",on_update,on_delete,match FROM pragma_foreign_key_list(?) ORDER BY id,seq")
+                sqlx::query("SELECT id,seq,"table","from","to",on_update,on_delete,"match" FROM pragma_foreign_key_list(?) ORDER BY id,seq")
                     .bind(&name).fetch_all(&mut connection).await.map_err(db_error)?
             } else { Vec::new() };
             let triggers = sqlx::query(
@@ -229,7 +229,6 @@ impl SqliteCatalogAdapter {
         let application_id: i64 = sqlx::query_scalar("PRAGMA application_id").fetch_one(&mut connection).await.map_err(db_error)?;
         let target_attributes = json!({
             "database_file": file,
-            "file_size_bytes": file_metadata.len(),
             "filesystem_permissions": filesystem,
             "foreign_keys_enabled": foreign_keys_enabled,
             "journal_mode": journal_mode,
@@ -237,7 +236,7 @@ impl SqliteCatalogAdapter {
             "application_id": application_id,
             "read_only_connection": true,
             "query_only": true,
-            "trusted_schema": false
+            "inspection_connection_trusted_schema_disabled": true
         });
         let fingerprint = digest(&serde_json::to_vec(&json!({ "target": target_attributes, "resources": state }))
             .map_err(|_| error("sqlite_fingerprint_failed", "Could not serialize SQLite catalog state."))?);
@@ -398,7 +397,7 @@ fn filesystem_permissions(file: &std::fs::Metadata, parent: Option<&std::fs::Met
         let parent_mode = parent.map(|metadata| metadata.permissions().mode() & 0o777);
         FilesystemPermissions {
             assessed: true,
-            unsafe_permissions: (file_mode & 0o077) != 0 || parent_mode.is_none_or(|mode| (mode & 0o077) != 0),
+            unsafe_permissions: (file_mode & 0o077) != 0 || parent_mode.map_or(true, |mode| (mode & 0o077) != 0),
             file_mode: Some(file_mode),
             parent_mode,
         }
@@ -435,7 +434,8 @@ mod tests {
 
     #[test]
     fn descriptor_claims_discovery_only() {
-        let path = std::env::current_exe().unwrap();
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let path = file.path().to_path_buf();
         let uri = format!("sqlite://{}", path.display());
         let adapter = SqliteCatalogAdapter::new("target", path, uri).unwrap();
         let descriptor = adapter.descriptor();
