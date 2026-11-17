@@ -201,9 +201,21 @@ pub fn compile_redis_acl(policy: &TenantSecurityPolicy) -> Result<CompiledPolicy
             || prefix.contains('*')
             || !suffix.starts_with(':')
             || !resource.tenant_key.chars().all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, ':' | '_' | '-' | '*' | '
-        let mut commands = Vec::new();
-        if resource.operations.contains(&Operation::Read) { commands.push("+@read"); }
-        if resource.operations.iter().any(|op| matches!(op, Operation::Create | Operation::Update | Operation::Delete)) { commands.push("+@write"); }
+        let mut commands: Vec<&str> = Vec::new();
+        if resource.operations.contains(&Operation::Read) {
+            commands.extend([
+                "+get", "+mget", "+exists", "+ttl", "+pttl", "+type", "+strlen", "+getrange",
+                "+hget", "+hmget", "+hgetall", "+hexists", "+hlen", "+lrange", "+llen", "+lindex",
+                "+scard", "+smembers", "+sismember", "+zrange", "+zscore", "+zcard", "+xrange", "+xlen"
+            ]);
+        }
+        if resource.operations.iter().any(|op| matches!(op, Operation::Create | Operation::Update | Operation::Delete)) {
+            commands.extend([
+                "+set", "+mset", "+del", "+unlink", "+expire", "+pexpire", "+persist", "+incr", "+decr",
+                "+hset", "+hdel", "+lpush", "+rpush", "+lpop", "+rpop", "+sadd", "+srem",
+                "+zadd", "+zrem", "+xadd", "+xdel"
+            ]);
+        }
         if commands.is_empty() { return Err(error("empty_privilege_set", "No supported Redis command category was requested.")); }
         let mut acl_template = vec!["reset".to_string(), "on".to_string(), ">${secret_manager_generated_password}".to_string(), format!("~{pattern}")];
         acl_template.extend(commands.iter().map(|value| value.to_string()));
@@ -215,7 +227,7 @@ pub fn compile_redis_acl(policy: &TenantSecurityPolicy) -> Result<CompiledPolicy
             "limitations": [
                 "The trusted gateway must authenticate the tenant and select the matching Redis ACL user.",
                 "Every key must follow the tenant key pattern; unscoped keys and keyless commands need separate policy review.",
-                "Redis ACL categories are broad command groups; production adapters must reduce them to a tested command allowlist.",
+                "The generated ACL uses a narrow baseline core-command allowlist; production adapters must validate command key specifications, multi-key behavior, modules, scripts and version-specific commands.",
                 "ACL users, selectors, key patterns, channels, scripts, functions, modules and replication/admin commands require inspection."
             ]
         })));
