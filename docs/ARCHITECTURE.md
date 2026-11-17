@@ -1,8 +1,8 @@
 # Proxima Engine architecture
 
-Agata Proxima provides security infrastructure for multi-tenant PostgreSQL applications. Proxima Engine is its public Rust data plane: a PostgreSQL wire-protocol gateway that verifies signed tenant context and routes each accepted connection to a tenant-specific PostgreSQL role.
+Agata Proxima is a database-independent tenant-security platform. Its Proxima Security Core defines the common policy and verification contract; database adapters implement native controls. Proxima Engine is the public Rust enforcement runtime. Its current adapter speaks the PostgreSQL wire protocol, verifies signed tenant context and routes each accepted connection to a tenant-specific PostgreSQL role. MySQL, MariaDB, SQL Server, MongoDB and CockroachDB adapters are planned and are not currently supported.
 
-Applications retain their existing PostgreSQL drivers. PostgreSQL remains the database and applies the grants and Row-Level Security (RLS) policies assigned to each tenant role.
+Applications retain their existing PostgreSQL drivers for the current adapter. PostgreSQL applies the grants and Row-Level Security (RLS) policies assigned to each tenant role. This PostgreSQL-specific request path is an adapter implementation, not the definition of the entire Agata Proxima security model.
 
 ## Request path
 
