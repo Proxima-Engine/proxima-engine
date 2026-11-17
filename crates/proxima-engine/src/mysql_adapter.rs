@@ -11,6 +11,7 @@ use crate::database_adapter::{
     InspectionRequest, InspectionSnapshot, ResourceInspection,
 };
 use crate::native_policy_plans::compile_mysql_database_boundary;
+use crate::tenant_identity::VerifiedTenantIdentity;
 use crate::security_core::{
     AdapterCapabilities, AdapterDescriptor, AdapterMaturity, DatabaseKind,
     InspectionCompleteness, Operation, ResourceKind, ResourceRef, SecurityFinding,
@@ -23,6 +24,92 @@ use sqlx::{
     Connection, Row,
 };
 use std::str::FromStr;
+
+fn grants_are_scoped_to_database(grants: &[String], database_name: &str) -> bool {
+    if grants.is_empty() || database_name.trim().is_empty() || database_name.contains('\\0') {
+        return false;
+    }
+    let escaped_database = database_name.replace('`', "``");
+    let expected_prefix = format!("`{escaped_database}`.");
+    grants.iter().all(|grant| {
+        let lower = grant.to_ascii_lowercase();
+        let Some(on_index) = lower.find(" on ") else {
+            // Role grants or unfamiliar grant syntax can expand access beyond
+            // the selected database, so the tenant session fails closed.
+            return false;
+        };
+        let privilege_clause = lower[..on_index].trim();
+        let scope = grant[on_index + 4..]
+            .split_once(" TO ")
+            .or_else(|| grant[on_index + 4..].split_once(" to "))
+            .map(|(scope, _)| scope.trim())
+            .unwrap_or_default();
+        if scope == "*.*" {
+            return privilege_clause == "grant usage";
+        }
+        scope.starts_with(&expected_prefix)
+    })
+}
+
+/// Open a database-per-tenant MySQL or MariaDB connection using a verified
+/// tenant identity. The registered target selects one tenant database; the
+/// authenticated account must have no global, wildcard, role, or other-database
+/// grants. Shared-table row isolation is not inferred from this boundary.
+pub async fn connect_tenant_session(
+    connection_url: &str,
+    target: &AdapterTarget,
+    kind: DatabaseKind,
+    identity: &VerifiedTenantIdentity,
+) -> Result<MySqlConnection, AdapterError> {
+    if !matches!(kind, DatabaseKind::MySql | DatabaseKind::MariaDb)
+        || identity.database_kind() != kind
+        || identity.target_id() != target.target_id
+    {
+        return Err(error("mysql_tenant_identity_scope_mismatch", "The verified tenant identity does not match this MySQL/MariaDB target."));
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|_| error("mysql_tenant_identity_clock_invalid", "The system clock is before the Unix epoch."))?
+        .as_secs() as i64;
+    if identity.issued_at_unix() > now || identity.expires_at_unix() <= now {
+        return Err(error("mysql_tenant_identity_expired", "The verified tenant identity is not currently valid."));
+    }
+    let mut options = MySqlConnectOptions::from_str(connection_url)
+        .map_err(|_| error("invalid_mysql_connection_config", "The MySQL connection URL could not be parsed."))?;
+    options = options.ssl_mode(MySqlSslMode::VerifyIdentity);
+    let mut connection = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        MySqlConnection::connect_with(&options),
+    ).await.map_err(|_| error("mysql_tenant_connection_timeout", "The tenant database connection exceeded the ten-second deadline."))?
+        .map_err(db_error)?;
+
+    let row = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        sqlx::query("SELECT DATABASE() AS database_name, CURRENT_USER() AS authenticated_account")
+            .fetch_one(&mut connection),
+    ).await.map_err(|_| error("mysql_tenant_identity_timeout", "MySQL did not return connection identity within the ten-second deadline."))?
+        .map_err(db_error)?;
+    let database: Option<String> = row.try_get("database_name").map_err(db_error)?;
+    let account: String = row.try_get("authenticated_account").map_err(db_error)?;
+    if database.as_deref() != Some(target.database_name.as_str()) || account.trim().is_empty() {
+        return Err(error("mysql_tenant_target_mismatch", "The authenticated connection reached a different database or did not expose its account."));
+    }
+
+    let grant_rows = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        sqlx::query("SHOW GRANTS FOR CURRENT_USER()").fetch_all(&mut connection),
+    ).await.map_err(|_| error("mysql_tenant_grant_inspection_timeout", "MySQL grant inspection exceeded the ten-second deadline."))?
+        .map_err(db_error)?;
+    let mut grants = Vec::with_capacity(grant_rows.len());
+    for row in grant_rows {
+        let grant: String = row.try_get(0).map_err(db_error)?;
+        grants.push(grant);
+    }
+    if !grants_are_scoped_to_database(&grants, &target.database_name) {
+        return Err(error("mysql_tenant_grants_too_broad", "The authenticated MySQL account has grants outside the selected tenant database, an inherited role, or unrecognized grant syntax."));
+    }
+    Ok(connection)
+}
 
 pub struct MySqlCatalogAdapter {
     target_id: String,
@@ -660,5 +747,31 @@ mod tests {
     fn rejects_unbounded_or_empty_target_configuration() {
         assert!(MySqlCatalogAdapter::new("", "app", "mysql://localhost/app", DatabaseKind::MySql).is_err());
         assert!(MySqlCatalogAdapter::new("target", &"d".repeat(65), "mysql://localhost/app", DatabaseKind::MySql).is_err());
+    }
+}
+
+#[cfg(test)]
+mod tenant_database_grant_tests {
+    use super::grants_are_scoped_to_database;
+
+    #[test]
+    fn grant_scope_must_be_limited_to_the_selected_database() {
+        let scoped = vec![
+            "GRANT USAGE ON *.* TO 'tenant_a'@'%'".to_owned(),
+            "GRANT SELECT, INSERT, UPDATE, DELETE ON `tenant_a`.* TO 'tenant_a'@'%'".to_owned(),
+        ];
+        assert!(grants_are_scoped_to_database(&scoped, "tenant_a"));
+        assert!(!grants_are_scoped_to_database(
+            &["GRANT SELECT ON `tenant_b`.* TO 'tenant_a'@'%'".to_owned()],
+            "tenant_a",
+        ));
+        assert!(!grants_are_scoped_to_database(
+            &["GRANT SELECT ON *.* TO 'tenant_a'@'%'".to_owned()],
+            "tenant_a",
+        ));
+        assert!(!grants_are_scoped_to_database(
+            &["GRANT 'tenant_role'@'%' TO 'tenant_a'@'%'".to_owned()],
+            "tenant_a",
+        ));
     }
 }
