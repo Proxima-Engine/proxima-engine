@@ -19,6 +19,7 @@ pub enum SecurityCoreError {
     DuplicateInspectedResource(String),
     InvalidCompilation,
     DriftInspectionIncomplete,
+    DriftFingerprintMismatch,
 }
 
 impl From<AdapterError> for SecurityCoreError {
@@ -99,6 +100,18 @@ impl SecurityCoreCoordinator {
         let report = adapter.detect_drift(target, previous_fingerprint).await?;
         if report.database_kind != kind || report.target != *target { return Err(SecurityCoreError::SnapshotTargetMismatch); }
         if report.completeness != InspectionCompleteness::Complete { return Err(SecurityCoreError::DriftInspectionIncomplete); }
+        if report.observed_at.trim().is_empty() || report.observed_fingerprint.as_deref().is_none_or(str::is_empty) {
+            return Err(SecurityCoreError::DriftInspectionIncomplete);
+        }
+        if let (Some(previous), Some(observed)) = (previous_fingerprint, report.observed_fingerprint.as_deref()) {
+            let actual_drift = previous != observed;
+            if report.detected != actual_drift { return Err(SecurityCoreError::DriftFingerprintMismatch); }
+        } else if previous_fingerprint.is_some() {
+            return Err(SecurityCoreError::DriftInspectionIncomplete);
+        }
+        if report.detected && report.findings.is_empty() {
+            return Err(SecurityCoreError::DriftFingerprintMismatch);
+        }
         Ok(report)
     }
 
