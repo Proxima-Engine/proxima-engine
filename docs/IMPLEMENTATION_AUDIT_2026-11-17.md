@@ -97,3 +97,10 @@ The signed evidence payload validator also bounds policy/target/tenant identifie
 The read-only PostgreSQL inspection path also checks that each policy-declared tenant ownership column exists on the registered relation and is NOT NULL; missing or nullable tenant keys become explicit findings rather than being inferred from RLS policy presence.
 
 PostgreSQL resource inspection also checks dependent view chains for non-security-invoker views and materialized views, and flags application SECURITY DEFINER routines for explicit review. These are conservative findings; their presence does not automatically prove exploitability, but they prevent a clean isolation posture from being inferred without reviewing those alternate access paths.
+
+
+## 10. Native PostgreSQL resource discovery — 17 November 2026
+
+The database-neutral adapter contract now exposes `discover` independently of policy inspection, with typed resource inventory, adapter target, completeness, findings, fingerprint and observation time. The PostgreSQL adapter implements read-only discovery of tables, partitioned/foreign tables, views, materialized views, sequences, functions and procedures. It records owners, relation ACL/RLS state, columns/defaults, native policy expressions/roles, constraints, indexes, non-internal triggers, view definitions/options, and routine SECURITY DEFINER/execute ACL metadata. The Policy Guard CLI exposes `discover-postgres [schema]` and always labels the result as inventory only with an explicit deny decision.
+
+Discovery tests cover invalid namespace and target mismatch without opening a database connection. Live catalog discovery and supported-version compatibility remain unexecuted in this session.
