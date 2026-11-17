@@ -71,19 +71,28 @@ impl MySqlCatalogAdapter {
             MySqlConnection::connect_with(&options),
         ).await.map_err(|_| error("mysql_connection_timeout", "The MySQL TLS connection exceeded the ten-second connection deadline."))?
             .map_err(db_error)?;
-        // MySQL and MariaDB expose different session-level statement timeout variables.
-        // Attempt both; the unsupported variable is harmlessly ignored.
-        let _ = sqlx::query("SET SESSION MAX_EXECUTION_TIME=10000").execute(&mut connection).await;
-        let _ = sqlx::query("SET SESSION max_statement_time=10").execute(&mut connection).await;
-        let row = sqlx::query("SELECT DATABASE() AS database_name, CURRENT_USER() AS authenticated_account")
+        let row = sqlx::query("SELECT DATABASE() AS database_name, CURRENT_USER() AS authenticated_account, VERSION() AS server_version")
             .fetch_one(&mut connection).await.map_err(db_error)?;
         let database: Option<String> = row.try_get("database_name").map_err(db_error)?;
         let account: String = row.try_get("authenticated_account").map_err(db_error)?;
+        let version: String = row.try_get("server_version").map_err(db_error)?;
         if database.as_deref() != Some(self.database_name.as_str()) {
             return Err(error("mysql_database_mismatch", "The authenticated connection reached a different database."));
         }
         if account.trim().is_empty() {
             return Err(error("mysql_identity_unavailable", "The server did not expose an authenticated account identity."));
+        }
+        // Force subsequent autocommit statements into read-only transactions and
+        // require the vendor-specific SELECT execution deadline. Do not silently
+        // continue when the server refuses either safety setting.
+        sqlx::query("SET SESSION TRANSACTION READ ONLY")
+            .execute(&mut connection).await.map_err(db_error)?;
+        if version.to_ascii_lowercase().contains("mariadb") {
+            sqlx::query("SET SESSION max_statement_time=10")
+                .execute(&mut connection).await.map_err(db_error)?;
+        } else {
+            sqlx::query("SET SESSION MAX_EXECUTION_TIME=10000")
+                .execute(&mut connection).await.map_err(db_error)?;
         }
         // Catalog operations below are SELECT-only. No DDL, DML, role changes,
         // or privilege mutations are performed by this adapter.
