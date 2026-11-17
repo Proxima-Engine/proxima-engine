@@ -212,7 +212,10 @@ impl MySqlCatalogAdapter {
                 attributes: json!({
                     "routine_type": routine_type,
                     "security_type": row.try_get::<String,_>("SECURITY_TYPE").map_err(db_error)?,
-                    "sql_data_access": row.try_get::<String,_>("SQL_DATA_ACCESS").map_err(db_error)?
+                    "sql_data_access": row.try_get::<String,_>("SQL_DATA_ACCESS").map_err(db_error)?,
+                    "is_deterministic": row.try_get::<String,_>("IS_DETERMINISTIC").map_err(db_error)?,
+                    "sql_mode": row.try_get::<String,_>("SQL_MODE").map_err(db_error)?,
+                    "definition": row.try_get::<Option<String>,_>("ROUTINE_DEFINITION").map_err(db_error)?
                 }),
             });
         }
@@ -315,6 +318,16 @@ impl DatabaseAdapter for MySqlCatalogAdapter {
                 let mut resource_findings = Vec::new();
                 if protected.resource.kind != ResourceKind::Table {
                     resource_findings.push(finding("unsupported_mysql_policy_resource", &protected.resource, "The current database-per-tenant compiler manages tables only."));
+                }
+                if found.kind == ResourceKind::View
+                    && found.attributes["view"]["security_type"].as_str().is_some_and(|value| value.eq_ignore_ascii_case("DEFINER")) {
+                    resource_findings.push(finding("mysql_definer_view_requires_review", &protected.resource, "This view executes with definer privileges and may expose rows beyond the caller's direct grants."));
+                }
+                if found.attributes["triggers"].as_array().is_some_and(|triggers| !triggers.is_empty()) {
+                    resource_findings.push(finding("mysql_trigger_definer_requires_review", &protected.resource, "Triggers execute in a definer security context; review every trigger body and definer privilege for tenant-boundary bypasses."));
+                }
+                if found.attributes["security_type"].as_str().is_some_and(|value| value.eq_ignore_ascii_case("DEFINER")) {
+                    resource_findings.push(finding("mysql_definer_routine_requires_review", &protected.resource, "This stored routine executes with definer privileges and requires explicit tenant-boundary review."));
                 }
                 let columns = found.attributes["columns"].as_array().cloned().unwrap_or_default();
                 let tenant_column = columns.iter().find(|column| column["name"].as_str() == Some(protected.tenant_key.as_str()));
