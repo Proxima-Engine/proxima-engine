@@ -329,13 +329,64 @@ impl DatabaseAdapter for PostgresCatalogAdapter {
                 "SELECT n.nspname, c.relname, pg_catalog.pg_get_userbyid(c.relowner), c.relrowsecurity, c.relforcerowsecurity, COALESCE((SELECT string_agg(concat_ws(':',p.polname,p.polcmd,p.polpermissive::text,COALESCE(pg_catalog.pg_get_expr(p.polqual,p.polrelid),''),COALESCE(pg_catalog.pg_get_expr(p.polwithcheck,p.polrelid),''),COALESCE((SELECT string_agg(COALESCE(role_name.rolname,'PUBLIC'),',' ORDER BY COALESCE(role_name.rolname,'PUBLIC')) FROM unnest(p.polroles) policy_role(role_oid) LEFT JOIN pg_catalog.pg_roles role_name ON role_name.oid=policy_role.role_oid),'')), E'\\n' ORDER BY p.polname) FROM pg_catalog.pg_policy p WHERE p.polrelid=c.oid), ''), COALESCE(c.relacl::text,'<default>'), EXISTS(SELECT 1 FROM aclexplode(COALESCE(c.relacl,acldefault('r',c.relowner))) acl WHERE acl.grantee<>0 AND EXISTS(WITH RECURSIVE granted_roles(role_oid) AS (SELECT acl.grantee UNION SELECT am.roleid FROM pg_catalog.pg_auth_members am JOIN granted_roles parent ON am.member=parent.role_oid) SELECT 1 FROM granted_roles granted JOIN pg_catalog.pg_roles role ON role.oid=granted.role_oid WHERE role.rolsuper OR role.rolbypassrls)), (WITH RECURSIVE owner_roles(role_oid) AS (SELECT c.relowner UNION SELECT am.roleid FROM pg_catalog.pg_auth_members am JOIN owner_roles parent ON am.member=parent.role_oid) SELECT EXISTS(SELECT 1 FROM owner_roles roles JOIN pg_catalog.pg_roles inherited ON inherited.oid=roles.role_oid WHERE inherited.rolsuper OR inherited.rolbypassrls)) FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE c.relkind IN ('r','p') AND n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname NOT LIKE 'pg_%' ORDER BY n.nspname,c.relname",
                 &[],
             ).await.map_err(db_error)?;
-            let state: Vec<serde_json::Value> = rows.into_iter().map(|row| json!({
+            let mut state: Vec<serde_json::Value> = rows.into_iter().map(|row| json!({
+                "kind": "relation",
                 "schema": row.get::<_, String>(0), "table": row.get::<_, String>(1),
                 "owner": row.get::<_, String>(2), "rls_enabled": row.get::<_, bool>(3),
                 "rls_forced": row.get::<_, bool>(4), "policies": row.get::<_, String>(5),
                 "acl": row.get::<_, String>(6), "bypass_grantee": row.get::<_, bool>(7),
                 "owner_bypasses_rls": row.get::<_, bool>(8)
             })).collect();
+
+            // A relation-only fingerprint misses security changes that alter
+            // effective access without changing a table's ACL or RLS policy:
+            // role attributes, inherited memberships, and persistent role
+            // settings can all widen access or disable row security.
+            let role_rows = client.query(
+                "SELECT r.rolname, r.rolsuper, r.rolbypassrls, r.rolcreaterole, r.rolcreatedb, r.rolreplication, r.rolcanlogin, r.rolinherit, r.rolvaliduntil::text, COALESCE(array_to_string(s.setconfig, E'\\n' ORDER BY s.setconfig::text), '') FROM pg_catalog.pg_roles r LEFT JOIN pg_catalog.pg_db_role_setting s ON s.setrole=r.oid ORDER BY r.rolname, s.setdatabase",
+                &[],
+            ).await.map_err(db_error)?;
+            state.extend(role_rows.into_iter().map(|row| json!({
+                "kind": "role",
+                "name": row.get::<_, String>(0),
+                "superuser": row.get::<_, bool>(1),
+                "bypass_rls": row.get::<_, bool>(2),
+                "create_role": row.get::<_, bool>(3),
+                "create_database": row.get::<_, bool>(4),
+                "replication": row.get::<_, bool>(5),
+                "can_login": row.get::<_, bool>(6),
+                "inherit": row.get::<_, bool>(7),
+                "valid_until": row.get::<_, Option<String>>(8),
+                "settings": row.get::<_, String>(9)
+            })));
+
+            let membership_rows = client.query(
+                "SELECT granted.rolname, member.rolname, grantor.rolname, membership.admin_option FROM pg_catalog.pg_auth_members membership JOIN pg_catalog.pg_roles granted ON granted.oid=membership.roleid JOIN pg_catalog.pg_roles member ON member.oid=membership.member JOIN pg_catalog.pg_roles grantor ON grantor.oid=membership.grantor ORDER BY granted.rolname, member.rolname, grantor.rolname",
+                &[],
+            ).await.map_err(db_error)?;
+            state.extend(membership_rows.into_iter().map(|row| json!({
+                "kind": "role_membership",
+                "granted_role": row.get::<_, String>(0),
+                "member_role": row.get::<_, String>(1),
+                "grantor": row.get::<_, String>(2),
+                "admin_option": row.get::<_, bool>(3)
+            })));
+
+            let routine_rows = client.query(
+                "SELECT n.nspname, p.proname, pg_catalog.pg_get_userbyid(p.proowner), p.prosecdef, COALESCE(array_to_string(p.proconfig, ','), ''), pg_catalog.pg_get_function_identity_arguments(p.oid), pg_catalog.pg_get_functiondef(p.oid) FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace WHERE p.prosecdef AND p.prokind IN ('f','p') AND n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname NOT LIKE 'pg_%' ORDER BY n.nspname,p.proname,pg_catalog.pg_get_function_identity_arguments(p.oid)",
+                &[],
+            ).await.map_err(db_error)?;
+            state.extend(routine_rows.into_iter().map(|row| json!({
+                "kind": "security_definer_routine",
+                "schema": row.get::<_, String>(0),
+                "name": row.get::<_, String>(1),
+                "owner": row.get::<_, String>(2),
+                "security_definer": row.get::<_, bool>(3),
+                "settings": row.get::<_, String>(4),
+                "arguments": row.get::<_, String>(5),
+                "definition": row.get::<_, String>(6)
+            })));
+
             let fingerprint = sha256(&serde_json::to_vec(&state).map_err(|_| error("fingerprint_serialization_failed", "Could not serialize PostgreSQL catalog state."))?);
             let clock = client.query_one("SELECT to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"')", &[]).await.map_err(db_error)?;
             let observed_at: String = clock.get(0);
