@@ -111,7 +111,7 @@ impl DatabaseAdapter for PostgresCatalogAdapter {
                 let schema = protected.resource.namespace.as_deref().unwrap_or("public");
                 let row = client.query_opt(
                     "SELECT c.relrowsecurity, c.relforcerowsecurity, owner.rolsuper, owner.rolbypassrls, (SELECT count(*)::bigint FROM pg_catalog.pg_policies p WHERE p.schemaname=n.nspname AND p.tablename=c.relname), c.relkind::text FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace JOIN pg_catalog.pg_roles owner ON owner.oid=c.relowner WHERE n.nspname=$1 AND c.relname=$2 AND c.relkind IN ('r','p')",
-                    &[&schema, &protected.resource.name],
+                    &[&schema, &protected.resource.name.as_str()],
                 ).await.map_err(db_error)?;
 
                 let Some(row) = row else {
