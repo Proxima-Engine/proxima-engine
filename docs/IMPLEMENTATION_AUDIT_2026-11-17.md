@@ -163,3 +163,11 @@ MongoDB tenant-field validation now also rejects validators whose BSON type cons
 - Discovery inventories tables/views, columns, indexes and index columns, foreign keys, triggers, schema definitions, journal mode, file/directory permissions and WAL/SHM sidecar permission bits where visible.
 - The adapter is marked `in_development` with schema-inspection and drift-detection capabilities only. SQLite has no native per-tenant users or RLS; policy compilation and semantic verification are explicitly denied.
 - File-per-tenant selection, complete cross-platform OS ACL verification (including Windows), independent cross-tenant file-access probes, runtime admission and signed evidence remain unimplemented. No Rust build, tests or live SQLite acceptance were run.
+
+
+## Elasticsearch / OpenSearch discovery adapter added after the initial audit
+
+- Added a verified-HTTPS adapter with redirect suppression, bounded requests, registered index-pattern scoping, cluster identity inspection, index mapping/settings/alias inventory, and Elasticsearch or OpenSearch native security-role/user catalog retrieval where authorized.
+- User catalog password/hash/token fields are removed before serialization. Missing security API visibility is represented as incomplete discovery rather than a clean security state.
+- The adapter is marked `in_development` and exposes schema inspection and drift detection only. DLS/FLS enforcement, tenant-principal binding, policy compilation/deployment, independent document probes, runtime admission and signed evidence remain unimplemented.
+- Authored tests cover endpoint TLS requirements, glob matching, nested field mapping lookup and credential redaction. No build, tests or live cluster acceptance were run.
