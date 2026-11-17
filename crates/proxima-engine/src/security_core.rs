@@ -108,8 +108,8 @@ pub fn adapter_catalog() -> Vec<AdapterDescriptor> {
             kind: DatabaseKind::MySql,
             name: "MySQL",
             maturity: AdapterMaturity::InDevelopment,
-            capabilities: AdapterCapabilities { policy_generation: true, ..AdapterCapabilities::default() },
-            status_note: "Reviewable database-per-tenant grant templates require a trusted application-host scope. No shared-table row-level enforcement, native inspection, runtime principal binding or drift verification is implemented.",
+            capabilities: AdapterCapabilities { schema_inspection: true, policy_generation: true, drift_detection: true, ..AdapterCapabilities::default() },
+            status_note: "TLS-verified catalog discovery, table/schema privilege inspection and fingerprint drift detection are implemented. Database-per-tenant grant plans remain review-only; runtime principal binding and semantic verification are not implemented.",
         },
         AdapterDescriptor {
             kind: DatabaseKind::MariaDb,
