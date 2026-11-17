@@ -12,6 +12,8 @@ use crate::database_adapter::{
 };
 use crate::native_policy_plans::compile_mysql_database_boundary;
 use crate::tenant_identity::VerifiedTenantIdentity;
+use crate::connection_admission::ConnectionAdmissionGate;
+use crate::policy_evidence::{PolicyEvidenceAuthority, SignedPolicyAdmission, SignedPolicyEvidence};
 use crate::security_core::{
     AdapterCapabilities, AdapterDescriptor, AdapterMaturity, DatabaseKind,
     InspectionCompleteness, Operation, ResourceKind, ResourceRef, SecurityFinding,
@@ -53,6 +55,11 @@ pub async fn connect_tenant_session(
     target: &AdapterTarget,
     kind: DatabaseKind,
     identity: &VerifiedTenantIdentity,
+    evidence_authority: &PolicyEvidenceAuthority,
+    admission_gate: &ConnectionAdmissionGate,
+    evidence: &SignedPolicyEvidence,
+    admission: &SignedPolicyAdmission,
+    connection_id: &str,
 ) -> Result<MySqlConnection, AdapterError> {
     if !matches!(kind, DatabaseKind::MySql | DatabaseKind::MariaDb)
         || identity.database_kind() != kind
@@ -67,6 +74,14 @@ pub async fn connect_tenant_session(
     if identity.issued_at_unix() > now || identity.expires_at_unix() <= now {
         return Err(error("mysql_tenant_identity_expired", "The verified tenant identity is not currently valid."));
     }
+    admission_gate.consume_for_identity(
+        evidence_authority,
+        admission,
+        evidence,
+        identity,
+        connection_id,
+        now,
+    ).map_err(|_| error("mysql_policy_admission_denied", "A valid, fresh, one-use signed tenant policy admission is required before opening a MySQL/MariaDB session."))?;
     let mut options = MySqlConnectOptions::from_str(connection_url)
         .map_err(|_| error("invalid_mysql_connection_config", "The MySQL connection URL could not be parsed."))?;
     options = options.ssl_mode(MySqlSslMode::VerifyIdentity);
