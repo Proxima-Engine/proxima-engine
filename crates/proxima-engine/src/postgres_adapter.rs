@@ -151,12 +151,24 @@ impl DatabaseAdapter for PostgresCatalogAdapter {
                 &[],
             ).await.map_err(db_error)?;
             let observed_at: String = clock.get(0);
-            let fingerprint = sha256(&serde_json::to_vec(&resources)
+            let target_row = client.query_one(
+                "SELECT current_database(), current_user, current_setting('server_version'), current_setting('server_version_num')",
+                &[],
+            ).await.map_err(db_error)?;
+            let target_attributes = json!({
+                "database": target_row.get::<_, String>(0),
+                "authenticated_role": target_row.get::<_, String>(1),
+                "server_version": target_row.get::<_, String>(2),
+                "server_version_num": target_row.get::<_, String>(3),
+                "inspection_role_is_read_only": true
+            });
+            let fingerprint = sha256(&serde_json::to_vec(&json!({"target":target_attributes,"resources":resources}))
                 .map_err(|_| error("fingerprint_serialization_failed", "Could not serialize discovered PostgreSQL resources."))?);
             Ok(DiscoverySnapshot {
                 database_kind: DatabaseKind::PostgreSql,
                 target: request.target.clone(),
                 completeness: InspectionCompleteness::Complete,
+                target_attributes,
                 resources,
                 findings: Vec::new(),
                 fingerprint: Some(fingerprint),
