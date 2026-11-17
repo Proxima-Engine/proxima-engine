@@ -1,4 +1,5 @@
 use serde_json::{json, Value};
+use proxima_engine::security_core::{adapter_catalog, SECURITY_MODEL_VERSION};
 use std::{collections::HashSet, env, error::Error, fs, io::BufReader, path::Path, str::FromStr, time::Duration};
 use tokio_postgres::config::SslMode;
 use tokio_postgres_rustls::MakeRustlsConnect;
@@ -131,6 +132,12 @@ fn report(rows: &[TableFinding]) -> Value {
     }).collect();
     let count: usize = tables.iter().map(|t| t["findings"].as_array().map_or(0, Vec::len)).sum();
     json!({"schema":"agata-proxima.postgresql-posture.v1",
+      "security_model_version":SECURITY_MODEL_VERSION,
+      "database_kind":"postgresql",
+      "adapter_maturity":"in_development",
+      "inspection_status":"inspection_only",
+      "security_posture":"unknown",
+      "access_decision":"deny",
       "scope":"non-system ordinary and partitioned tables visible to the audit role",
       "table_count":tables.len(),"finding_count":count,
       "status":if count==0 {"no_catalog_findings"} else {"attention_required"},
@@ -276,6 +283,10 @@ $agata_proxima_preflight$;
 async fn main() -> Result<(),Box<dyn Error>> {
     let mut args=env::args().skip(1);
     match args.next().as_deref() {
+      Some("adapters") => {
+        let value=json!({"schema_version":SECURITY_MODEL_VERSION,"adapters":adapter_catalog()});
+        println!("{}",serde_json::to_string_pretty(&value)?);
+      },
       Some("audit") => {
         let url=env::var("PROXIMA_POLICY_AUDIT_DATABASE_URL").map_err(|_|"set PROXIMA_POLICY_AUDIT_DATABASE_URL to a read-only inspection URL")?;
         let value=report(&inspect(&url).await?);
@@ -287,13 +298,19 @@ async fn main() -> Result<(),Box<dyn Error>> {
         let spec:Value=serde_json::from_slice(&fs::read(Path::new(&path))?)?;
         print!("{}",generate(&spec)?);
       },
-      _ => return Err("usage: proxima-policy-guard <audit|generate>".into())
+      _ => return Err("usage: proxima-policy-guard <adapters|audit|generate>".into())
     }
     Ok(())
 }
 #[cfg(test)]
 mod tests {
  use super::*;
+ #[test] fn catalog_audit_never_claims_verified_posture() {
+   let value=report(&[]);
+   assert_eq!(value["security_posture"],"unknown");
+   assert_eq!(value["access_decision"],"deny");
+   assert_eq!(value["inspection_status"],"inspection_only");
+ }
  #[test] fn escapes_sql_names_and_values() {
    assert_eq!(ident("a\"b"),"\"a\"\"b\"");
    assert_eq!(literal("a'b"),"'a''b'");
