@@ -57,7 +57,7 @@ pub fn compile_sql_server(policy: &TenantSecurityPolicy) -> Result<CompiledPolic
         let policy_name = format!("{schema}.[proxima_policy_{suffix}]");
         let claim = policy.tenant_identity_claim.replace('\'', "''");
         let mut statements = vec![format!(
-            "CREATE OR ALTER FUNCTION {function_name}(@row_tenant_key nvarchar(450))\nRETURNS TABLE WITH SCHEMABINDING AS\nRETURN SELECT 1 AS allowed\nWHERE @row_tenant_key = CONVERT(nvarchar(450), SESSION_CONTEXT(N'{claim}'));"
+            "CREATE OR ALTER FUNCTION {function_name}(@row_tenant_key <VERIFIED_COLUMN_TYPE>)\nRETURNS TABLE WITH SCHEMABINDING AS\nRETURN SELECT 1 AS allowed\nWHERE CONVERT(nvarchar(450), @row_tenant_key) = CONVERT(nvarchar(450), SESSION_CONTEXT(N'{claim}'));"
         )];
         if resource.operations.contains(&Operation::Read) {
             statements.push(format!("ADD FILTER PREDICATE {function_name}({tenant_key}) ON {schema}.{table}"));
@@ -92,10 +92,12 @@ pub fn compile_sql_server(policy: &TenantSecurityPolicy) -> Result<CompiledPolic
             "batches": batches,
             "required_session_context": policy.tenant_identity_claim,
             "session_context_must_be_set_by": "trusted_authenticated_application_or_gateway",
+            "required_catalog_substitution": { "placeholder": "<VERIFIED_COLUMN_TYPE>", "source": "live_catalog_type_of_the_tenant_key_column" },
             "requires_operator_approval": true,
             "limitations": [
                 "The adapter must prove that untrusted clients cannot set or overwrite SESSION_CONTEXT.",
-                "The predicate function and security policy must be inspected after deployment.",
+                "The generated function contains a verified-column-type placeholder and is not executable until a live catalog inspector substitutes the exact native type.",
+                "Existing security policies require an explicit ALTER SECURITY POLICY revision; the template only creates a missing policy.",
                 "SQL Server ownership chaining, elevated principals, module signing and bypass paths require catalog verification."
             ]
         })));
@@ -247,6 +249,7 @@ mod tests {
         let batches = compiled.changes[0].definition["batches"].as_array().unwrap();
         let ddl = batches.iter().filter_map(|batch| batch.as_str()).collect::<Vec<_>>().join("\n");
         assert!(ddl.contains("SESSION_CONTEXT(N'tenant_id')"));
+        assert!(ddl.contains("<VERIFIED_COLUMN_TYPE>"));
         assert!(ddl.contains("FILTER PREDICATE"));
         assert!(ddl.contains("AFTER INSERT"));
         assert!(ddl.contains("BEFORE UPDATE"));
