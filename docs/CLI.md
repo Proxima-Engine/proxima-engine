@@ -103,7 +103,7 @@ proxima-policy-guard compile-plan mongodb policy.json
 proxima-policy-guard compile-plan redis policy.json
 ```
 
-Redirect output to a file for review, for example `proxima-policy-guard compile-plan sql_server policy.json > sql-server-plan.json`. SQL Server plans contain a `<VERIFIED_COLUMN_TYPE>` placeholder that must be resolved by a future live catalog inspector; do not execute the plan as-is. MySQL/MariaDB and MongoDB templates require one database per tenant. Redis requires a keyspace resource whose `tenant_key` uses a strict tenant-specific pattern such as `tenant:${tenant_id}:*`. These are policy-generation templates only, not live adapters or production support.
+Redirect output to a file for review, for example `proxima-policy-guard compile-plan sql_server policy.json > sql-server-plan.json`. SQL Server plans contain a `<VERIFIED_COLUMN_TYPE>` placeholder that must be resolved by a future live catalog inspector; do not execute the plan as-is. MySQL/MariaDB and MongoDB templates require one database per tenant. Redis requires a keyspace resource whose `tenant_key` uses a strict tenant-specific pattern such as `tenant:${tenant_id}:*`. These policy-generation templates are review-only. MySQL/MariaDB, MongoDB and Redis also have live native discovery/inspection paths, but none of these adapters currently deploy policies, execute independent semantic probes or provide production runtime admission.
 
 
 ## Native MySQL/MariaDB adapter
@@ -154,7 +154,7 @@ Both commands return a deny decision until a native document-level enforcement b
 
 ## Native Redis ACL adapter
 
-The Rust adapter requires a rediss:// URI and a registered logical database index. It connects with TLS, confirms the selected database using CLIENT INFO, reads the authenticated ACL user, ACL user rules, read-only/write-only/read-write key patterns, command rules, ACL categories, server version and keyspace statistics, and fingerprints the observed ACL state. Policy inspection checks required explicit commands and key-pattern modes, flags broad categories and wildcard access, and still requires independent data-plane probes. Credential hashes and plaintext-style ACL password tokens are redacted from the returned inventory; the raw ACL rules are hashed for drift detection.
+The Rust adapter requires a rediss:// URI and a registered logical database index. It rejects URL fragments, including redis-rs's #insecure fragment that disables TLS certificate verification. It connects with TLS, confirms the selected database using CLIENT INFO, reads the authenticated ACL user, ACL user rules, read-only/write-only/read-write key patterns, command rules, ACL categories, server version and keyspace statistics, and fingerprints the observed ACL state. Policy inspection checks required explicit commands and key-pattern modes, flags broad categories and wildcard access, and still requires independent data-plane probes. Credential hashes and plaintext-style ACL password tokens are redacted from the returned inventory; the raw ACL rules are hashed for drift detection.
 
 ```bash
 PROXIMA_REDIS_ADAPTER_URI='rediss://...' \\
