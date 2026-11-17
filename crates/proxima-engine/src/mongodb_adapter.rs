@@ -98,6 +98,8 @@ impl MongoCatalogAdapter {
             "showPrivileges": true
         }).await.map_err(db_error)?;
         let names = database.list_collection_names().await.map_err(db_error)?;
+        let collection_inventory_truncated = names.len() > 10_000;
+        let names = names.into_iter().take(10_000).collect::<Vec<_>>();
         let mut resources = Vec::with_capacity(names.len());
         for name in names {
             let response = database.run_command(doc! {
@@ -134,7 +136,8 @@ impl MongoCatalogAdapter {
         let target_attributes = json!({
             "database": self.database_name,
             "connection_status": bson_value(&connection_status)?,
-            "tls_certificate_verification_required": true
+            "tls_certificate_verification_required": true,
+            "collection_inventory_truncated": collection_inventory_truncated
         });
         let fingerprint = digest(&serde_json::to_vec(&json!({"target":target_attributes,"resources":resources}))
             .map_err(|_| error("fingerprint_serialization_failed", "Could not serialize MongoDB discovery results."))?);
@@ -146,11 +149,21 @@ impl MongoCatalogAdapter {
             completeness: InspectionCompleteness::Incomplete,
             target_attributes,
             resources,
-            findings: vec![SecurityFinding {
-                code: "mongodb_catalog_visibility_not_proven".into(),
-                resource: None,
-                detail: "MongoDB collection and privilege visibility is scoped to the authenticated account; a partial inventory cannot certify complete database coverage.".into(),
-            }],
+            findings: {
+                let mut findings = vec![SecurityFinding {
+                    code: "mongodb_catalog_visibility_not_proven".into(),
+                    resource: None,
+                    detail: "MongoDB collection and privilege visibility is scoped to the authenticated account; a partial inventory cannot certify complete database coverage.".into(),
+                }];
+                if collection_inventory_truncated {
+                    findings.push(SecurityFinding {
+                        code: "mongodb_collection_inventory_truncated".into(),
+                        resource: None,
+                        detail: "The visible collection/view inventory exceeded the 10,000-resource safety bound and was truncated.".into(),
+                    });
+                }
+                findings
+            },
             fingerprint: Some(fingerprint),
             observed_at: chrono::Utc::now().to_rfc3339(),
         })
