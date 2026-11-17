@@ -115,7 +115,7 @@ impl MySqlCatalogAdapter {
                  FROM information_schema.SCHEMA_PRIVILEGES WHERE TABLE_SCHEMA=? ORDER BY GRANTEE,PRIVILEGE_TYPE"
             ).bind(&schema).fetch_all(&mut connection).await.map_err(db_error)?;
             let constraints = sqlx::query(
-                "SELECT tc.CONSTRAINT_NAME,tc.CONSTRAINT_TYPE,tc.ENFORCED,kcu.COLUMN_NAME,kcu.REFERENCED_TABLE_SCHEMA,kcu.REFERENCED_TABLE_NAME,kcu.REFERENCED_COLUMN_NAME \
+                "SELECT tc.CONSTRAINT_NAME,tc.CONSTRAINT_TYPE,kcu.COLUMN_NAME,kcu.REFERENCED_TABLE_SCHEMA,kcu.REFERENCED_TABLE_NAME,kcu.REFERENCED_COLUMN_NAME \
                  FROM information_schema.TABLE_CONSTRAINTS tc \
                  LEFT JOIN information_schema.KEY_COLUMN_USAGE kcu ON kcu.CONSTRAINT_SCHEMA=tc.CONSTRAINT_SCHEMA AND kcu.TABLE_NAME=tc.TABLE_NAME AND kcu.CONSTRAINT_NAME=tc.CONSTRAINT_NAME \
                  WHERE tc.TABLE_SCHEMA=? AND tc.TABLE_NAME=? ORDER BY tc.CONSTRAINT_NAME,kcu.ORDINAL_POSITION"
@@ -168,7 +168,6 @@ impl MySqlCatalogAdapter {
                 "constraints": constraints.iter().map(|item| Ok(json!({
                     "name": item.try_get::<String,_>("CONSTRAINT_NAME").map_err(db_error)?,
                     "type": item.try_get::<String,_>("CONSTRAINT_TYPE").map_err(db_error)?,
-                    "enforced": item.try_get::<Option<String>,_>("ENFORCED").map_err(db_error)?,
                     "column": item.try_get::<Option<String>,_>("COLUMN_NAME").map_err(db_error)?,
                     "referenced_schema": item.try_get::<Option<String>,_>("REFERENCED_TABLE_SCHEMA").map_err(db_error)?,
                     "referenced_table": item.try_get::<Option<String>,_>("REFERENCED_TABLE_NAME").map_err(db_error)?,
