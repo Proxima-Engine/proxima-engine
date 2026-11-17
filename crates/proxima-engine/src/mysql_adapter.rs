@@ -225,15 +225,7 @@ impl MySqlCatalogAdapter {
         let account_grant_statements = grants.iter()
             .map(|row| row.try_get::<String,usize>(0).map_err(db_error))
             .collect::<Result<Vec<_>,AdapterError>>()?;
-        let elevated_inspection_account = account_grant_statements.iter().any(|grant| {
-            let upper = grant.to_ascii_uppercase();
-            upper.contains("ALL PRIVILEGES ON *.*")
-                || upper.contains("WITH GRANT OPTION")
-                || upper.contains(" SUPER ")
-                || upper.contains("SYSTEM_USER")
-                || upper.contains("ROLE_ADMIN")
-                || upper.contains("CREATE USER")
-        });
+        let elevated_inspection_account = has_elevated_inspection_grants(&account_grant_statements);
         let active_roles: Option<String> = sqlx::query_scalar("SELECT CURRENT_ROLE()")
             .fetch_one(&mut connection).await.map_err(db_error)?;
         let routine_privileges = sqlx::query(
@@ -439,6 +431,18 @@ impl DatabaseAdapter for MySqlCatalogAdapter {
     }
 }
 
+fn has_elevated_inspection_grants(grants: &[String]) -> bool {
+    grants.iter().any(|grant| {
+        let upper = grant.to_ascii_uppercase();
+        upper.contains("ALL PRIVILEGES ON *.*")
+            || upper.contains("WITH GRANT OPTION")
+            || upper.contains(" SUPER ")
+            || upper.contains("SYSTEM_USER")
+            || upper.contains("ROLE_ADMIN")
+            || upper.contains("CREATE USER")
+    })
+}
+
 fn finding(code: &str, resource: &ResourceRef, detail: &str) -> SecurityFinding {
     SecurityFinding { code: code.into(), resource: Some(resource.clone()), detail: detail.into() }
 }
@@ -485,6 +489,20 @@ mod tests {
         assert!(!descriptor.capabilities.controlled_policy_deployment);
         assert!(!descriptor.capabilities.runtime_fail_closed_admission);
         assert!(!descriptor.capabilities.signed_security_evidence);
+    }
+
+    #[test]
+    fn identifies_global_and_administrative_inspection_grants() {
+        assert!(has_elevated_inspection_grants(&[
+            "GRANT SELECT ON app.* TO 'auditor'@'%'".into(),
+            "GRANT ALL PRIVILEGES ON *.* TO 'auditor'@'%'".into(),
+        ]));
+        assert!(has_elevated_inspection_grants(&[
+            "GRANT SELECT ON app.* TO 'auditor'@'%' WITH GRANT OPTION".into(),
+        ]));
+        assert!(!has_elevated_inspection_grants(&[
+            "GRANT SELECT, SHOW VIEW ON app.* TO 'auditor'@'%'".into(),
+        ]));
     }
 
     #[test]
