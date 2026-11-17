@@ -27,6 +27,15 @@ The `adapters` command prints the versioned Proxima Security Core catalog. Postg
 The PostgreSQL `audit` command is a catalog posture inspection, not a semantic policy verifier. Its JSON deliberately reports `security_posture: unknown` and `access_decision: deny`, even when it finds no catalog findings. A zero exit code means the inspection completed without catalog findings; it does not certify tenant isolation.
 
 
+Validate a database-neutral policy document against the shared contract without connecting to a database:
+
+```bash
+cargo run -p proxima-engine --bin proxima-policy-guard -- validate-policy ./policy.json
+```
+
+The command checks the versioned envelope, explicit resources, tenant ownership keys and unique operations. It does not prove that any database adapter has enforced the policy.
+
+
 | Command | Purpose |
 |---|---|
 | `init` | Generate local node identity and tenant-signing credentials in `.proxima-dev/` |
