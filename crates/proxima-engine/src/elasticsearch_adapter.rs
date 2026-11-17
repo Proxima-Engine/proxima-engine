@@ -270,9 +270,20 @@ impl DatabaseAdapter for ElasticsearchCatalogAdapter {
                 }
                 if !discovery.target_attributes.get("security_catalog_visible").and_then(Value::as_bool).unwrap_or(false) {
                     resource_findings.push(finding("elasticsearch_security_roles_unavailable", &required.resource, "Native DLS/FLS role state could not be inspected."));
+                } else {
+                    let roles = discovery.target_attributes.get("roles").unwrap_or(&Value::Null);
+                    let (matching_roles, tenant_dls_roles, broad_roles) = dls_role_coverage(roles, &required.resource.name, &required.tenant_key);
+                    if matching_roles == 0 {
+                        resource_findings.push(finding("elasticsearch_no_index_role_observed", &required.resource, "No native security role with an index pattern matching this index was observed."));
+                    } else if tenant_dls_roles == 0 {
+                        resource_findings.push(finding("elasticsearch_dls_not_observed", &required.resource, "No matching index role was observed with a document-level query that references the declared tenant field."));
+                    }
+                    if broad_roles > 0 {
+                        resource_findings.push(finding("elasticsearch_broad_index_role_observed", &required.resource, "One or more matching native roles grant index access without a tenant-scoped DLS query."));
+                    }
                 }
                 if field_type.is_some() {
-                    resource_findings.push(finding("elasticsearch_dls_probe_required", &required.resource, "A mapped tenant field does not enforce document isolation; verify DLS query predicates and independent positive/negative document probes."));
+                    resource_findings.push(finding("elasticsearch_dls_probe_required", &required.resource, "A mapped tenant field and matching DLS query are not proof of enforcement; verify effective role assignment and independent positive/negative document probes."));
                 }
                 findings.extend(resource_findings.iter().cloned());
                 inspected.push(ResourceInspection {
@@ -350,6 +361,36 @@ impl DatabaseAdapter for ElasticsearchCatalogAdapter {
             })
         })
     }
+}
+
+fn dls_role_coverage(roles: &Value, index: &str, tenant_field: &str) -> (usize, usize, usize) {
+    let mut matching_roles = 0usize;
+    let mut tenant_dls_roles = 0usize;
+    let mut broad_roles = 0usize;
+    let Some(role_map) = roles.as_object() else { return (0, 0, 0) };
+    for role in role_map.values() {
+        let permissions = role.get("indices").and_then(Value::as_array)
+            .or_else(|| role.get("index_permissions").and_then(Value::as_array));
+        let Some(permissions) = permissions else { continue };
+        for permission in permissions {
+            let patterns = permission.get("names").and_then(Value::as_array)
+                .or_else(|| permission.get("index_patterns").and_then(Value::as_array));
+            let matches = patterns.is_some_and(|patterns| patterns.iter().filter_map(Value::as_str)
+                .any(|pattern| matches_index_pattern(pattern, index)));
+            if !matches { continue; }
+            matching_roles += 1;
+            let query = permission.get("query").or_else(|| permission.get("dls"));
+            let query_text = query.filter(|value| !value.is_null()).map(Value::to_string).unwrap_or_default();
+            if query_text.is_empty() {
+                broad_roles += 1;
+            } else if query_text.contains(tenant_field) {
+                tenant_dls_roles += 1;
+            } else {
+                broad_roles += 1;
+            }
+        }
+    }
+    (matching_roles, tenant_dls_roles, broad_roles)
 }
 
 fn mapping_field_type(mapping: &Value, field: &str) -> Option<String> {
