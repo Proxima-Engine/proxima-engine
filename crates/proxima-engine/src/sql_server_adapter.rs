@@ -139,7 +139,7 @@ pub async fn connect_tenant_session(
     let connected_database = rows.first()
         .and_then(|row| row.get::<&str, _>("database_name"))
         .ok_or_else(|| error("sql_server_identity_unavailable", "SQL Server did not return the selected database name."))?;
-    if !connected_database.eq_ignore_ascii_case(&target.database_name) {
+    if connected_database != target.database_name {
         return Err(error("sql_server_database_mismatch", "The tenant session connected to a different SQL Server database than requested."));
     }
 
