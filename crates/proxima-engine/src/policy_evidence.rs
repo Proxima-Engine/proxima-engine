@@ -261,11 +261,16 @@ fn operation_key(operation: Operation) -> &'static str {
 }
 
 fn required_semantic_checks(operations: &[Operation]) -> Vec<String> {
-    let mut required = Vec::with_capacity(operations.len() * 2);
+    let mut required = Vec::with_capacity(operations.len() * 3);
     for operation in operations {
         let key = operation_key(*operation);
         required.push(format!("own_tenant_allow:{key}"));
         required.push(format!("cross_tenant_deny:{key}"));
+        if matches!(operation, Operation::Create | Operation::Update | Operation::Delete) {
+            // A successful mutation probe must run inside an isolated transaction
+            // and prove that rollback leaves the target unchanged.
+            required.push(format!("mutation_rollback:{key}"));
+        }
     }
     required
 }
@@ -324,10 +329,20 @@ mod tests {
     }
 
     fn semantic_checks() -> Vec<EvidenceCheck> {
-        ["read", "create", "update", "delete"].into_iter().flat_map(|operation| [
-            EvidenceCheck { check_id: format!("own_tenant_allow:{operation}"), passed: true, detail: format!("own-tenant {operation} probe passed") },
-            EvidenceCheck { check_id: format!("cross_tenant_deny:{operation}"), passed: true, detail: format!("cross-tenant {operation} probe denied") },
-        ]).collect()
+        ["read", "create", "update", "delete"].into_iter().flat_map(|operation| {
+            let mut checks = vec![
+                EvidenceCheck { check_id: format!("own_tenant_allow:{operation}"), passed: true, detail: format!("own-tenant {operation} probe passed") },
+                EvidenceCheck { check_id: format!("cross_tenant_deny:{operation}"), passed: true, detail: format!("cross-tenant {operation} probe denied") },
+            ];
+            if operation != "read" {
+                checks.push(EvidenceCheck {
+                    check_id: format!("mutation_rollback:{operation}"),
+                    passed: true,
+                    detail: format!("own-tenant {operation} probe was rolled back"),
+                });
+            }
+            checks
+        }).collect()
     }
 
     fn evidence_payload() -> PolicyEvidencePayload {
@@ -412,6 +427,18 @@ mod tests {
         let authority = authority();
         let mut payload = evidence_payload();
         payload.checks.retain(|check| check.check_id != "cross_tenant_deny:delete");
+        let evidence = authority.sign_evidence(payload).unwrap();
+        assert_eq!(
+            authority.issue_admission(&evidence, 1_800_000_010, 30).unwrap_err().code,
+            "evidence_not_admissible"
+        );
+    }
+
+    #[test]
+    fn admission_requires_mutation_probe_rollback_evidence() {
+        let authority = authority();
+        let mut payload = evidence_payload();
+        payload.checks.retain(|check| check.check_id != "mutation_rollback:update");
         let evidence = authority.sign_evidence(payload).unwrap();
         assert_eq!(
             authority.issue_admission(&evidence, 1_800_000_010, 30).unwrap_err().code,
