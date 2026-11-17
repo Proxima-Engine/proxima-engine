@@ -46,3 +46,8 @@ Do not mark the five new database families as supported, do not advertise runtim
 - owner-run local acceptance and independent adversarial review pass.
 
 The current result is a wider Agata-owned security architecture and five policy-plan compilers—not a completed all-database production security platform.
+## 5. Production maturity gate added after this audit
+
+The adapter registry now refuses registration unless an adapter explicitly declares supported maturity and all eight end-to-end capability flags are true: schema inspection, tenant identity enforcement, semantic verification, policy generation, controlled deployment, drift detection, fail-closed runtime admission and signed evidence. The shared capability model exposes the same completeness predicate. Regression tests cover rejection of review-only/partial adapters and acceptance of a complete descriptor.
+
+This is a guard against accidentally advertising or loading an incomplete adapter. It does not implement the missing database drivers, native inspection, deployment, protocol listeners or acceptance tests, and it does not change the maturity of any database in the catalog.
