@@ -83,7 +83,8 @@ impl RedisCatalogAdapter {
         let keyspace_info = redis::cmd("INFO").arg("keyspace").query_async::<String>(&mut connection).await.map_err(db_error)?;
         let mut resources = Vec::new();
         let mut broad_users = Vec::new();
-        for line in &acl_lines {
+        let mut resource_inventory_truncated = false;
+        'acl_users: for line in &acl_lines {
             let Some((username, tokens)) = parse_acl_line(line) else { continue };
             let patterns = tokens.iter().filter_map(|token| {
                 if let Some(pattern) = token.strip_prefix("%R~") {
@@ -130,6 +131,7 @@ impl RedisCatalogAdapter {
             "acl_rule_fingerprint": acl_digest,
             "acl_rule_count": acl_rule_count,
             "acl_inventory_truncated": acl_inventory_truncated,
+            "resource_inventory_truncated": resource_inventory_truncated,
             "tls_certificate_and_hostname_verification_required": true
         });
         let fingerprint = digest(&serde_json::to_vec(&json!({"database_index":self.database_index,"target":target_attributes,"resources":resources}))
@@ -139,11 +141,11 @@ impl RedisCatalogAdapter {
             resource: None,
             detail: "Discovery inventories ACL key patterns and command rules. It does not enumerate all stored keys or prove every application operation is tenant-bound.".into(),
         }];
-        if acl_inventory_truncated {
+        if acl_inventory_truncated || resource_inventory_truncated {
             findings.push(SecurityFinding {
                 code: "redis_acl_inventory_truncated".into(),
                 resource: None,
-                detail: "Redis ACL LIST returned more than 10,000 users; the displayed inventory is bounded and cannot be treated as complete.".into(),
+                detail: "Redis ACL or key-pattern inventory exceeded the 10,000-user or 50,000-pattern safety bound; the displayed inventory is bounded and cannot be treated as complete.".into(),
             });
         }
         if !broad_users.is_empty() {
