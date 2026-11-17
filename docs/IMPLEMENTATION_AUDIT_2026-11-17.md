@@ -133,4 +133,4 @@ Added a Tiberius encrypted-TDS adapter that rejects disabled encryption and Trus
 
 The PostgreSQL discovery snapshot now also includes database/schema ACLs and ownership, default privileges, role attributes and role memberships, and full application routine definitions alongside relation metadata. The adapter descriptor now advertises its implemented fingerprint drift comparison.
 
-MongoDB discovery now includes collection index definitions in addition to validators, view pipelines, collection options and effective connection privileges; inventory is bounded to 10,000 collections. It flags broad inspection roles/any-resource privileges and uses bounded connect, server-selection and socket timeouts.
+MongoDB discovery now includes collection index definitions in addition to validators, view pipelines, collection options and effective connection privileges; inventory is bounded to 10,000 collections. It flags broad inspection roles/any-resource privileges and uses bounded connect and server-selection timeouts.
