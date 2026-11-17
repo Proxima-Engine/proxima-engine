@@ -19,3 +19,4 @@ pub mod security_core_coordinator;
 pub mod postgres_adapter;
 
 pub mod mysql_adapter;
+pub mod mongodb_adapter;
