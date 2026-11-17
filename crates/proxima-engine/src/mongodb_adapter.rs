@@ -18,7 +18,7 @@ use crate::security_core::{
 };
 use mongodb::{
     bson::{doc, Bson, Document},
-    options::ClientOptions,
+    options::{ClientOptions, ConnectionString, Tls},
     Client,
 };
 use serde_json::{json, Value};
@@ -51,12 +51,16 @@ impl MongoCatalogAdapter {
             query.split('&').filter_map(|part| part.split_once('=')).collect()
         }).unwrap_or_default();
         let parameter_is_true = |key: &str| parameters.iter().any(|(name, value)| *name == key && *value == "true");
-        let parameter_is_false = |key: &str| parameters.iter().any(|(name, value)| *name == key && *value == "false");
-        let tls_enabled = uri.starts_with("mongodb+srv://") || parameter_is_true("tls") || parameter_is_true("ssl");
-        let tls_disabled = parameter_is_false("tls") || parameter_is_false("ssl");
-        let insecure_tls = parameter_is_true("tlsinsecure")
+        let parsed = ConnectionString::parse(&connection_uri)
+            .map_err(|_| error("invalid_mongodb_connection_uri", "The MongoDB connection URI could not be parsed."))?;
+        let tls_enabled = uri.starts_with("mongodb+srv://")
+            || matches!(parsed.tls.as_ref(), Some(Tls::Enabled(_)));
+        let tls_disabled = matches!(parsed.tls.as_ref(), Some(Tls::Disabled));
+        let insecure_tls = parsed.tls_insecure() == Some(true)
+            || parameter_is_true("tlsinsecure")
             || parameter_is_true("tlsallowinvalidcertificates")
-            || parameter_is_true("tlsallowinvalidhostnames");
+            || parameter_is_true("tlsallowinvalidhostnames")
+            || matches!(parsed.tls.as_ref(), Some(Tls::Enabled(options)) if options.allow_invalid_certificates == Some(true));
         if !tls_enabled || tls_disabled || insecure_tls {
             return Err(error("mongodb_tls_verification_required", "MongoDB connections must use TLS with certificate and hostname verification; insecure TLS options are forbidden."));
         }
