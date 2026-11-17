@@ -156,7 +156,7 @@ mod tests {
         ProtectedResource, ResourceKind, ResourceRef, SECURITY_MODEL_VERSION,
     };
 
-    struct FixtureAdapter { omit_read: bool, wrong_tenant_key: bool }
+    struct FixtureAdapter { omit_read: bool, wrong_tenant_key: bool, lie_about_previous: bool }
 
     impl DatabaseAdapter for FixtureAdapter {
         fn descriptor(&self) -> AdapterDescriptor {
@@ -240,7 +240,7 @@ mod tests {
                     target: target.clone(),
                     detected: previous_fingerprint.is_some_and(|value| value != "a".repeat(64)),
                     completeness: InspectionCompleteness::Complete,
-                    previous_fingerprint: previous_fingerprint.map(str::to_owned),
+                    previous_fingerprint: if self.lie_about_previous { Some("f".repeat(64)) } else { previous_fingerprint.map(str::to_owned) },
                     observed_fingerprint: Some("a".repeat(64)),
                     findings: Vec::new(),
                     observed_at: "2026-11-17T00:00:00Z".into(),
@@ -276,7 +276,7 @@ mod tests {
 
     fn coordinator(omit_read: bool) -> SecurityCoreCoordinator {
         let mut registry = AdapterRegistry::default();
-        registry.register(std::sync::Arc::new(FixtureAdapter { omit_read, wrong_tenant_key: false })).unwrap();
+        registry.register(std::sync::Arc::new(FixtureAdapter { omit_read, wrong_tenant_key: false, lie_about_previous: false })).unwrap();
         SecurityCoreCoordinator::new(registry)
     }
 
@@ -298,7 +298,7 @@ mod tests {
     #[test]
     fn compilation_rejects_a_different_tenant_ownership_key() {
         let mut registry = AdapterRegistry::default();
-        registry.register(std::sync::Arc::new(FixtureAdapter { omit_read: false, wrong_tenant_key: true })).unwrap();
+        registry.register(std::sync::Arc::new(FixtureAdapter { omit_read: false, wrong_tenant_key: true, lie_about_previous: false })).unwrap();
         let coordinator = SecurityCoreCoordinator::new(registry);
         assert_eq!(coordinator.compile(DatabaseKind::PostgreSql, &request().policy), Err(SecurityCoreError::InvalidCompilation));
     }
@@ -311,6 +311,22 @@ mod tests {
         let report = coordinator.inspect_and_verify(DatabaseKind::PostgreSql, &request()).await.unwrap();
         assert_eq!(report.access_decision(), AccessDecision::Deny);
         assert!(report.findings.iter().any(|finding| finding.code == "tenant_ownership_key_mismatch"));
+    }
+
+    #[tokio::test]
+    async fn drift_report_cannot_substitute_the_previous_fingerprint() {
+        let mut registry = AdapterRegistry::default();
+        registry.register(std::sync::Arc::new(FixtureAdapter {
+            omit_read: false,
+            wrong_tenant_key: false,
+            lie_about_previous: true,
+        })).unwrap();
+        let coordinator = SecurityCoreCoordinator::new(registry);
+        let target = request().target;
+        assert_eq!(
+            coordinator.detect_drift(DatabaseKind::PostgreSql, &target, Some(&"a".repeat(64))).await,
+            Err(SecurityCoreError::DriftFingerprintMismatch)
+        );
     }
 
     #[test]
