@@ -60,6 +60,21 @@ pub struct AdapterCapabilities {
     pub signed_security_evidence: bool,
 }
 
+impl AdapterCapabilities {
+    /// Production support is an end-to-end claim. A compiler or a successful
+    /// connection test is not sufficient to mark an adapter supported.
+    pub fn is_production_complete(&self) -> bool {
+        self.schema_inspection
+            && self.tenant_identity_enforcement
+            && self.policy_semantic_verification
+            && self.policy_generation
+            && self.controlled_policy_deployment
+            && self.drift_detection
+            && self.runtime_fail_closed_admission
+            && self.signed_security_evidence
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct AdapterDescriptor {
     pub kind: DatabaseKind,
@@ -436,6 +451,35 @@ mod tests {
                 findings: vec![],
             };
             assert_eq!(report.access_decision(), AccessDecision::Deny);
+        }
+    }
+
+    #[test]
+    fn supported_maturity_requires_the_complete_end_to_end_capability_set() {
+        let complete = AdapterCapabilities {
+            schema_inspection: true,
+            tenant_identity_enforcement: true,
+            policy_semantic_verification: true,
+            policy_generation: true,
+            controlled_policy_deployment: true,
+            drift_detection: true,
+            runtime_fail_closed_admission: true,
+            signed_security_evidence: true,
+        };
+        assert!(complete.is_production_complete());
+        for field in 0..8 {
+            let mut partial = complete;
+            match field {
+                0 => partial.schema_inspection = false,
+                1 => partial.tenant_identity_enforcement = false,
+                2 => partial.policy_semantic_verification = false,
+                3 => partial.policy_generation = false,
+                4 => partial.controlled_policy_deployment = false,
+                5 => partial.drift_detection = false,
+                6 => partial.runtime_fail_closed_admission = false,
+                _ => partial.signed_security_evidence = false,
+            }
+            assert!(!partial.is_production_complete());
         }
     }
 
