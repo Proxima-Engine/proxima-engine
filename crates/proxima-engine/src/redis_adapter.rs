@@ -66,6 +66,16 @@ impl RedisCatalogAdapter {
         Ok(connection)
     }
 
+    async fn discover_bounded(&self, request: &DiscoveryRequest) -> Result<DiscoverySnapshot, AdapterError> {
+        tokio::time::timeout(Duration::from_secs(60), self.discover_inner(request))
+            .await
+            .map_err(|_| AdapterError {
+                code: "redis_catalog_timeout".into(),
+                detail: "Redis ACL and keyspace discovery exceeded the sixty-second operation deadline.".into(),
+                retryable: true,
+            })?
+    }
+
     async fn discover_inner(&self, request: &DiscoveryRequest) -> Result<DiscoverySnapshot, AdapterError> {
         self.validate_target(&request.target)?;
         if request.namespace.as_ref().is_some_and(|namespace| namespace != &self.database_index.to_string()) {
@@ -182,7 +192,7 @@ impl DatabaseAdapter for RedisCatalogAdapter {
     }
 
     fn discover<'a>(&'a self, request: &'a DiscoveryRequest) -> AdapterFuture<'a, Result<DiscoverySnapshot, AdapterError>> {
-        Box::pin(async move { self.discover_inner(request).await })
+        Box::pin(async move { self.discover_bounded(request).await })
     }
 
     fn inspect<'a>(&'a self, request: &'a InspectionRequest) -> AdapterFuture<'a, Result<InspectionSnapshot, AdapterError>> {
@@ -308,7 +318,7 @@ impl DatabaseAdapter for RedisCatalogAdapter {
             if previous_fingerprint.is_some_and(|value| value.len() != 64 || hex::decode(value).map_or(true, |bytes| bytes.len() != 32)) {
                 return Err(error("invalid_previous_fingerprint", "The previous fingerprint must be a 32-byte hexadecimal SHA-256 digest."));
             }
-            let snapshot = self.discover_inner(&DiscoveryRequest { target: target.clone(), namespace: None }).await?;
+            let snapshot = self.discover_bounded(&DiscoveryRequest { target: target.clone(), namespace: None }).await?;
             Ok(DriftReport {
                 database_kind: DatabaseKind::Redis,
                 target: target.clone(),
