@@ -208,6 +208,18 @@ BEGIN
      THEN RAISE EXCEPTION 'Agata Proxima: tenant roles must exist, have no role memberships, and must not bypass RLS'; END IF;
   IF (SELECT count(*) FROM pg_roles WHERE rolname=ANY({role_array})) <> {role_count}
      THEN RAISE EXCEPTION 'Agata Proxima: one or more tenant roles do not exist'; END IF;
+  IF EXISTS (SELECT 1 FROM pg_db_role_setting s LEFT JOIN pg_roles r ON r.oid=s.setrole
+             WHERE (s.setrole=0 OR r.rolname=ANY({role_array}))
+               AND (s.setdatabase=0 OR s.setdatabase=(SELECT oid FROM pg_database WHERE datname=current_database()))
+               AND EXISTS(SELECT 1 FROM unnest(s.setconfig) setting
+                 WHERE lower(setting) LIKE 'role=%'
+                    OR lower(setting) LIKE 'session_authorization=%'
+                    OR lower(setting) LIKE 'row_security=off%'
+                    OR lower(setting) LIKE 'row_security=false%'
+                    OR lower(setting) LIKE 'row_security=0%'
+                    OR lower(setting) LIKE 'row_security=no%'
+                    OR lower(setting) LIKE 'session_replication_role=replica%'))
+     THEN RAISE EXCEPTION 'Agata Proxima: tenant role/database defaults can change security state'; END IF;
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname=owner_name AND (rolsuper OR rolbypassrls))
      THEN RAISE EXCEPTION 'Agata Proxima: table owner bypasses row security'; END IF;
   IF EXISTS (WITH RECURSIVE owner_roles(role_oid) AS (
