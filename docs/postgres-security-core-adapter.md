@@ -63,6 +63,38 @@ admission must remain denied until independent authenticated positive and
 cross-tenant negative probes, controlled deployment/rollback, drift response,
 and the protocol connection admission path are implemented and accepted.
 
+## Runtime admission against Control Plane posture
+
+For a node to enforce the hosted PostgreSQL policy state before accepting a
+tenant connection, configure:
+
+- `PROXIMA_NODE_POLICY_STATUS_URL`: the Control Plane endpoint
+  `/api/v1/nodes/policy-status` (HTTPS in production).
+- `PROXIMA_DATABASE_TARGET_ID`: the UUID of the registered PostgreSQL
+  connection in the Control Plane.
+- `PROXIMA_POLICY_ADMISSION_REQUIRED=true`: fail Engine startup if the
+  admission endpoint or its required node identity is not configured.
+
+When the endpoint is configured, every tenant-bound PostgreSQL startup performs
+a signed request bound to the node, registered target, requested database,
+verified tenant ID, and Engine role prefix. The Control Plane returns a
+node-key-signed decision with a 15-second expiry. The Engine verifies the
+signature and every binding before relaying the established session. An
+unreachable service, invalid signature, expired response, unknown policy,
+unapplied revision, stale schema fingerprint, drift flag, or non-protected
+verification denies the connection.
+
+The Control Plane refreshes PostgreSQL catalog fingerprints every 30 seconds.
+The admission endpoint denies when the last fingerprint check is older than
+90 seconds. All enabled registrations for the requested tenant on the target
+must have their latest revision applied and verified as protected. A tenant
+with no registered protected resources is denied when admission is enabled.
+
+This is a connection-admission gate. It prevents new sessions from entering
+when the hosted posture is unknown or unsafe; it does not terminate sessions
+that were already established before a later drift event. Existing-session
+revocation and live query interruption remain a separate runtime control.
+
 ## Scope boundary
 
 This first concrete adapter supports PostgreSQL table and partitioned-table
