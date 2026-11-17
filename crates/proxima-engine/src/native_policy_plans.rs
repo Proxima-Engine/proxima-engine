@@ -118,6 +118,9 @@ pub fn compile_mysql_database_boundary(policy: &TenantSecurityPolicy, kind: Data
         if resource.resource.kind != ResourceKind::Table {
             return Err(error("unsupported_resource_kind", "MySQL-family tenant database templates currently accept tables only."));
         }
+        if resource.operations.contains(&Operation::Execute) {
+            return Err(error("unsupported_operation", "MySQL table grants do not implement the canonical execute operation; use a separately reviewed routine policy."));
+        }
         let table = mysql_ident(&resource.resource.name)?;
         let mut grants = Vec::new();
         if resource.operations.contains(&Operation::Read) { grants.push("SELECT"); }
@@ -128,7 +131,7 @@ pub fn compile_mysql_database_boundary(policy: &TenantSecurityPolicy, kind: Data
             else { format!("GRANT {} ON \x60${{tenant_database}}\x60.{table} TO '${{tenant_principal}}'@'${{trusted_application_host}}';", grants.join(", ")) };
         changes.push(resource_change(resource, "mysql_family_per_tenant_database_grant_template", json!({
             "sql_template": [
-                "CREATE USER '${tenant_principal}'@'${trusted_application_host}' IDENTIFIED BY '${secret_manager_generated_password}';",
+                "CREATE USER IF NOT EXISTS '${tenant_principal}'@'${trusted_application_host}' IDENTIFIED BY '${secret_manager_generated_password}' REQUIRE SSL;",
                 sql
             ],
             "required_isolation_model": "one_database_per_tenant",
@@ -137,7 +140,8 @@ pub fn compile_mysql_database_boundary(policy: &TenantSecurityPolicy, kind: Data
             "principal_placeholder": "${tenant_principal}",
             "principal_placeholder_requirement": "Generate a unique bounded principal name from trusted tenant identity and quote it as a MySQL account component.",
             "credential_placeholder": "${secret_manager_generated_password}",
-            "credential_placeholder_requirement": "Generate a unique high-entropy secret in a secret manager; never reuse a shared tenant password.",
+            "credential_placeholder_requirement": "Generate a unique high-entropy secret in a secret manager; never reuse a shared tenant password. CREATE USER IF NOT EXISTS does not rotate an existing credential; reconcile existing account credentials through a separately approved secret-rotation step.",
+            "account_transport_requirement": "The generated account requires SSL; the application connection must also verify the server certificate and hostname.",
             "host_placeholder": "${trusted_application_host}",
             "host_placeholder_requirement": "Replace with the exact trusted application egress host or a narrowly scoped network identity; never use an unrestricted wildcard host.",
             "shared_table_row_level_isolation": false,
@@ -316,6 +320,24 @@ mod tests {
         assert!(template.contains("@'${trusted_application_host}'"));
         assert!(!template.contains("@'%'"));
         assert_eq!(compiled.changes[0].definition["host_placeholder"], "${trusted_application_host}");
+    }
+
+    #[test]
+    fn mysql_template_rejects_execute_instead_of_silently_dropping_it() {
+        let mut requested = policy(ResourceKind::Table, "tenant_id");
+        requested.resources[0].operations = vec![Operation::Read, Operation::Execute];
+        let error = compile_mysql_database_boundary(&requested, DatabaseKind::MySql).unwrap_err();
+        assert_eq!(error.code, "unsupported_operation");
+    }
+
+    #[test]
+    fn mysql_account_template_is_idempotent_and_requires_tls() {
+        let compiled = compile_mysql_database_boundary(&policy(ResourceKind::Table, "tenant_id"), DatabaseKind::MariaDb).unwrap();
+        let template = compiled.changes[0].definition["sql_template"].as_array().unwrap()
+            .iter().filter_map(|value| value.as_str()).collect::<Vec<_>>().join("\n");
+        assert!(template.contains("CREATE USER IF NOT EXISTS"));
+        assert!(template.contains("REQUIRE SSL"));
+        assert!(template.contains("GRANT SELECT, INSERT, UPDATE, DELETE"));
     }
 
     #[test]
