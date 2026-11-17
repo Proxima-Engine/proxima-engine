@@ -397,7 +397,7 @@ impl DatabaseAdapter for PostgresCatalogAdapter {
                 &[],
             ).await.map_err(db_error)?;
             state.extend(routine_rows.into_iter().map(|row| json!({
-                "kind": "security_definer_routine",
+                "kind": "application_routine",
                 "schema": row.get::<_, String>(0),
                 "name": row.get::<_, String>(1),
                 "owner": row.get::<_, String>(2),
