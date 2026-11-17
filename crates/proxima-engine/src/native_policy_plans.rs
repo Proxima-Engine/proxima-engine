@@ -408,3 +408,83 @@ mod tests {
         assert!(compile_redis_acl(&policy(ResourceKind::Keyspace, "*:${tenant_id}:*")).is_err());
     }
 }
+
+
+/// Oracle Virtual Private Database (VPD) policy compiler.
+///
+/// Oracle's DBMS_RLS predicate is evaluated inside the database for each
+/// statement. Tenant identity is read only from a secure application context;
+/// the generated package contains a mandatory trusted-verifier integration
+/// point and must not be deployed with that placeholder unresolved.
+pub fn compile_oracle_vpd(policy: &TenantSecurityPolicy) -> Result<CompiledPolicy, AdapterError> {
+    policy.validate().map_err(|e| error("invalid_policy", &format!("The shared policy is invalid: {e:?}")))?;
+    let mut changes = Vec::new();
+    for resource in &policy.resources {
+        if resource.resource.kind != ResourceKind::Table {
+            return Err(error("unsupported_resource_kind", "Oracle VPD compilation currently accepts tables only; views and PL/SQL entry points require separately verified policies."));
+        }
+        if resource.operations.contains(&Operation::Execute) {
+            return Err(error("unsupported_operation", "Oracle table VPD does not authorize PL/SQL execution; package and procedure access require a separate least-privilege grant policy."));
+        }
+        let owner = identifier(resource.resource.namespace.as_deref().ok_or_else(|| error("oracle_schema_required", "Oracle protected tables must specify their owning schema."))?, 128)?;
+        let table = identifier(&resource.resource.name, 128)?;
+        let tenant_column = identifier(&resource.tenant_key, 128)?;
+        let identity = format!("{}:{}:{}", policy.policy_id, owner.to_ascii_uppercase(), table.to_ascii_uppercase());
+        let digest = Sha256::digest(identity.as_bytes());
+        let suffix = hex::encode(&digest[..8]).to_ascii_uppercase();
+        let package = format!("PROXIMA_CTX_{suffix}");
+        let policy_name = format!("PROXIMA_POL_{suffix}");
+        let owner_sql = format!("\"{}\"", owner.replace('"', "\"\""));
+        let table_sql = format!("\"{}\"", table.replace('"', "\"\""));
+        let column_sql = format!("\"{}\"", tenant_column.replace('"', "\"\""));
+        let package_sql = format!("{owner_sql}.\"{package}\"");
+        let predicate = format!("{column_sql} = SYS_CONTEXT('PROXIMA_TENANT_CTX','TENANT_ID')");
+        let statement_types = resource.operations.iter().filter_map(|op| match op {
+            Operation::Read => Some("SELECT"),
+            Operation::Create => Some("INSERT"),
+            Operation::Update => Some("UPDATE"),
+            Operation::Delete => Some("DELETE"),
+            Operation::Execute => None,
+        }).collect::<Vec<_>>().join(",");
+        let statements = vec![
+            format!(
+                "CREATE OR REPLACE PACKAGE {package_sql} AUTHID DEFINER AS\n  PROCEDURE SET_TENANT(p_tenant_id IN VARCHAR2, p_signed_context IN CLOB, p_signature IN VARCHAR2);\n  FUNCTION TENANT_PREDICATE(p_schema IN VARCHAR2, p_object IN VARCHAR2) RETURN VARCHAR2;\nEND;"
+            ),
+            format!(
+                "CREATE OR REPLACE PACKAGE BODY {package_sql} AS\n  PROCEDURE SET_TENANT(p_tenant_id IN VARCHAR2, p_signed_context IN CLOB, p_signature IN VARCHAR2) IS\n  BEGIN\n    IF p_tenant_id IS NULL OR LENGTH(p_tenant_id) > 256 THEN RAISE_APPLICATION_ERROR(-20071, 'Invalid tenant identity'); END IF;\n    -- REQUIRED: replace this fail-closed hook with verification of the signed,\n    -- short-lived tenant assertion against a key unavailable to application users.\n    IF NOT PROXIMA_TRUSTED_ASSERTION_VERIFY(p_tenant_id, p_signed_context, p_signature) THEN\n      RAISE_APPLICATION_ERROR(-20072, 'Tenant assertion rejected');\n    END IF;\n    DBMS_SESSION.SET_CONTEXT('PROXIMA_TENANT_CTX','TENANT_ID',p_tenant_id);\n  END;\n  FUNCTION TENANT_PREDICATE(p_schema IN VARCHAR2, p_object IN VARCHAR2) RETURN VARCHAR2 IS\n  BEGIN\n    IF SYS_CONTEXT('PROXIMA_TENANT_CTX','TENANT_ID') IS NULL THEN\n      RETURN '1=0';\n    END IF;\n    RETURN '\${predicate}';\n  END;\nEND;"
+            ),
+            format!("CREATE CONTEXT PROXIMA_TENANT_CTX USING {package_sql};"),
+            format!(
+                "BEGIN\n  DBMS_RLS.ADD_POLICY(\n    object_schema => '{}', object_name => '{}', policy_name => '{}',\n    function_schema => '{}', policy_function => '{}.TENANT_PREDICATE',\n    statement_types => '{}', update_check => TRUE, enable => TRUE,\n    policy_type => DBMS_RLS.DYNAMIC);\nEND;",
+                owner.replace('\'', "''"), table.replace('\'', "''"), policy_name,
+                owner.replace('\'', "''"), package.replace('\'', "''"), statement_types
+            )
+        ];
+        changes.push(resource_change(resource, "oracle_create_vpd_policy_plan", json!({
+            "plsql_batches": statements,
+            "native_enforcement": "Oracle DBMS_RLS Virtual Private Database",
+            "tenant_identity_source": "secure Oracle application context PROXIMA_TENANT_CTX.TENANT_ID",
+            "missing_context_behavior": "deny_all_predicate",
+            "write_semantics": "DBMS_RLS update_check TRUE enforces tenant predicate on inserted and updated row values",
+            "required_trusted_identity_integration": {
+                "placeholder": "PROXIMA_TRUSTED_ASSERTION_VERIFY",
+                "must_validate": ["signature", "issuer", "audience", "target_id", "tenant_id", "expiry", "nonce_or_replay_window"],
+                "key_storage": "database wallet or external secret manager; never application-readable",
+                "failure_behavior": "raise error and leave context unset"
+            },
+            "required_grants": [
+                "The deployment principal needs narrowly scoped DBMS_RLS policy administration rights.",
+                "The runtime principal must not own protected tables and must not have EXEMPT ACCESS POLICY.",
+                "Only the trusted context package may set PROXIMA_TENANT_CTX; revoke direct package/context administration from application principals."
+            ],
+            "requires_approval": true,
+            "limitations": [
+                "The trusted assertion verifier is a mandatory implementation dependency; the generated plan is not deployable until it is linked and independently tested.",
+                "Oracle VPD is not automatically applied to every access path: inspect SYS-owned objects, definer-rights PL/SQL, synonyms, views, database links and exempt principals.",
+                "This plan does not grant table privileges or secure PL/SQL EXECUTE privileges.",
+                "The compiler does not execute DDL or certify tenant isolation."
+            ]
+        })));
+    }
+    Ok(CompiledPolicy { database_kind: DatabaseKind::Oracle, policy_id: policy.policy_id.clone(), revision: policy.revision, changes, requires_approval: true })
+}
