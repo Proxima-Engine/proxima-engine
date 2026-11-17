@@ -14,3 +14,4 @@ pub mod security_core;
 pub mod database_adapter;
 pub mod native_policy_plans;
 pub mod policy_evidence;
+pub mod connection_admission;
