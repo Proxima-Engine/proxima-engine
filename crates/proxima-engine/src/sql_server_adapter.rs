@@ -87,7 +87,7 @@ impl SqlServerCatalogAdapter {
         }
         let mut client = self.connect_checked().await?;
         let identity_rows = client.simple_query(
-            "SELECT DB_NAME() AS database_name, ORIGINAL_LOGIN() AS login_name, USER_NAME() AS database_user, CONVERT(nvarchar(128), SERVERPROPERTY('ProductVersion')) AS server_version, CONVERT(int,SERVERPROPERTY('ProductMajorVersion')) AS product_major_version, CONVERT(bit,HAS_PERMS_BY_NAME(DB_NAME(), 'DATABASE', 'VIEW DEFINITION')) AS can_view_definition, IS_SRVROLEMEMBER('sysadmin') AS is_sysadmin"
+            "SELECT DB_NAME() AS database_name, ORIGINAL_LOGIN() AS login_name, USER_NAME() AS database_user, CONVERT(nvarchar(128), SERVERPROPERTY('ProductVersion')) AS server_version, CONVERT(int,SERVERPROPERTY('ProductMajorVersion')) AS product_major_version, CONVERT(int,SERVERPROPERTY('EngineEdition')) AS engine_edition, CONVERT(bit,HAS_PERMS_BY_NAME(DB_NAME(), 'DATABASE', 'VIEW DEFINITION')) AS can_view_definition, IS_SRVROLEMEMBER('sysadmin') AS is_sysadmin"
         ).await.map_err(db_error)?.into_first_result().await.map_err(db_error)?;
         let identity = identity_rows.first().ok_or_else(|| error("sql_server_identity_unavailable", "SQL Server identity metadata was unavailable."))?;
         let can_view_definition = identity.get::<bool,_>("can_view_definition").unwrap_or(false);
