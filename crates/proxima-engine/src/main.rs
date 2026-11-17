@@ -1186,7 +1186,7 @@ async fn handle_connection(
         Box::new(upstream_tcp)
     };
 
-    let (client, upstream, session) =
+    let (mut client, upstream, session) =
         establish(client, upstream, verifier, tenant_role_prefix).await?;
 
     if let (Some(admission), Some(context)) = (policy_admission, session.tenant_context.as_ref()) {
@@ -1207,6 +1207,10 @@ async fn handle_connection(
             ));
         }
     }
+    if let Some(ready_for_query) = session.ready_for_query.as_ref() {
+        client.write_all(ready_for_query).await?;
+    }
+
     let session_started_at = Instant::now();
     metrics::global().session_started(session.tenant_context.is_some());
     info!(
