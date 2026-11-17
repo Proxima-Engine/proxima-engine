@@ -26,3 +26,4 @@ pub mod redis_adapter;
 pub mod sql_server_adapter;
 
 pub mod cockroach_adapter;
+pub mod sqlite_adapter;
