@@ -352,17 +352,24 @@ async fn main() -> Result<(),Box<dyn Error>> {
         }
       },
       Some("compile-plan") => {
-        let database = args.next().ok_or("usage: proxima-policy-guard compile-plan <sql_server|mysql|mariadb|mongodb|redis> <policy.json>")?;
+        let database = args.next().ok_or("usage: proxima-policy-guard compile-plan <postgresql|sql_server|mysql|mariadb|mongodb|redis> <policy.json>")?;
         let path = args.next().ok_or("usage: proxima-policy-guard compile-plan <sql_server|mysql|mariadb|mongodb|redis> <policy.json>")?;
         let source = fs::read_to_string(&path)?;
         let policy: TenantSecurityPolicy = serde_json::from_str(&source)?;
         let compiled = match database.as_str() {
+          "postgresql" => {
+            let connector: PostgresConnector = std::sync::Arc::new(|| Box::pin(async {
+              Err(AdapterError { code: "compile_only_connector".into(), detail: "PostgreSQL plan compilation does not connect to a database.".into(), retryable: false })
+            }));
+            let adapter = PostgresCatalogAdapter::new("compile-only", "compile-only", connector)?;
+            adapter.compile_policy(&policy)?
+          },
           "sql_server" => compile_sql_server(&policy)?,
           "mysql" => compile_mysql_database_boundary(&policy, proxima_engine::security_core::DatabaseKind::MySql)?,
           "mariadb" => compile_mysql_database_boundary(&policy, proxima_engine::security_core::DatabaseKind::MariaDb)?,
           "mongodb" => compile_mongodb_database_boundary(&policy)?,
           "redis" => compile_redis_acl(&policy)?,
-          _ => return Err("unsupported compile-plan database; choose sql_server, mysql, mariadb, mongodb, or redis".into())
+          _ => return Err("unsupported compile-plan database; choose postgresql, sql_server, mysql, mariadb, mongodb, or redis".into())
         };
         println!("{}", serde_json::to_string_pretty(&compiled)?);
         eprintln!("Review-only policy plan generated. No database connection or DDL/ACL change was made.");
