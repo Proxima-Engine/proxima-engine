@@ -223,6 +223,20 @@ impl MySqlCatalogAdapter {
             .fetch_one(&mut connection).await.map_err(db_error)?;
         let grants = sqlx::query("SHOW GRANTS FOR CURRENT_USER")
             .fetch_all(&mut connection).await.map_err(db_error)?;
+        let account_grant_statements = grants.iter()
+            .map(|row| row.try_get::<String,usize>(0).map_err(db_error))
+            .collect::<Result<Vec<_>,AdapterError>>()?;
+        let elevated_inspection_account = account_grant_statements.iter().any(|grant| {
+            let upper = grant.to_ascii_uppercase();
+            upper.contains("ALL PRIVILEGES ON *.*")
+                || upper.contains("WITH GRANT OPTION")
+                || upper.contains(" SUPER ")
+                || upper.contains("SYSTEM_USER")
+                || upper.contains("ROLE_ADMIN")
+                || upper.contains("CREATE USER")
+        });
+        let active_roles: Option<String> = sqlx::query_scalar("SELECT CURRENT_ROLE()")
+            .fetch_one(&mut connection).await.map_err(db_error)?;
         let routine_privileges = sqlx::query(
             "SELECT GRANTEE,ROUTINE_SCHEMA,ROUTINE_NAME,ROUTINE_TYPE,PRIVILEGE_TYPE,IS_GRANTABLE \
              FROM information_schema.ROUTINE_PRIVILEGES WHERE ROUTINE_SCHEMA=? ORDER BY ROUTINE_NAME,GRANTEE,PRIVILEGE_TYPE"
@@ -231,7 +245,9 @@ impl MySqlCatalogAdapter {
             "database": target_row.try_get::<Option<String>,_>("database_name").map_err(db_error)?,
             "authenticated_account": target_row.try_get::<String,_>("authenticated_account").map_err(db_error)?,
             "server_version": target_row.try_get::<String,_>("server_version").map_err(db_error)?,
-            "authenticated_account_grants": grants.iter().map(|row| row.try_get::<String,usize>(0).map_err(db_error)).collect::<Result<Vec<_>,AdapterError>>()?,
+            "authenticated_account_grants": account_grant_statements,
+            "active_roles": active_roles,
+            "inspection_account_has_elevated_privileges": elevated_inspection_account,
             "routine_privileges": routine_privileges.iter().map(|grant| Ok(json!({
                 "grantee": grant.try_get::<String,_>("GRANTEE").map_err(db_error)?,
                 "routine_schema": grant.try_get::<String,_>("ROUTINE_SCHEMA").map_err(db_error)?,
@@ -255,11 +271,21 @@ impl MySqlCatalogAdapter {
             completeness: InspectionCompleteness::Incomplete,
             target_attributes,
             resources,
-            findings: vec![SecurityFinding {
-                code: "mysql_catalog_visibility_not_proven".into(),
-                resource: None,
-                detail: "MySQL/MariaDB information_schema visibility is privilege-filtered; this inventory is limited to objects visible to the authenticated account and cannot certify full database coverage.".into(),
-            }],
+            findings: {
+                let mut findings = vec![SecurityFinding {
+                    code: "mysql_catalog_visibility_not_proven".into(),
+                    resource: None,
+                    detail: "MySQL/MariaDB information_schema visibility is privilege-filtered; this inventory is limited to objects visible to the authenticated account and cannot certify full database coverage.".into(),
+                }];
+                if elevated_inspection_account {
+                    findings.push(SecurityFinding {
+                        code: "mysql_inspection_account_overprivileged".into(),
+                        resource: None,
+                        detail: "The catalog inspection account has broad global or administrative privileges. Use a dedicated least-privilege inspection identity and keep it separate from application tenant principals.".into(),
+                    });
+                }
+                findings
+            },
             fingerprint: Some(fingerprint),
             observed_at,
         })
