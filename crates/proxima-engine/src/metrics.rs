@@ -18,6 +18,10 @@ pub struct EngineMetrics {
     established_sessions: AtomicU64,
     failed_sessions: AtomicU64,
     blocked_violations: AtomicU64,
+    policy_admission_checks: AtomicU64,
+    policy_admission_allowed: AtomicU64,
+    policy_admission_denied: AtomicU64,
+    policy_admission_session_revocations: AtomicU64,
     client_bytes: AtomicU64,
     database_bytes: AtomicU64,
     session_duration_micros: AtomicU64,
@@ -129,6 +133,18 @@ impl EngineMetrics {
     pub fn violation_blocked(&self) {
         self.blocked_violations.fetch_add(1, Ordering::Relaxed);
     }
+    pub fn policy_admission_checked(&self) {
+        self.policy_admission_checks.fetch_add(1, Ordering::Relaxed);
+    }
+    pub fn policy_admission_allowed(&self) {
+        self.policy_admission_allowed.fetch_add(1, Ordering::Relaxed);
+    }
+    pub fn policy_admission_denied(&self) {
+        self.policy_admission_denied.fetch_add(1, Ordering::Relaxed);
+    }
+    pub fn policy_admission_session_revoked(&self) {
+        self.policy_admission_session_revocations.fetch_add(1, Ordering::Relaxed);
+    }
     pub fn observe_query_latency(&self, elapsed_micros: u64) {
         self.query_latency_count.fetch_add(1, Ordering::Relaxed);
         self.query_latency_sum_micros
@@ -191,6 +207,18 @@ impl EngineMetrics {
             "# HELP proxima_engine_security_violations_blocked Total protocol or tenant-security violations blocked.\n",
             "# TYPE proxima_engine_security_violations_blocked counter\n",
             "proxima_engine_security_violations_blocked_total {}\n",
+            "# HELP proxima_engine_policy_admission_checks_total Signed PostgreSQL policy admission checks performed.\n",
+            "# TYPE proxima_engine_policy_admission_checks_total counter\n",
+            "proxima_engine_policy_admission_checks_total {}\n",
+            "# HELP proxima_engine_policy_admission_allowed_total Policy admission decisions that allowed tenant sessions.\n",
+            "# TYPE proxima_engine_policy_admission_allowed_total counter\n",
+            "proxima_engine_policy_admission_allowed_total {}\n",
+            "# HELP proxima_engine_policy_admission_denied_total Policy admission decisions that denied tenant sessions.\n",
+            "# TYPE proxima_engine_policy_admission_denied_total counter\n",
+            "proxima_engine_policy_admission_denied_total {}\n",
+            "# HELP proxima_engine_policy_admission_session_revocations_total Active sessions closed after a policy recheck denied access.\n",
+            "# TYPE proxima_engine_policy_admission_session_revocations_total counter\n",
+            "proxima_engine_policy_admission_session_revocations_total {}\n",
             "# HELP proxima_engine_client_bytes_total Bytes copied from clients to PostgreSQL.\n",
             "# TYPE proxima_engine_client_bytes_total counter\n",
             "proxima_engine_client_bytes_total {}\n",
@@ -213,6 +241,10 @@ impl EngineMetrics {
             self.established_sessions.load(Ordering::Relaxed),
             self.failed_sessions.load(Ordering::Relaxed),
             self.blocked_violations.load(Ordering::Relaxed),
+            self.policy_admission_checks.load(Ordering::Relaxed),
+            self.policy_admission_allowed.load(Ordering::Relaxed),
+            self.policy_admission_denied.load(Ordering::Relaxed),
+            self.policy_admission_session_revocations.load(Ordering::Relaxed),
             self.client_bytes.load(Ordering::Relaxed),
             self.database_bytes.load(Ordering::Relaxed),
             duration as f64 / 1_000_000.0,
