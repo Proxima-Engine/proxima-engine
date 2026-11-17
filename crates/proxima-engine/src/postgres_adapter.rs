@@ -400,7 +400,7 @@ mod tests {
         assert!(compiled.requires_approval);
         assert_eq!(compiled.changes.len(), 1);
         let statements = compiled.changes[0].definition["statements"].as_array().unwrap();
-        assert_eq!(statements.len(), 4);
+        assert_eq!(statements.len(), 6);
         let sql = statements.iter().map(|value| value.as_str().unwrap()).collect::<Vec<_>>().join("\n");
         assert!(sql.contains("AS RESTRICTIVE"));
         assert!(sql.contains("current_setting('proxima.tenant_id', true)"));
