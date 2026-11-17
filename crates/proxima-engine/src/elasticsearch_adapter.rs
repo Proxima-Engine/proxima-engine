@@ -220,10 +220,15 @@ impl ElasticsearchCatalogAdapter {
                 detail: "No visible index matched the registered index pattern. Check the pattern and the inspection principal's index privileges.".into(),
             });
         }
+        findings.push(SecurityFinding {
+            code: "elasticsearch_catalog_visibility_not_proven".into(),
+            resource: None,
+            detail: "The adapter cannot independently prove that the authenticated principal can enumerate every cluster index, role, role mapping and user. The visible inventory is not a complete security baseline.".into(),
+        });
         Ok(DiscoverySnapshot {
             database_kind: kind,
             target: request.target.clone(),
-            completeness: if truncated || !security_visible { InspectionCompleteness::Incomplete } else { InspectionCompleteness::Complete },
+            completeness: InspectionCompleteness::Incomplete,
             target_attributes,
             resources,
             findings,
