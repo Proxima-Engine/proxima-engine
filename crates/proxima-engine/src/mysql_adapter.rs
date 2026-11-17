@@ -164,7 +164,18 @@ impl MySqlCatalogAdapter {
                 }),
             });
         }
-        let fingerprint = digest(&serde_json::to_vec(&resources)
+        let target_row = sqlx::query("SELECT DATABASE() AS database_name, CURRENT_USER() AS authenticated_account, VERSION() AS server_version")
+            .fetch_one(&mut connection).await.map_err(db_error)?;
+        let grants = sqlx::query("SHOW GRANTS FOR CURRENT_USER")
+            .fetch_all(&mut connection).await.map_err(db_error)?;
+        let target_attributes = json!({
+            "database": target_row.try_get::<Option<String>,_>("database_name").map_err(db_error)?,
+            "authenticated_account": target_row.try_get::<String,_>("authenticated_account").map_err(db_error)?,
+            "server_version": target_row.try_get::<String,_>("server_version").map_err(db_error)?,
+            "authenticated_account_grants": grants.iter().map(|row| row.try_get::<String,usize>(0).map_err(db_error)).collect::<Result<Vec<_>,AdapterError>>()?,
+            "tls_identity_verification_required": true
+        });
+        let fingerprint = digest(&serde_json::to_vec(&json!({"target":target_attributes,"resources":resources}))
             .map_err(|_| error("fingerprint_serialization_failed", "Could not serialize MySQL discovery results."))?);
         let observed_at: String = sqlx::query_scalar("SELECT DATE_FORMAT(UTC_TIMESTAMP(6),'%Y-%m-%dT%H:%i:%s.%fZ')")
             .fetch_one(&mut connection).await.map_err(db_error)?;
@@ -175,6 +186,7 @@ impl MySqlCatalogAdapter {
             // separately attested inventory principal/metadata scope, absence
             // from this result cannot prove that a resource does not exist.
             completeness: InspectionCompleteness::Incomplete,
+            target_attributes,
             resources,
             findings: vec![SecurityFinding {
                 code: "mysql_catalog_visibility_not_proven".into(),
@@ -213,7 +225,7 @@ impl DatabaseAdapter for MySqlCatalogAdapter {
             request.policy.validate().map_err(|_| error("invalid_policy", "The canonical tenant policy failed validation."))?;
             let discovery = self.discover_inner(&DiscoveryRequest { target: request.target.clone(), namespace: None }).await?;
             let mut resources = Vec::with_capacity(request.policy.resources.len());
-            let mut findings = Vec::new();
+            let mut findings = discovery.findings.clone();
             for protected in &request.policy.resources {
                 let namespace = protected.resource.namespace.as_deref().unwrap_or(&self.database_name);
                 if namespace != self.database_name {
