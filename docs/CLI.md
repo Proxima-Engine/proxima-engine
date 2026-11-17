@@ -173,7 +173,7 @@ The inspection principal needs permission to run CLIENT INFO, PING, ACL WHOAMI, 
 
 ## Native Microsoft SQL Server adapter
 
-The SQL Server adapter uses encrypted TDS with certificate verification. It rejects TrustServerCertificate=true and Encrypt=false, confirms the connected database, and inventories tables/columns, object and column permissions, schema/database permissions, principals, role memberships, RLS security policies/predicates, triggers, views and stored routines. It marks catalog visibility incomplete unless the inspection identity has database VIEW DEFINITION or sysadmin visibility; sysadmin inspection is explicitly flagged.
+The SQL Server adapter uses encrypted TDS with certificate verification and SQL username/password authentication. This build rejects integrated Windows/Kerberos authentication, TrustServerCertificate=true and Encrypt=false. It confirms the connected database, and inventories tables/columns, object and column permissions, schema/database permissions, principals, role memberships, RLS security policies/predicates, triggers, views and stored routines. It marks catalog visibility incomplete unless the inspection identity has database VIEW DEFINITION or sysadmin visibility; sysadmin inspection is explicitly flagged.
 
 ```powershell
 $env:PROXIMA_SQL_SERVER_ADAPTER_CONNECTION_STRING = 'Server=tcp:db.example,1433;Database=app;User Id=...;Password=...;Encrypt=True;TrustServerCertificate=False'
