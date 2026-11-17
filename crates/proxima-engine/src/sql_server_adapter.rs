@@ -582,7 +582,7 @@ fn error(code: &str, detail: &str) -> AdapterError {
 }
 
 fn db_error(_error: impl std::fmt::Display) -> AdapterError {
-    AdapterError { code: "sql_server_catalog_operation_failed".into(), detail: "The encrypted SQL Server catalog operation failed.".into(), retryable: true }
+    AdapterError { code: "sql_server_catalog_operation_failed".into(), detail: "The encrypted SQL Server catalog operation failed.".into(), retryable: false }
 }
 
 #[cfg(test)]
