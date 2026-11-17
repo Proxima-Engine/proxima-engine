@@ -329,6 +329,18 @@ mod tests {
     }
 
     #[test]
+    fn admission_rejects_evidence_for_a_different_database_kind() {
+        let authority = authority();
+        let evidence = authority.sign_evidence(evidence_payload()).unwrap();
+        let admission = authority.issue_admission(&evidence, 1_800_000_010, 30).unwrap();
+        let wrong_database = AdmissionExpectation { database_kind: DatabaseKind::MySql, ..expected() };
+        assert_eq!(
+            authority.verify_admission(&admission, &evidence, wrong_database, 1_800_000_020).unwrap_err().code,
+            "database_kind_mismatch"
+        );
+    }
+
+    #[test]
     fn expired_and_overlong_admissions_are_rejected() {
         let authority = authority();
         let evidence = authority.sign_evidence(evidence_payload()).unwrap();
