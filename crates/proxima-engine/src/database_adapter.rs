@@ -183,3 +183,74 @@ impl AdapterRegistry {
         descriptors
     }
 }
+
+
+#[cfg(test)]
+mod registry_tests {
+    use super::*;
+    use crate::security_core::{AdapterCapabilities, AdapterMaturity};
+
+    struct CandidateAdapter {
+        maturity: AdapterMaturity,
+        capabilities: AdapterCapabilities,
+    }
+
+    impl DatabaseAdapter for CandidateAdapter {
+        fn descriptor(&self) -> AdapterDescriptor {
+            AdapterDescriptor {
+                kind: DatabaseKind::MySql,
+                name: "candidate",
+                maturity: self.maturity,
+                capabilities: self.capabilities,
+                status_note: "test adapter",
+            }
+        }
+
+        fn inspect<'a>(&'a self, _request: &'a InspectionRequest) -> AdapterFuture<'a, Result<InspectionSnapshot, AdapterError>> {
+            Box::pin(async { Err(AdapterError { code: "not_implemented".into(), detail: "test adapter".into(), retryable: false }) })
+        }
+
+        fn compile_policy(&self, _policy: &TenantSecurityPolicy) -> Result<CompiledPolicy, AdapterError> {
+            Err(AdapterError { code: "not_implemented".into(), detail: "test adapter".into(), retryable: false })
+        }
+
+        fn verify<'a>(&'a self, _policy: &'a TenantSecurityPolicy, _snapshot: &'a InspectionSnapshot) -> AdapterFuture<'a, Result<VerificationReport, AdapterError>> {
+            Box::pin(async { Err(AdapterError { code: "not_implemented".into(), detail: "test adapter".into(), retryable: false }) })
+        }
+
+        fn detect_drift<'a>(&'a self, _target: &'a AdapterTarget, _previous_fingerprint: Option<&'a str>) -> AdapterFuture<'a, Result<DriftReport, AdapterError>> {
+            Box::pin(async { Err(AdapterError { code: "not_implemented".into(), detail: "test adapter".into(), retryable: false }) })
+        }
+    }
+
+    #[test]
+    fn registry_rejects_review_only_and_partial_adapters() {
+        let adapter = CandidateAdapter {
+            maturity: AdapterMaturity::InDevelopment,
+            capabilities: AdapterCapabilities { policy_generation: true, ..AdapterCapabilities::default() },
+        };
+        let mut registry = AdapterRegistry::default();
+        assert_eq!(registry.register(Arc::new(adapter)).unwrap_err(), RegistryError::IncompleteAdapter);
+        assert!(registry.get(DatabaseKind::MySql).is_none());
+    }
+
+    #[test]
+    fn registry_accepts_only_a_complete_supported_adapter() {
+        let adapter = CandidateAdapter {
+            maturity: AdapterMaturity::Supported,
+            capabilities: AdapterCapabilities {
+                schema_inspection: true,
+                tenant_identity_enforcement: true,
+                policy_semantic_verification: true,
+                policy_generation: true,
+                controlled_policy_deployment: true,
+                drift_detection: true,
+                runtime_fail_closed_admission: true,
+                signed_security_evidence: true,
+            },
+        };
+        let mut registry = AdapterRegistry::default();
+        assert!(registry.register(Arc::new(adapter)).is_ok());
+        assert!(registry.get(DatabaseKind::MySql).is_some());
+    }
+}
