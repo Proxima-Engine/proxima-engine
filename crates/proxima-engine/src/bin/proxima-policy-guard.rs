@@ -302,7 +302,7 @@ async fn main() -> Result<(),Box<dyn Error>> {
         }
       },
       Some("adapters") => {
-        let value=json!({"schema_version":SECURITY_MODEL_VERSION,"adapters":adapter_catalog()});
+        let value=json!({"schema_version":SECURITY_MODEL_VERSION,"scope":"engine_runtime","adapter_contract":"database_adapter::DatabaseAdapter","adapters":adapter_catalog()});
         println!("{}",serde_json::to_string_pretty(&value)?);
       },
       Some("audit") => {
