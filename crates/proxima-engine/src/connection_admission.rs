@@ -154,6 +154,24 @@ mod tests {
     }
 
     #[test]
+    fn replay_registry_capacity_fails_closed_without_eviction() {
+        let authority = authority();
+        let gate = ConnectionAdmissionGate::new();
+        let (evidence, admission) = signed_pair(&authority);
+        {
+            let mut consumed = gate.consumed.lock().unwrap();
+            for index in 0..100_000 {
+                consumed.insert(format!("signature-{index}"), (format!("connection-{index}"), 1_900_000_100));
+            }
+        }
+        assert_eq!(
+            gate.consume_for_connection(&authority, &admission, &evidence, expected(), "conn-new", 1_900_000_002).unwrap_err().code,
+            "admission_capacity_exceeded"
+        );
+        assert_eq!(gate.active_consumptions(1_900_000_002).unwrap(), 100_000);
+    }
+
+    #[test]
     fn invalid_connection_identifier_fails_closed() {
         let authority = authority();
         let gate = ConnectionAdmissionGate::new();
