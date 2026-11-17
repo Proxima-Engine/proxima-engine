@@ -5,8 +5,8 @@
 //! obtain evidence from a trusted native database inspector before using it.
 
 use crate::security_core::{
-    AccessDecision, DatabaseKind, InspectionCompleteness, Operation, SecurityFinding,
-    SecurityPosture, SECURITY_MODEL_VERSION,
+    AccessDecision, DatabaseKind, InspectionCompleteness, Operation, ProtectedResource,
+    ResourceRef, SecurityFinding, SecurityPosture, SECURITY_MODEL_VERSION,
 };
 use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
@@ -50,10 +50,20 @@ fn verify_bytes(key: &[u8], payload: &[u8], signature: &str) -> Result<(), Evide
         .map_err(|_| error("signature_mismatch", "The signed policy object has been modified or was signed by another authority."))
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EvidenceCheckKind {
+    OwnTenantAllow,
+    CrossTenantDeny,
+    MutationRollback,
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EvidenceCheck {
-    pub check_id: String,
+    pub resource: ResourceRef,
+    pub operation: Operation,
+    pub kind: EvidenceCheckKind,
     pub passed: bool,
     pub detail: String,
 }
@@ -70,6 +80,7 @@ pub struct PolicyEvidencePayload {
     pub posture: SecurityPosture,
     pub inspection: InspectionCompleteness,
     pub findings: Vec<SecurityFinding>,
+    pub protected_resources: Vec<ProtectedResource>,
     pub verified_operations: Vec<Operation>,
     pub fingerprint: String,
     pub observed_at_unix: i64,
@@ -250,29 +261,38 @@ fn admission_claims_bytes(admission: &SignedPolicyAdmission) -> Result<Vec<u8>, 
     }).map_err(|_| error("admission_serialization_failed", "The admission claims could not be serialized."))
 }
 
-fn operation_key(operation: Operation) -> &'static str {
-    match operation {
-        Operation::Read => "read",
-        Operation::Create => "create",
-        Operation::Update => "update",
-        Operation::Delete => "delete",
-        Operation::Execute => "execute",
-    }
-}
-
-fn required_semantic_checks(operations: &[Operation]) -> Vec<String> {
-    let mut required = Vec::with_capacity(operations.len() * 3);
-    for operation in operations {
-        let key = operation_key(*operation);
-        required.push(format!("own_tenant_allow:{key}"));
-        required.push(format!("cross_tenant_deny:{key}"));
-        if matches!(operation, Operation::Create | Operation::Update | Operation::Delete) {
-            // A successful mutation probe must run inside an isolated transaction
-            // and prove that rollback leaves the target unchanged.
-            required.push(format!("mutation_rollback:{key}"));
+fn required_semantic_checks(
+    resources: &[ProtectedResource],
+) -> std::collections::HashSet<(ResourceRef, Operation, EvidenceCheckKind)> {
+    let mut required = std::collections::HashSet::new();
+    for protected in resources {
+        for operation in &protected.operations {
+            required.insert((protected.resource.clone(), *operation, EvidenceCheckKind::OwnTenantAllow));
+            required.insert((protected.resource.clone(), *operation, EvidenceCheckKind::CrossTenantDeny));
+            if matches!(operation, Operation::Create | Operation::Update | Operation::Delete) {
+                // Mutation probes must use an isolated transaction and prove rollback.
+                required.insert((protected.resource.clone(), *operation, EvidenceCheckKind::MutationRollback));
+            }
         }
     }
     required
+}
+
+fn valid_protected_resource(resource: &ProtectedResource) -> bool {
+    let reference = &resource.resource;
+    let mut operations = std::collections::HashSet::new();
+    !reference.name.trim().is_empty()
+        && reference.name.len() <= 256
+        && !reference.name.contains('\\0')
+        && reference.namespace.as_ref().map_or(true, |namespace| {
+            !namespace.trim().is_empty() && namespace.len() <= 128 && !namespace.contains('\\0')
+        })
+        && !resource.tenant_key.trim().is_empty()
+        && resource.tenant_key.len() <= 128
+        && !resource.tenant_key.contains('\\0')
+        && !resource.operations.is_empty()
+        && resource.operations.len() <= 5
+        && resource.operations.iter().all(|operation| operations.insert(*operation))
 }
 
 fn validate_evidence_payload(payload: &PolicyEvidencePayload) -> Result<(), EvidenceError> {
@@ -284,38 +304,65 @@ fn validate_evidence_payload(payload: &PolicyEvidencePayload) -> Result<(), Evid
         || payload.fingerprint.len() != 64
         || hex::decode(&payload.fingerprint).map_or(true, |bytes| bytes.len() != 32)
         || payload.observed_at_unix < 0
-        || payload.findings.len() > 256 || payload.verified_operations.len() > 5
+        || payload.findings.len() > 256
+        || payload.protected_resources.is_empty()
+        || payload.protected_resources.len() > 256
+        || payload.protected_resources.iter().any(|resource| !valid_protected_resource(resource))
         || payload.findings.iter().any(|finding| finding.code.trim().is_empty()
             || finding.code.len() > 128 || finding.code.contains('\\0')
             || finding.detail.len() > 2048 || finding.detail.contains('\\0')
             || finding.resource.as_ref().is_some_and(|resource| resource.name.len() > 256
                 || resource.name.contains('\\0')
                 || resource.namespace.as_ref().is_some_and(|namespace| namespace.len() > 128 || namespace.contains('\\0'))))
-        || payload.checks.len() > 256
-        || payload.checks.iter().any(|check| check.check_id.trim().is_empty()
-            || check.check_id.len() > 128 || check.check_id.contains('\\0')
-            || check.detail.len() > 2048 || check.detail.contains('\\0'))
+        || payload.checks.len() > 3840
+        || payload.checks.iter().any(|check| check.detail.len() > 2048 || check.detail.contains('\\0'))
     {
-        return Err(error("invalid_evidence_payload", "The policy evidence is missing a required identity, revision, fingerprint or timestamp, or contains malformed/bounded-check data."));
+        return Err(error("invalid_evidence_payload", "The policy evidence is missing a required identity, revision, resource, fingerprint or timestamp, or contains malformed/bounded-check data."));
     }
-    let mut check_ids = std::collections::HashSet::with_capacity(payload.checks.len());
-    if payload.checks.iter().any(|check| !check_ids.insert(check.check_id.as_str())) {
-        return Err(error("duplicate_evidence_check", "Evidence check identifiers must be unique."));
+
+    let declared_resources: std::collections::HashSet<_> = payload.protected_resources
+        .iter().map(|resource| resource.resource.clone()).collect();
+    if declared_resources.len() != payload.protected_resources.len() {
+        return Err(error("duplicate_evidence_resource", "Protected resources in evidence must be unique."));
+    }
+
+    let declared_operations: std::collections::HashSet<_> = payload.protected_resources
+        .iter().flat_map(|resource| resource.operations.iter().copied()).collect();
+    let verified_operations: std::collections::HashSet<_> = payload.verified_operations.iter().copied().collect();
+    if payload.verified_operations.is_empty()
+        || payload.verified_operations.len() > 5
+        || verified_operations.len() != payload.verified_operations.len()
+        || verified_operations != declared_operations
+    {
+        return Err(error("invalid_evidence_operations", "Verified operations must be unique and exactly match the operations declared for protected resources."));
+    }
+
+    let required = required_semantic_checks(&payload.protected_resources);
+    let mut observed = std::collections::HashSet::with_capacity(payload.checks.len());
+    for check in &payload.checks {
+        let key = (check.resource.clone(), check.operation, check.kind);
+        if !declared_resources.contains(&check.resource)
+            || !required.contains(&key)
+            || !observed.insert(key)
+        {
+            return Err(error("invalid_evidence_check_scope", "Each evidence check must name one declared resource, an operation required for that resource, and one unique required probe kind."));
+        }
     }
     Ok(())
 }
 
 fn validate_admission_eligibility(payload: &PolicyEvidencePayload) -> Result<(), EvidenceError> {
-    let mut operations = std::collections::HashSet::with_capacity(payload.verified_operations.len());
-    let operations_unique = payload.verified_operations.iter().all(|operation| operations.insert(*operation));
-    let check_ids: std::collections::HashSet<&str> = payload.checks.iter().map(|check| check.check_id.as_str()).collect();
-    let semantic_coverage_complete = !payload.verified_operations.is_empty()
-        && operations_unique
-        && required_semantic_checks(&payload.verified_operations).iter().all(|required| check_ids.contains(required.as_str()));
+    let required = required_semantic_checks(&payload.protected_resources);
+    let observed: std::collections::HashSet<_> = payload.checks.iter()
+        .map(|check| (check.resource.clone(), check.operation, check.kind))
+        .collect();
+    let semantic_coverage_complete = !required.is_empty()
+        && observed == required
+        && payload.checks.iter().all(|check| check.passed);
     if payload.posture != SecurityPosture::Verified || payload.inspection != InspectionCompleteness::Complete
         || !payload.findings.is_empty() || !semantic_coverage_complete
-        || payload.checks.is_empty() || payload.checks.iter().any(|check| !check.passed) {
-        return Err(error("evidence_not_admissible", "Admission requires complete verified evidence, no findings, unique operations, and a passing own-tenant allow plus cross-tenant deny probe for every operation."));
+    {
+        return Err(error("evidence_not_admissible", "Admission requires complete verified evidence and passing own-tenant allow, cross-tenant deny, and mutation rollback probes for every declared resource operation."));
     }
     Ok(())
 }
@@ -328,24 +375,60 @@ mod tests {
         PolicyEvidenceAuthority::new(vec![7; 32], vec![9; 32]).unwrap()
     }
 
-    fn semantic_checks() -> Vec<EvidenceCheck> {
-        ["read", "create", "update", "delete"].into_iter().flat_map(|operation| {
-            let mut checks = vec![
-                EvidenceCheck { check_id: format!("own_tenant_allow:{operation}"), passed: true, detail: format!("own-tenant {operation} probe passed") },
-                EvidenceCheck { check_id: format!("cross_tenant_deny:{operation}"), passed: true, detail: format!("cross-tenant {operation} probe denied") },
-            ];
-            if operation != "read" {
-                checks.push(EvidenceCheck {
-                    check_id: format!("mutation_rollback:{operation}"),
-                    passed: true,
-                    detail: format!("own-tenant {operation} probe was rolled back"),
-                });
-            }
-            checks
-        }).collect()
+    fn protected_resource(name: &str) -> ProtectedResource {
+        ProtectedResource {
+            resource: ResourceRef {
+                namespace: Some("public".into()),
+                name: name.into(),
+                kind: crate::security_core::ResourceKind::Table,
+            },
+            tenant_key: "tenant_id".into(),
+            operations: vec![Operation::Read, Operation::Create, Operation::Update, Operation::Delete],
+        }
     }
 
-    fn evidence_payload() -> PolicyEvidencePayload {
+    fn semantic_checks(resources: &[ProtectedResource]) -> Vec<EvidenceCheck> {
+        let mut checks = Vec::new();
+        for resource in resources {
+            for operation in &resource.operations {
+                checks.push(EvidenceCheck {
+                    resource: resource.resource.clone(),
+                    operation: *operation,
+                    kind: EvidenceCheckKind::OwnTenantAllow,
+                    passed: true,
+                    detail: format!("own-tenant {operation:?} probe passed"),
+                });
+                checks.push(EvidenceCheck {
+                    resource: resource.resource.clone(),
+                    operation: *operation,
+                    kind: EvidenceCheckKind::CrossTenantDeny,
+                    passed: true,
+                    detail: format!("cross-tenant {operation:?} probe denied"),
+                });
+                if matches!(operation, Operation::Create | Operation::Update | Operation::Delete) {
+                    checks.push(EvidenceCheck {
+                        resource: resource.resource.clone(),
+                        operation: *operation,
+                        kind: EvidenceCheckKind::MutationRollback,
+                        passed: true,
+                        detail: format!("own-tenant {operation:?} mutation was rolled back"),
+                    });
+                }
+            }
+        }
+        checks
+    }
+
+    fn evidence_payload_with_resources(resources: Vec<ProtectedResource>) -> PolicyEvidencePayload {
+        let mut verified_operations = Vec::new();
+        for resource in &resources {
+            for operation in &resource.operations {
+                if !verified_operations.contains(operation) {
+                    verified_operations.push(*operation);
+                }
+            }
+        }
+        let checks = semantic_checks(&resources);
         PolicyEvidencePayload {
             model_version: SECURITY_MODEL_VERSION.into(),
             policy_id: "tenant-data".into(),
@@ -356,11 +439,16 @@ mod tests {
             posture: SecurityPosture::Verified,
             inspection: InspectionCompleteness::Complete,
             findings: vec![],
-            verified_operations: vec![Operation::Read, Operation::Create, Operation::Update, Operation::Delete],
+            protected_resources: resources,
+            verified_operations,
             fingerprint: "a".repeat(64),
             observed_at_unix: 1_800_000_000,
-            checks: semantic_checks(),
+            checks,
         }
+    }
+
+    fn evidence_payload() -> PolicyEvidencePayload {
+        evidence_payload_with_resources(vec![protected_resource("orders")])
     }
 
     fn expected() -> AdmissionExpectation<'static> {
@@ -426,7 +514,7 @@ mod tests {
     fn admission_requires_positive_and_negative_probes_for_every_operation() {
         let authority = authority();
         let mut payload = evidence_payload();
-        payload.checks.retain(|check| check.check_id != "cross_tenant_deny:delete");
+        payload.checks.retain(|check| !(check.kind == EvidenceCheckKind::CrossTenantDeny && check.operation == Operation::Delete));
         let evidence = authority.sign_evidence(payload).unwrap();
         assert_eq!(
             authority.issue_admission(&evidence, 1_800_000_010, 30).unwrap_err().code,
@@ -438,7 +526,7 @@ mod tests {
     fn admission_requires_mutation_probe_rollback_evidence() {
         let authority = authority();
         let mut payload = evidence_payload();
-        payload.checks.retain(|check| check.check_id != "mutation_rollback:update");
+        payload.checks.retain(|check| !(check.kind == EvidenceCheckKind::MutationRollback && check.operation == Operation::Update));
         let evidence = authority.sign_evidence(payload).unwrap();
         assert_eq!(
             authority.issue_admission(&evidence, 1_800_000_010, 30).unwrap_err().code,
@@ -447,11 +535,36 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_semantic_check_identifiers_are_rejected_before_signing() {
+    fn duplicate_resource_scoped_semantic_checks_are_rejected_before_signing() {
         let authority = authority();
         let mut payload = evidence_payload();
         payload.checks.push(payload.checks[0].clone());
-        assert_eq!(authority.sign_evidence(payload).unwrap_err().code, "duplicate_evidence_check");
+        assert_eq!(authority.sign_evidence(payload).unwrap_err().code, "invalid_evidence_check_scope");
+    }
+
+    #[test]
+    fn evidence_requires_probe_coverage_for_each_protected_resource() {
+        let authority = authority();
+        let resources = vec![protected_resource("orders"), protected_resource("invoices")];
+        let mut payload = evidence_payload_with_resources(resources.clone());
+        payload.checks = semantic_checks(&resources[..1]);
+        let evidence = authority.sign_evidence(payload).unwrap();
+        assert_eq!(
+            authority.issue_admission(&evidence, 1_800_000_010, 30).unwrap_err().code,
+            "evidence_not_admissible"
+        );
+    }
+
+    #[test]
+    fn fully_probed_multi_resource_evidence_can_be_admitted() {
+        let authority = authority();
+        let resources = vec![protected_resource("orders"), protected_resource("invoices")];
+        let evidence = authority.sign_evidence(evidence_payload_with_resources(resources)).unwrap();
+        let admission = authority.issue_admission(&evidence, 1_800_000_010, 30).unwrap();
+        assert_eq!(
+            authority.verify_admission(&admission, &evidence, expected(), 1_800_000_020),
+            Ok(AccessDecision::Allow)
+        );
     }
 
     #[test]
@@ -459,11 +572,7 @@ mod tests {
         let authority = authority();
         let mut payload = evidence_payload();
         payload.verified_operations.push(Operation::Read);
-        let evidence = authority.sign_evidence(payload).unwrap();
-        assert_eq!(
-            authority.issue_admission(&evidence, 1_800_000_010, 30).unwrap_err().code,
-            "evidence_not_admissible"
-        );
+        assert_eq!(authority.sign_evidence(payload).unwrap_err().code, "invalid_evidence_operations");
     }
 
     #[test]
