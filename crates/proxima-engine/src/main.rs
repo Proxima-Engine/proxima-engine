@@ -287,8 +287,13 @@ mod admission_requirement_tests {
     fn admission_is_required_by_default_and_values_must_be_explicit() {
         assert_eq!(parse_policy_admission_required(None).unwrap(), true);
         assert_eq!(parse_policy_admission_required(Some(" yes ")).unwrap(), true);
-        assert_eq!(parse_policy_admission_required(Some("0")).unwrap(), false);
-        assert_eq!(parse_policy_admission_required(Some("false")).unwrap(), false);
+        if cfg!(debug_assertions) {
+            assert_eq!(parse_policy_admission_required(Some("0")).unwrap(), false);
+            assert_eq!(parse_policy_admission_required(Some("false")).unwrap(), false);
+        } else {
+            assert!(parse_policy_admission_required(Some("0")).is_err());
+            assert!(parse_policy_admission_required(Some("false")).is_err());
+        }
         assert!(parse_policy_admission_required(Some("sometimes")).is_err());
     }
 }
@@ -312,7 +317,11 @@ fn parse_policy_admission_required(value: Option<&str>) -> io::Result<bool> {
         // Tenant traffic requires a live, signed posture decision by default.
         // Local development may explicitly opt out with false/0/no.
         None | Some("1") | Some("true") | Some("yes") => Ok(true),
-        Some("0") | Some("false") | Some("no") => Ok(false),
+        Some("0") | Some("false") | Some("no") if cfg!(debug_assertions) => Ok(false),
+        Some("0") | Some("false") | Some("no") => Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Policy admission cannot be disabled in release builds",
+        )),
         Some(_) => Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "PROXIMA_POLICY_ADMISSION_REQUIRED must be true/false, yes/no, or 1/0",
