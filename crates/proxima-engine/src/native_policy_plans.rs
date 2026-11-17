@@ -436,7 +436,6 @@ pub fn compile_oracle_vpd(policy: &TenantSecurityPolicy) -> Result<CompiledPolic
         let policy_name = format!("PROXIMA_POL_{suffix}");
         let function_name = format!("PROXIMA_VPD_{suffix}");
         let owner_sql = format!("\"{}\"", owner.replace('"', "\"\""));
-        let table_sql = format!("\"{}\"", table.replace('"', "\"\""));
         let column_sql = format!("\"{}\"", tenant_column.replace('"', "\"\""));
         let package_sql = format!("{owner_sql}.\"{package}\"");
         let function_sql = format!("{owner_sql}.\"{function_name}\"");
