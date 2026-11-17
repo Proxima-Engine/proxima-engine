@@ -112,7 +112,7 @@ impl SqlServerCatalogAdapter {
                 &[&object_id],
             ).await.map_err(db_error)?.into_first_result().await.map_err(db_error)?;
             let indexes = client.query(
-                "SELECT index_info.name,index_info.type_desc,index_info.is_unique,index_info.is_primary_key,index_info.is_unique_constraint,index_info.is_disabled,index_info.has_filter,index_info.filter_definition,index_column.key_ordinal,index_column.is_included_column,column_info.name AS column_name FROM sys.indexes index_info LEFT JOIN sys.index_columns index_column ON index_column.object_id=index_info.object_id AND index_column.index_id=index_info.index_id LEFT JOIN sys.columns column_info ON column_info.object_id=index_column.object_id AND column_info.column_id=index_column.column_id WHERE index_info.object_id=@P1 AND index_info.index_id > 0 ORDER BY index_info.index_id,index_column.key_ordinal,index_column.index_column_id",
+                "SELECT index_info.name,index_info.type_desc,index_info.is_unique,index_info.is_primary_key,index_info.is_unique_constraint,index_info.is_disabled,index_info.has_filter,index_info.filter_definition,CONVERT(int,index_column.key_ordinal) AS key_ordinal,index_column.is_included_column,column_info.name AS column_name FROM sys.indexes index_info LEFT JOIN sys.index_columns index_column ON index_column.object_id=index_info.object_id AND index_column.index_id=index_info.index_id LEFT JOIN sys.columns column_info ON column_info.object_id=index_column.object_id AND column_info.column_id=index_column.column_id WHERE index_info.object_id=@P1 AND index_info.index_id > 0 ORDER BY index_info.index_id,index_column.key_ordinal,index_column.index_column_id",
                 &[&object_id],
             ).await.map_err(db_error)?.into_first_result().await.map_err(db_error)?;
             let foreign_keys = client.query(
@@ -254,7 +254,7 @@ impl SqlServerCatalogAdapter {
         }
 
         let database_options_rows = client.simple_query(
-            "SELECT database_info.name,owner.name AS owner_name,database_info.is_trustworthy_on,database_info.is_db_chaining_on,database_info.is_read_committed_snapshot_on,database_info.compatibility_level,database_info.containment_desc FROM sys.databases database_info LEFT JOIN sys.server_principals owner ON owner.sid=database_info.owner_sid WHERE database_info.database_id=DB_ID()"
+            "SELECT database_info.name,owner.name AS owner_name,database_info.is_trustworthy_on,database_info.is_db_chaining_on,database_info.is_read_committed_snapshot_on,CONVERT(int,database_info.compatibility_level) AS compatibility_level,database_info.containment_desc FROM sys.databases database_info LEFT JOIN sys.server_principals owner ON owner.sid=database_info.owner_sid WHERE database_info.database_id=DB_ID()"
         ).await.map_err(db_error)?.into_first_result().await.map_err(db_error)?;
         let database_options = database_options_rows.first();
         let principals = client.simple_query(
