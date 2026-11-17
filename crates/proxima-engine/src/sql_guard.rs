@@ -35,6 +35,7 @@ pub fn blocks_tenant_session_mutation(sql: &str) -> bool {
             let mut cursor=index+1;
             if at(cursor,"session") && at(cursor+1,"authorization") { return true; }
             if at(cursor,"session") || at(cursor,"local") { cursor+=1; }
+            if at(cursor,"session") && at(cursor+1,"authorization") { return true; }
             if at(cursor,"role") || at(cursor,"session_authorization")
                 || at(cursor,"row_security") || at(cursor,"session_replication_role") {
                 return true;
@@ -122,6 +123,7 @@ mod tests {
             "RESET ROLE",
             "RESET ALL",
             "SET SESSION AUTHORIZATION other_user",
+            "SET LOCAL SESSION AUTHORIZATION other_user",
             "RESET SESSION AUTHORIZATION",
             "SET row_security = off",
             "SET \"row_security\" TO 'off'",
