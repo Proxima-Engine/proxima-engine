@@ -92,39 +92,47 @@ pub fn adapter_catalog() -> Vec<AdapterDescriptor> {
         AdapterDescriptor {
             kind: DatabaseKind::MySql,
             name: "MySQL",
-            maturity: AdapterMaturity::Planned,
-            capabilities: AdapterCapabilities::default(),
-            status_note: "Adapter contract defined; native inspection and enforcement are not implemented.",
+            maturity: AdapterMaturity::InDevelopment,
+            capabilities: AdapterCapabilities { policy_generation: true, ..AdapterCapabilities::default() },
+            status_note: "Reviewable database-per-tenant grant templates exist. No shared-table row-level enforcement, native inspection, runtime principal binding or drift verification is implemented.",
         },
         AdapterDescriptor {
             kind: DatabaseKind::MariaDb,
             name: "MariaDB",
-            maturity: AdapterMaturity::Planned,
-            capabilities: AdapterCapabilities::default(),
-            status_note: "Adapter contract defined; native inspection and enforcement are not implemented.",
+            maturity: AdapterMaturity::InDevelopment,
+            capabilities: AdapterCapabilities { policy_generation: true, ..AdapterCapabilities::default() },
+            status_note: "Reviewable database-per-tenant grant templates exist. No shared-table row-level enforcement, native inspection, runtime principal binding or drift verification is implemented.",
         },
         AdapterDescriptor {
             kind: DatabaseKind::SqlServer,
             name: "Microsoft SQL Server",
-            maturity: AdapterMaturity::Planned,
-            capabilities: AdapterCapabilities::default(),
-            status_note: "Adapter contract defined; native inspection and enforcement are not implemented.",
+            maturity: AdapterMaturity::InDevelopment,
+            capabilities: AdapterCapabilities { policy_generation: true, ..AdapterCapabilities::default() },
+            status_note: "Reviewable native Row-Level Security predicate and policy DDL can be generated. Session-context trust, catalog inspection, deployment, semantic verification and runtime admission are not implemented.",
         },
         AdapterDescriptor {
             kind: DatabaseKind::MongoDb,
             name: "MongoDB",
-            maturity: AdapterMaturity::Planned,
-            capabilities: AdapterCapabilities::default(),
-            status_note: "Adapter contract defined; document-level authorization model and enforcement are not implemented.",
+            maturity: AdapterMaturity::InDevelopment,
+            capabilities: AdapterCapabilities { policy_generation: true, ..AdapterCapabilities::default() },
+            status_note: "Reviewable database-per-tenant collection-role templates exist. Shared-collection document-level enforcement and native runtime verification are not implemented.",
         },
         AdapterDescriptor {
             kind: DatabaseKind::CockroachDb,
             name: "CockroachDB",
             maturity: AdapterMaturity::Planned,
             capabilities: AdapterCapabilities::default(),
-            status_note: "Adapter contract defined; CockroachDB-specific authorization behavior requires separate validation.",
+            status_note: "CockroachDB-specific authorization semantics and runtime enforcement require separate implementation and validation.",
         },
-        AdapterDescriptor {\n            kind: DatabaseKind::Redis,\n            name: "Redis",\n            maturity: AdapterMaturity::InDevelopment,\n            capabilities: AdapterCapabilities { policy_generation: true, ..AdapterCapabilities::default() },\n            status_note: "Reviewable ACL templates exist for tenant-prefixed keyspaces; native inspection, principal binding, runtime enforcement, drift and evidence are not implemented.",\n        },\n        AdapterDescriptor {\n            kind: DatabaseKind::VaultDb,
+        AdapterDescriptor {
+            kind: DatabaseKind::Redis,
+            name: "Redis",
+            maturity: AdapterMaturity::InDevelopment,
+            capabilities: AdapterCapabilities { policy_generation: true, ..AdapterCapabilities::default() },
+            status_note: "Reviewable tenant-prefixed ACL templates exist. Native ACL inspection, trusted principal selection, command allowlisting, runtime enforcement and drift verification are not implemented.",
+        },
+        AdapterDescriptor {
+            kind: DatabaseKind::VaultDb,
             name: "VAULTDB (Agata-native research engine)",
             maturity: AdapterMaturity::Planned,
             capabilities: AdapterCapabilities::default(),
@@ -434,7 +442,7 @@ mod tests {
     #[test]
     fn planned_adapters_make_no_unsupported_capability_claims() {
         let catalog = adapter_catalog();
-        assert_eq!(catalog.len(), 12);
+        assert_eq!(catalog.len(), 13);
         for adapter in catalog.iter().filter(|adapter| adapter.maturity == AdapterMaturity::Planned) {
             assert_eq!(adapter.capabilities, AdapterCapabilities::default());
         }
