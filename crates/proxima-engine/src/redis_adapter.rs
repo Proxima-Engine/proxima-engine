@@ -74,6 +74,10 @@ impl RedisCatalogAdapter {
         let mut connection = self.connect_checked().await?;
         let whoami = redis::cmd("ACL").arg("WHOAMI").query_async::<String>(&mut connection).await.map_err(db_error)?;
         let acl_lines = redis::cmd("ACL").arg("LIST").query_async::<Vec<String>>(&mut connection).await.map_err(db_error)?;
+        let acl_rule_count = acl_lines.len();
+        let acl_inventory_truncated = acl_rule_count > 10_000;
+        let acl_digest = digest(&serde_json::to_vec(&acl_lines).map_err(|_| error("redis_acl_serialization_failed", "Could not serialize Redis ACL rules."))?);
+        let acl_lines = acl_lines.into_iter().take(10_000).collect::<Vec<_>>();
         let categories = redis::cmd("ACL").arg("CAT").query_async::<Vec<String>>(&mut connection).await.map_err(db_error)?;
         let server_info = redis::cmd("INFO").arg("server").query_async::<String>(&mut connection).await.map_err(db_error)?;
         let keyspace_info = redis::cmd("INFO").arg("keyspace").query_async::<String>(&mut connection).await.map_err(db_error)?;
@@ -114,7 +118,6 @@ impl RedisCatalogAdapter {
                 });
             }
         }
-        let acl_digest = digest(&serde_json::to_vec(&acl_lines).map_err(|_| error("redis_acl_serialization_failed", "Could not serialize Redis ACL rules."))?);
         let sanitized_acl = acl_lines.iter().map(|line| sanitize_acl_line(line)).collect::<Vec<_>>();
         let target_attributes = json!({
             "database_index": self.database_index,
@@ -125,6 +128,8 @@ impl RedisCatalogAdapter {
             "acl_users": sanitized_acl,
             "acl_categories": categories,
             "acl_rule_fingerprint": acl_digest,
+            "acl_rule_count": acl_rule_count,
+            "acl_inventory_truncated": acl_inventory_truncated,
             "tls_certificate_and_hostname_verification_required": true
         });
         let fingerprint = digest(&serde_json::to_vec(&json!({"database_index":self.database_index,"target":target_attributes,"resources":resources}))
@@ -134,6 +139,13 @@ impl RedisCatalogAdapter {
             resource: None,
             detail: "Discovery inventories ACL key patterns and command rules. It does not enumerate all stored keys or prove every application operation is tenant-bound.".into(),
         }];
+        if acl_inventory_truncated {
+            findings.push(SecurityFinding {
+                code: "redis_acl_inventory_truncated".into(),
+                resource: None,
+                detail: "Redis ACL LIST returned more than 10,000 users; the displayed inventory is bounded and cannot be treated as complete.".into(),
+            });
+        }
         if !broad_users.is_empty() {
             broad_users.sort();
             broad_users.dedup();
