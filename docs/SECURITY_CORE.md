@@ -21,6 +21,10 @@ The Rust library module `security_core` defines:
 
 A report permits access only when posture is `verified`, inspection is `complete`, and the finding list is empty. Unknown, incomplete, unavailable, degraded, or failing inspection produces a deny decision.
 
+The Rust module `database_adapter` defines the adapter boundary through `DatabaseAdapter`: native inspection, policy compilation, verification, and drift detection. Its registry rejects duplicate implementations for the same database kind. The interface is an implementation contract, not proof that a database adapter exists; the current Engine branch does not register a production-ready PostgreSQL adapter through this trait yet.
+
+The CLI's `adapters` command reports `scope: engine_runtime`. The Cloud API reports platform-level management capabilities separately. Their scopes differ deliberately: a Cloud deployment workflow does not imply that the Engine itself performs database DDL deployment or runtime posture admission.
+
 ## Adapter maturity
 
 The Engine catalog intentionally reports PostgreSQL as `in_development`. Existing work includes signed tenant-context verification, PostgreSQL role binding, the PostgreSQL Policy Guard CLI work and protocol-level tenant-session protections. The catalog does not mark semantic policy verification, controlled policy deployment, drift detection or signed policy evidence as complete Engine capabilities.
