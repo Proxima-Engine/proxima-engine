@@ -5,6 +5,7 @@ use std::io;
 use std::sync::Arc;
 
 use hmac::Mac;
+use serde::{Deserialize, Serialize};
 use proxima_engine::{
     attestation::{AttestationConfig, AttestationLedger, SecurityState, TelemetrySummary},
     break_glass,
@@ -175,6 +176,171 @@ fn sign_node_heartbeat(
     let mut mac = hmac::Hmac::<Sha256>::new_from_slice(key)?;
     mac.update(canonical.as_bytes());
     Ok(hex::encode(mac.finalize().into_bytes()))
+}
+
+
+#[derive(Serialize)]
+struct NodePolicyStatusRequestCanonical<'a> {
+    domain: &'static str,
+    node_id: &'a str,
+    timestamp: i64,
+    target_id: &'a str,
+    database_name: &'a str,
+    tenant_id: &'a str,
+    tenant_role_prefix: &'a str,
+}
+
+#[derive(Serialize, Deserialize)]
+struct NodePolicyStatusPayload {
+    node_id: String,
+    request_timestamp: i64,
+    target_id: String,
+    database_name: String,
+    tenant_id: String,
+    decision: String,
+    policy_revision: Option<i32>,
+    reason: String,
+    issued_at: i64,
+    expires_at: i64,
+}
+
+#[derive(Deserialize)]
+struct SignedNodePolicyStatus {
+    payload: NodePolicyStatusPayload,
+    signature: String,
+}
+
+/// Per-connection fail-closed check against the Control Plane's latest verified
+/// PostgreSQL posture. A signed response is bound to this node, target,
+/// database, tenant, request timestamp and a 15-second expiry.
+#[derive(Clone)]
+struct PolicyAdmissionClient {
+    client: reqwest::Client,
+    url: String,
+    node_id: String,
+    target_id: String,
+    tenant_role_prefix: String,
+    signing_key: Vec<u8>,
+}
+
+impl PolicyAdmissionClient {
+    fn from_env(tenant_role_prefix: &str) -> io::Result<Option<Self>> {
+        let url = std::env::var("PROXIMA_NODE_POLICY_STATUS_URL").ok();
+        let required = std::env::var("PROXIMA_POLICY_ADMISSION_REQUIRED")
+            .map(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+            .unwrap_or(false);
+        let Some(url) = url else {
+            if required {
+                return Err(io::Error::new(io::ErrorKind::InvalidInput,
+                    "PROXIMA_POLICY_ADMISSION_REQUIRED is enabled but PROXIMA_NODE_POLICY_STATUS_URL is missing"));
+            }
+            return Ok(None);
+        };
+        if !attestation_ingest_url_allowed(&url, true) {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput,
+                "PROXIMA_NODE_POLICY_STATUS_URL must use HTTPS or an approved loopback/development endpoint"));
+        }
+        let node_id = std::env::var("PROXIMA_NODE_ID")
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "PROXIMA_NODE_ID is required for policy admission"))?;
+        let target_id = std::env::var("PROXIMA_DATABASE_TARGET_ID")
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "PROXIMA_DATABASE_TARGET_ID is required for policy admission"))?;
+        let signing_key = std::env::var("PROXIMA_NODE_SIGNING_KEY_HEX")
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "PROXIMA_NODE_SIGNING_KEY_HEX is required for policy admission"))?;
+        let signing_key = hex::decode(signing_key.trim())
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "PROXIMA_NODE_SIGNING_KEY_HEX must be hexadecimal"))?;
+        if signing_key.len() != 32 {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "Node policy admission signing key must be exactly 32 bytes"));
+        }
+        uuid::Uuid::parse_str(&node_id)
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "PROXIMA_NODE_ID must be a UUID"))?;
+        uuid::Uuid::parse_str(&target_id)
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "PROXIMA_DATABASE_TARGET_ID must be a UUID"))?;
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(5))
+            .build()
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.to_string()))?;
+        Ok(Some(Self {
+            client, url, node_id, target_id,
+            tenant_role_prefix: tenant_role_prefix.to_owned(),
+            signing_key,
+        }))
+    }
+
+    async fn authorize(&self, database_name: &str, tenant_id: &str) -> io::Result<()> {
+        if database_name.is_empty() || database_name.len() > 63
+            || tenant_id.is_empty() || tenant_id.len() > 128
+        {
+            return Err(io::Error::new(io::ErrorKind::PermissionDenied,
+                "Invalid database or tenant identity for policy admission"));
+        }
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|error| io::Error::new(io::ErrorKind::PermissionDenied, error.to_string()))?
+            .as_secs() as i64;
+        let canonical = NodePolicyStatusRequestCanonical {
+            domain: "proxima-node-policy-status-request-v1",
+            node_id: &self.node_id,
+            timestamp,
+            target_id: &self.target_id,
+            database_name,
+            tenant_id,
+            tenant_role_prefix: &self.tenant_role_prefix,
+        };
+        let bytes = serde_json::to_vec(&canonical)
+            .map_err(|error| io::Error::new(io::ErrorKind::PermissionDenied, error.to_string()))?;
+        let mut mac = hmac::Hmac::<Sha256>::new_from_slice(&self.signing_key)
+            .map_err(|_| io::Error::new(io::ErrorKind::PermissionDenied, "Invalid node signing key"))?;
+        mac.update(&bytes);
+        let signature = hex::encode(mac.finalize().into_bytes());
+
+        let response = self.client.post(&self.url)
+            .json(&serde_json::json!({
+                "node_id": self.node_id,
+                "timestamp": timestamp,
+                "target_id": self.target_id,
+                "database_name": database_name,
+                "tenant_id": tenant_id,
+                "tenant_role_prefix": self.tenant_role_prefix,
+                "signature": signature
+            }))
+            .send().await
+            .map_err(|error| io::Error::new(io::ErrorKind::PermissionDenied,
+                format!("Policy admission service unavailable: {error}")))?
+            .error_for_status()
+            .map_err(|error| io::Error::new(io::ErrorKind::PermissionDenied,
+                format!("Policy admission request rejected: {error}")))?;
+        let signed: SignedNodePolicyStatus = response.json().await
+            .map_err(|error| io::Error::new(io::ErrorKind::PermissionDenied,
+                format!("Invalid signed policy admission response: {error}")))?;
+        let payload = &signed.payload;
+        if payload.node_id != self.node_id
+            || payload.request_timestamp != timestamp
+            || payload.target_id != self.target_id
+            || payload.database_name != database_name
+            || payload.tenant_id != tenant_id
+            || payload.issued_at > timestamp + 30
+            || payload.issued_at < timestamp - 30
+            || payload.expires_at <= timestamp
+            || payload.expires_at > payload.issued_at + 15
+        {
+            return Err(io::Error::new(io::ErrorKind::PermissionDenied,
+                "Policy admission response is stale or bound to a different node, target, database, or tenant"));
+        }
+        let signature = hex::decode(&signed.signature)
+            .map_err(|_| io::Error::new(io::ErrorKind::PermissionDenied, "Invalid policy admission signature encoding"))?;
+        let payload_bytes = serde_json::to_vec(payload)
+            .map_err(|error| io::Error::new(io::ErrorKind::PermissionDenied, error.to_string()))?;
+        let mut verifier = hmac::Hmac::<Sha256>::new_from_slice(&self.signing_key)
+            .map_err(|_| io::Error::new(io::ErrorKind::PermissionDenied, "Invalid node signing key"))?;
+        verifier.update(&payload_bytes);
+        verifier.verify_slice(&signature)
+            .map_err(|_| io::Error::new(io::ErrorKind::PermissionDenied, "Policy admission signature verification failed"))?;
+        if payload.decision != "allow" {
+            return Err(io::Error::new(io::ErrorKind::PermissionDenied,
+                format!("Tenant policy admission denied: {}", payload.reason)));
+        }
+        Ok(())
+    }
 }
 
 fn attestation_ingest_url_allowed(url: &str, allow_insecure_http: bool) -> bool {
