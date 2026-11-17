@@ -11,7 +11,7 @@ use crate::database_adapter::{
 };
 use crate::security_core::{
     AdapterCapabilities, AdapterDescriptor, AdapterMaturity, DatabaseKind,
-    InspectionCompleteness, Operation, ResourceKind, ResourceRef, SecurityFinding,
+    InspectionCompleteness, ResourceKind, ResourceRef, SecurityFinding,
     SecurityPosture, TenantSecurityPolicy, VerificationReport, SECURITY_MODEL_VERSION,
 };
 use reqwest::{header::{HeaderMap, HeaderValue, AUTHORIZATION}, redirect::Policy, Client, Url};
