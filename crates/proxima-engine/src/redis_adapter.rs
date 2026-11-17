@@ -410,6 +410,7 @@ mod tests {
     fn requires_tls_and_validates_target() {
         assert!(RedisCatalogAdapter::new("target", 0, "redis://localhost/0").is_err());
         assert!(RedisCatalogAdapter::new("target", 0, "rediss://localhost/0").is_ok());
+        assert!(RedisCatalogAdapter::new("target", 0, "rediss://localhost/0#insecure").is_err());
         assert!(RedisCatalogAdapter::new("", 0, "rediss://localhost/0").is_err());
     }
 
