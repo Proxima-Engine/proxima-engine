@@ -355,8 +355,21 @@ impl DatabaseAdapter for SqlServerCatalogAdapter {
                 if protected.operations.contains(&Operation::Delete) && !has_before_delete {
                     resource_findings.push(finding("sql_server_delete_block_predicate_missing", &protected.resource, "Delete operations require a BEFORE DELETE block predicate."));
                 }
-                if !predicates.is_empty() && !predicates.iter().any(|predicate| predicate["definition"].as_str().is_some_and(|definition| definition.to_ascii_uppercase().contains("SESSION_CONTEXT"))) {
-                    resource_findings.push(finding("sql_server_tenant_context_predicate_missing", &protected.resource, "The enabled RLS predicate definitions do not reference SESSION_CONTEXT; verify that they bind rows to authenticated tenant identity."));
+                let predicate_function_names = predicates.iter()
+                    .filter_map(|predicate| predicate["definition"].as_str().and_then(predicate_function_name))
+                    .collect::<Vec<_>>();
+                let predicate_functions = discovery.resources.iter().filter(|resource| {
+                    resource.kind == ResourceKind::Function && predicate_function_names.iter().any(|name| name == &resource.name)
+                }).collect::<Vec<_>>();
+                if !predicates.is_empty() && predicate_functions.is_empty() {
+                    resource_findings.push(finding("sql_server_predicate_function_definition_unavailable", &protected.resource, "The RLS predicate function definition was not visible in the catalog; its tenant identity source cannot be inspected."));
+                } else if !predicate_functions.is_empty() && !predicate_functions.iter().any(|function| {
+                    function.attributes["definition"].as_str().is_some_and(|definition| definition.to_ascii_uppercase().contains("SESSION_CONTEXT"))
+                }) {
+                    resource_findings.push(finding("sql_server_tenant_context_predicate_missing", &protected.resource, "The RLS predicate function definitions do not reference SESSION_CONTEXT; verify that they bind rows to authenticated tenant identity."));
+                }
+                if predicate_functions.iter().any(|function| function.attributes["schema_bound"].as_bool() != Some(true)) {
+                    resource_findings.push(finding("sql_server_predicate_function_not_schema_bound", &protected.resource, "A predicate function is not confirmed schema-bound; SQL Server RLS predicate functions should be schema-bound."));
                 }
                 resource_findings.push(finding("sql_server_session_context_trust_unverified", &protected.resource, "SESSION_CONTEXT is settable by a database session unless the application/gateway boundary prevents untrusted callers from setting tenant identity."));
                 let resource_fingerprint = digest(&serde_json::to_vec(&found.attributes)
@@ -424,6 +437,12 @@ impl DatabaseAdapter for SqlServerCatalogAdapter {
     }
 }
 
+fn predicate_function_name(definition: &str) -> Option<String> {
+    let call = definition.split('(').next()?.trim();
+    let normalized = call.replace('[', "").replace(']', "");
+    normalized.rsplit('.').next().map(str::trim).filter(|name| !name.is_empty()).map(str::to_owned)
+}
+
 fn finding(code: &str, resource: &ResourceRef, detail: &str) -> SecurityFinding {
     SecurityFinding { code: code.into(), resource: Some(resource.clone()), detail: detail.into() }
 }
@@ -450,6 +469,13 @@ mod tests {
     fn rejects_unverified_sql_server_transport_options() {
         assert!(SqlServerCatalogAdapter::new("target", "app", "Server=localhost;Database=app;TrustServerCertificate=true").is_err());
         assert!(SqlServerCatalogAdapter::new("target", "app", "Server=localhost;Database=app;Encrypt=false").is_err());
+    }
+
+    #[test]
+    fn extracts_schema_qualified_rls_predicate_function_names() {
+        assert_eq!(predicate_function_name("[security].[fn_tenant_access]([tenant_id])").as_deref(), Some("fn_tenant_access"));
+        assert_eq!(predicate_function_name("security.fn_tenant_access([tenant_id])").as_deref(), Some("fn_tenant_access"));
+        assert_eq!(predicate_function_name(""), None);
     }
 
     #[test]
