@@ -20,6 +20,7 @@ pub enum SecurityCoreError {
     InvalidCompilation,
     DriftInspectionIncomplete,
     DriftFingerprintMismatch,
+    DuplicateCompiledResource(String),
 }
 
 impl From<AdapterError> for SecurityCoreError {
@@ -43,9 +44,25 @@ impl SecurityCoreCoordinator {
         let mut covered = HashSet::new();
         for change in &compiled.changes {
             if change.action.trim().is_empty() || change.definition.is_null() { return Err(SecurityCoreError::InvalidCompilation); }
-            covered.insert(change.resource.resource.clone());
+            if !covered.insert(change.resource.resource.clone()) {
+                return Err(SecurityCoreError::DuplicateCompiledResource(change.resource.resource.name.clone()));
+            }
         }
-        if policy.resources.iter().any(|item| !covered.contains(&item.resource)) { return Err(SecurityCoreError::InvalidCompilation); }
+        if covered.len() != policy.resources.len()
+            || policy.resources.iter().any(|item| !covered.contains(&item.resource))
+        {
+            return Err(SecurityCoreError::InvalidCompilation);
+        }
+        for change in &compiled.changes {
+            let Some(required) = policy.resources.iter().find(|item| item.resource == change.resource.resource) else {
+                return Err(SecurityCoreError::InvalidCompilation);
+            };
+            if change.resource.tenant_key != required.tenant_key
+                || required.operations.iter().any(|operation| !change.resource.operations.contains(operation))
+            {
+                return Err(SecurityCoreError::InvalidCompilation);
+            }
+        }
         Ok(compiled)
     }
 
@@ -75,6 +92,9 @@ impl SecurityCoreCoordinator {
                 failures.push(SecurityFinding { code: "resource_posture_not_verified".into(), resource: Some(required.resource.clone()), detail: "The protected resource is incomplete or has native findings.".into() });
                 failures.extend(actual.findings.iter().cloned());
             }
+            if actual.resource.tenant_key != required.tenant_key {
+                failures.push(SecurityFinding { code: "tenant_ownership_key_mismatch".into(), resource: Some(required.resource.clone()), detail: "The inspected native tenant ownership key differs from the approved policy.".into() });
+            }
             for operation in &required.operations {
                 if !actual.verified_operations.contains(operation) {
                     failures.push(SecurityFinding { code: "operation_not_verified".into(), resource: Some(required.resource.clone()), detail: format!("Native enforcement for {operation:?} was not verified.") });
@@ -100,6 +120,9 @@ impl SecurityCoreCoordinator {
         let report = adapter.detect_drift(target, previous_fingerprint).await?;
         if report.database_kind != kind || report.target != *target { return Err(SecurityCoreError::SnapshotTargetMismatch); }
         if report.completeness != InspectionCompleteness::Complete { return Err(SecurityCoreError::DriftInspectionIncomplete); }
+        if report.previous_fingerprint.as_deref() != previous_fingerprint {
+            return Err(SecurityCoreError::DriftFingerprintMismatch);
+        }
         if report.observed_at.trim().is_empty() || report.observed_fingerprint.as_deref().map_or(true, str::is_empty) {
             return Err(SecurityCoreError::DriftInspectionIncomplete);
         }
