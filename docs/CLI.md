@@ -24,6 +24,17 @@ cargo run -p proxima-engine --bin proxima-policy-guard -- adapters
 
 The `adapters` command prints the versioned Proxima Security Core catalog. PostgreSQL is marked `in_development`; MySQL, MariaDB, Microsoft SQL Server, MongoDB, CockroachDB and VAULTDB (Agata's embedded-engine research target) are marked `planned` with no enabled capabilities. A planned entry is not a supported database integration.
 
+The PostgreSQL `discover-postgres` command enumerates non-system tables, partitioned tables, foreign tables, views, materialized views, sequences, functions and procedures. It captures ownership, columns/defaults, RLS flags, native policies, constraints, indexes, triggers, view definitions/options and routine security/execute ACL metadata. It requires the registered target ID/database name and a TLS-verified, read-only inspection role through `PROXIMA_POSTGRES_ADAPTER_DATABASE_URL`, `PROXIMA_POSTGRES_ADAPTER_TARGET_ID`, `PROXIMA_POSTGRES_ADAPTER_DATABASE_NAME` and `PROXIMA_TENANT_ROLE_PREFIX`.
+
+Run a full database discovery or scope it to one schema:
+
+```bash
+cargo run -p proxima-engine --bin proxima-policy-guard -- discover-postgres
+cargo run -p proxima-engine --bin proxima-policy-guard -- discover-postgres public
+```
+
+Discovery returns an inventory and fingerprint; it does not infer tenant keys, verify tenant isolation, or authorize traffic.
+
 The PostgreSQL `audit` command is a catalog posture inspection, not a semantic policy verifier. Its JSON deliberately reports `security_posture: unknown` and `access_decision: deny`, even when it finds no catalog findings. A zero exit code means the inspection completed without catalog findings; it does not certify tenant isolation.
 
 
