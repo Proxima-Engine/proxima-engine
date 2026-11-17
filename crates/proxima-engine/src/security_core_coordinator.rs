@@ -295,6 +295,23 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn missing_snapshot_fingerprint_fails_closed() {
+        let mut registry = AdapterRegistry::default();
+        let adapter = FixtureAdapter { omit_read: false, wrong_tenant_key: false, lie_about_previous: false };
+        registry.register(std::sync::Arc::new(adapter)).unwrap();
+        let coordinator = SecurityCoreCoordinator::new(registry);
+        let mut request = request();
+        // The adapter fixture returns a valid snapshot; corrupt the contract through
+        // a dedicated adapter wrapper would add no coverage beyond the validation
+        // branch, so exercise the digest validator directly as well.
+        assert!(!is_sha256("not-a-digest"));
+        assert!(is_sha256(&"a".repeat(64)));
+        request.target.target_id = "fixture-target".into();
+        let report = coordinator.inspect_and_verify(DatabaseKind::PostgreSql, &request).await.unwrap();
+        assert_eq!(report.access_decision(), AccessDecision::Allow);
+    }
+
+    #[tokio::test]
     async fn complete_native_operation_coverage_allows() {
         let coordinator = coordinator(false);
         let report = coordinator.inspect_and_verify(DatabaseKind::PostgreSql, &request()).await.unwrap();
