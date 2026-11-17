@@ -119,7 +119,7 @@ pub fn compile_mysql_database_boundary(policy: &TenantSecurityPolicy, kind: Data
             else { format!("GRANT {} ON \x60${{tenant_database}}\x60.{table} TO '${{tenant_principal}}'@'%';", grants.join(", ")) };
         changes.push(resource_change(resource, "mysql_family_per_tenant_database_grant_template", json!({
             "sql_template": [
-                "CREATE USER '\${tenant_principal}'@'%' IDENTIFIED BY '\${secret_manager_generated_password}';",
+                "CREATE USER '${tenant_principal}'@'%' IDENTIFIED BY '${secret_manager_generated_password}';",
                 sql
             ],
             "required_isolation_model": "one_database_per_tenant",
