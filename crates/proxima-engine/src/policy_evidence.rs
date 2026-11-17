@@ -324,7 +324,7 @@ mod tests {
         let authority = authority();
         let evidence = authority.sign_evidence(evidence_payload()).unwrap();
         assert_eq!(authority.issue_admission(&evidence, 1_800_000_010, 61).unwrap_err().code, "invalid_admission_lifetime");
-        let admission = authority.issue_admission(&evidence, 100, 30).unwrap();
+        let admission = authority.issue_admission(&evidence, 1_800_000_010, 30).unwrap();
         assert_eq!(authority.verify_admission(&admission, &evidence, expected(), 1_800_000_040).unwrap_err().code, "admission_expired");
     }
 
