@@ -392,8 +392,9 @@ impl DatabaseAdapter for SqlServerCatalogAdapter {
                 if protected.resource.kind != ResourceKind::Table {
                     return Err(error("unsupported_sql_server_policy_resource", "The current SQL Server RLS compiler manages tables only."));
                 }
+                let protected_schema = protected.resource.namespace.as_deref().unwrap_or("dbo");
                 let found = discovery.resources.iter().find(|resource| {
-                    resource.namespace == protected.resource.namespace && resource.name == protected.resource.name
+                    resource.namespace.as_deref() == Some(protected_schema) && resource.name == protected.resource.name
                         && resource.kind == ResourceKind::Table
                 });
                 let mut resource_findings = Vec::new();
