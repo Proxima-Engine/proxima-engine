@@ -22,7 +22,7 @@ This is only safe when the tenant context is set by a trusted authenticated gate
 
 ### MySQL and MariaDB
 
-These systems do not expose native row-level security predicates equivalent to PostgreSQL RLS or SQL Server RLS. The compiler therefore generates a database-per-tenant grant template. It explicitly marks shared-table row-level isolation as false. A deployment must provision a separate database, principal and secret for each tenant, and route only after authenticating the tenant. A shared table with a `tenant_id` column is not secured by this template.
+These systems do not expose native row-level security predicates equivalent to PostgreSQL RLS or SQL Server RLS. The compiler therefore generates a database-per-tenant grant template. It explicitly marks shared-table row-level isolation as false. The generated user and grant statements require a `${trusted_application_host}` placeholder; deployment must replace it with the exact trusted application egress host or a narrowly scoped network identity, never an unrestricted wildcard. A deployment must provision a separate database, principal and secret for each tenant, and route only after authenticating the tenant. A shared table with a `tenant_id` column is not secured by this template.
 
 ### MongoDB
 
@@ -30,7 +30,7 @@ MongoDB RBAC controls database and collection privileges; it does not automatica
 
 ### Redis
 
-The ACL template binds a tenant-specific principal to a key pattern containing the literal `${tenant_id}` placeholder, for example `tenant:${tenant_id}:*`. The trusted gateway must select the corresponding ACL principal after authenticating the tenant. The template uses a narrow baseline core-command allowlist instead of broad ACL categories. Production support still requires inspection of command key specifications, multi-key behavior, keyless commands, scripts, functions, channels, modules and administrative privileges.
+The ACL template binds a tenant-specific principal to a key pattern containing the literal `${tenant_id}` placeholder, for example `tenant:${tenant_id}:*`. The trusted gateway must select the corresponding ACL principal after authenticating the tenant. The template derives a narrower core-command allowlist from the requested operations instead of granting every mutating command. Redis ACLs cannot distinguish create-only from update-only semantics for upsert commands such as `SET`, `HSET`, `SADD` and `ZADD`; a trusted enforcing gateway or application contract must enforce that distinction. Production support still requires inspection of command key specifications, multi-key behavior, keyless commands, scripts, functions, channels, modules and administrative privileges.
 
 ## Why these are not yet called supported
 
