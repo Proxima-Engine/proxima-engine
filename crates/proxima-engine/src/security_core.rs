@@ -129,7 +129,7 @@ pub fn adapter_catalog() -> Vec<AdapterDescriptor> {
             name: "Redis",
             maturity: AdapterMaturity::InDevelopment,
             capabilities: AdapterCapabilities { policy_generation: true, ..AdapterCapabilities::default() },
-            status_note: "Reviewable tenant-prefixed ACL templates exist. Native ACL inspection, trusted principal selection, command allowlisting, runtime enforcement and drift verification are not implemented.",
+            status_note: "Reviewable tenant-prefixed ACL templates with an explicit baseline command allowlist exist. Native ACL inspection, trusted principal selection, runtime enforcement and drift verification are not implemented.",
         },
         AdapterDescriptor {
             kind: DatabaseKind::VaultDb,
