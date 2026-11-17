@@ -91,7 +91,7 @@ impl SqliteCatalogAdapter {
             let file: String = database.try_get("file").map_err(db_error)?;
             if name == "main" {
                 main_path = Some(file);
-            } else {
+            } else if name != "temp" {
                 return Err(error("sqlite_attached_database_rejected", "Attached SQLite databases are not accepted because they expand the inspection boundary."));
             }
         }
