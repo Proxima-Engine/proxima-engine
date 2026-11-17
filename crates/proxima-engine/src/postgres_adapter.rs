@@ -387,6 +387,81 @@ impl DatabaseAdapter for PostgresCatalogAdapter {
                 "definition": row.get::<_, String>(6)
             })));
 
+            let column_rows = client.query(
+                "SELECT n.nspname, c.relname, a.attname, pg_catalog.format_type(a.atttypid,a.atttypmod), a.attnotnull, COALESCE(pg_catalog.pg_get_expr(d.adbin,d.adrelid),''), a.attidentity::text, a.attgenerated::text FROM pg_catalog.pg_attribute a JOIN pg_catalog.pg_class c ON c.oid=a.attrelid JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace LEFT JOIN pg_catalog.pg_attrdef d ON d.adrelid=a.attrelid AND d.adnum=a.attnum WHERE c.relkind IN ('r','p','v','m') AND a.attnum>0 AND NOT a.attisdropped AND n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname NOT LIKE 'pg_%' ORDER BY n.nspname,c.relname,a.attnum",
+                &[],
+            ).await.map_err(db_error)?;
+            state.extend(column_rows.into_iter().map(|row| json!({
+                "kind": "column",
+                "schema": row.get::<_, String>(0),
+                "relation": row.get::<_, String>(1),
+                "name": row.get::<_, String>(2),
+                "data_type": row.get::<_, String>(3),
+                "not_null": row.get::<_, bool>(4),
+                "default": row.get::<_, String>(5),
+                "identity": row.get::<_, String>(6),
+                "generated": row.get::<_, String>(7)
+            })));
+
+            let constraint_rows = client.query(
+                "SELECT n.nspname, c.relname, constraint_row.conname, constraint_row.contype::text, constraint_row.convalidated, constraint_row.condeferrable, constraint_row.condeferred, pg_catalog.pg_get_constraintdef(constraint_row.oid,true) FROM pg_catalog.pg_constraint constraint_row JOIN pg_catalog.pg_class c ON c.oid=constraint_row.conrelid JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname NOT LIKE 'pg_%' ORDER BY n.nspname,c.relname,constraint_row.conname",
+                &[],
+            ).await.map_err(db_error)?;
+            state.extend(constraint_rows.into_iter().map(|row| json!({
+                "kind": "constraint",
+                "schema": row.get::<_, String>(0),
+                "relation": row.get::<_, String>(1),
+                "name": row.get::<_, String>(2),
+                "constraint_type": row.get::<_, String>(3),
+                "validated": row.get::<_, bool>(4),
+                "deferrable": row.get::<_, bool>(5),
+                "initially_deferred": row.get::<_, bool>(6),
+                "definition": row.get::<_, String>(7)
+            })));
+
+            let index_rows = client.query(
+                "SELECT n.nspname, table_row.relname, index_row.relname, index_meta.indisunique, index_meta.indisvalid, index_meta.indisready, pg_catalog.pg_get_indexdef(index_meta.indexrelid) FROM pg_catalog.pg_index index_meta JOIN pg_catalog.pg_class table_row ON table_row.oid=index_meta.indrelid JOIN pg_catalog.pg_class index_row ON index_row.oid=index_meta.indexrelid JOIN pg_catalog.pg_namespace n ON n.oid=table_row.relnamespace WHERE n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname NOT LIKE 'pg_%' ORDER BY n.nspname,table_row.relname,index_row.relname",
+                &[],
+            ).await.map_err(db_error)?;
+            state.extend(index_rows.into_iter().map(|row| json!({
+                "kind": "index",
+                "schema": row.get::<_, String>(0),
+                "relation": row.get::<_, String>(1),
+                "name": row.get::<_, String>(2),
+                "unique": row.get::<_, bool>(3),
+                "valid": row.get::<_, bool>(4),
+                "ready": row.get::<_, bool>(5),
+                "definition": row.get::<_, String>(6)
+            })));
+
+            let trigger_rows = client.query(
+                "SELECT n.nspname, c.relname, trigger_row.tgname, trigger_row.tgenabled::text, pg_catalog.pg_get_triggerdef(trigger_row.oid,true) FROM pg_catalog.pg_trigger trigger_row JOIN pg_catalog.pg_class c ON c.oid=trigger_row.tgrelid JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE NOT trigger_row.tgisinternal AND n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname NOT LIKE 'pg_%' ORDER BY n.nspname,c.relname,trigger_row.tgname",
+                &[],
+            ).await.map_err(db_error)?;
+            state.extend(trigger_rows.into_iter().map(|row| json!({
+                "kind": "trigger",
+                "schema": row.get::<_, String>(0),
+                "relation": row.get::<_, String>(1),
+                "name": row.get::<_, String>(2),
+                "enabled": row.get::<_, String>(3),
+                "definition": row.get::<_, String>(4)
+            })));
+
+            let view_rows = client.query(
+                "SELECT n.nspname, c.relname, c.relkind::text, pg_catalog.pg_get_userbyid(c.relowner), COALESCE(c.reloptions::text,''), pg_catalog.pg_get_viewdef(c.oid,true), COALESCE(c.relacl::text,'<default>') FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE c.relkind IN ('v','m') AND n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname NOT LIKE 'pg_%' ORDER BY n.nspname,c.relname",
+                &[],
+            ).await.map_err(db_error)?;
+            state.extend(view_rows.into_iter().map(|row| json!({
+                "kind": "view",
+                "schema": row.get::<_, String>(0),
+                "name": row.get::<_, String>(1),
+                "relation_kind": row.get::<_, String>(2),
+                "owner": row.get::<_, String>(3),
+                "options": row.get::<_, String>(4),
+                "definition": row.get::<_, String>(5),
+                "acl": row.get::<_, String>(6)
+            })));
+
             let fingerprint = sha256(&serde_json::to_vec(&state).map_err(|_| error("fingerprint_serialization_failed", "Could not serialize PostgreSQL catalog state."))?);
             let clock = client.query_one("SELECT to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"')", &[]).await.map_err(db_error)?;
             let observed_at: String = clock.get(0);
