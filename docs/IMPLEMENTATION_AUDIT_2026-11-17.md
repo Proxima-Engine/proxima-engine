@@ -104,3 +104,10 @@ PostgreSQL resource inspection also checks dependent view chains for non-securit
 The database-neutral adapter contract now exposes `discover` independently of policy inspection, with typed resource inventory, adapter target, completeness, findings, fingerprint and observation time. The PostgreSQL adapter implements read-only discovery of tables, partitioned/foreign tables, views, materialized views, sequences, functions and procedures. It records owners, relation ACL/RLS state, columns/defaults, native policy expressions/roles, constraints, indexes, non-internal triggers, view definitions/options, and routine SECURITY DEFINER/execute ACL metadata. The Policy Guard CLI exposes `discover-postgres [schema]` and always labels the result as inventory only with an explicit deny decision.
 
 Discovery tests cover invalid namespace and target mismatch without opening a database connection. Live catalog discovery and supported-version compatibility remain unexecuted in this session.
+
+
+## 11. Native MySQL/MariaDB catalog adapter — 17 November 2026
+
+Added a TLS identity-verifying MySQL protocol adapter shared by MySQL and MariaDB. It discovers tables/views and routines, column definitions/defaults/nullability, table/schema grants, and computes a deterministic catalog fingerprint. Policy inspection checks registered resource presence and tenant-key existence/nullability, while explicitly flagging that native row-level security is unavailable and database-per-tenant grants require independent principal probes. Drift comparison uses discovery fingerprints. The adapter remains in development and does not claim runtime tenant enforcement, semantic verification, controlled deployment or signed admission. Metadata visibility is marked incomplete because information_schema results are privilege-filtered.
+
+Regression tests cover database-kind validation, target bounds and capability maturity. Tests and live TLS/catalog compatibility checks were authored but not executed in this session.
