@@ -63,6 +63,7 @@ pub fn adapter_catalog() -> Vec<AdapterDescriptor> {
                 policy_generation: true,
                 controlled_policy_deployment: false,
                 drift_detection: false,
+                runtime_fail_closed_admission: false,
                 signed_security_evidence: false,
             },
             status_note: "Existing PostgreSQL Engine and Cloud work is being consolidated under the common security contract; full semantic verification and runtime fail-closed admission still require acceptance.",
