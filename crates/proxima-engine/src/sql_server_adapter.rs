@@ -120,6 +120,10 @@ impl SqlServerCatalogAdapter {
                 "SELECT index_info.name,index_info.type_desc,index_info.is_unique,index_info.is_primary_key,index_info.is_unique_constraint,index_info.is_disabled,index_info.has_filter,index_info.filter_definition,CONVERT(int,index_column.key_ordinal) AS key_ordinal,index_column.is_included_column,column_info.name AS column_name FROM sys.indexes index_info LEFT JOIN sys.index_columns index_column ON index_column.object_id=index_info.object_id AND index_column.index_id=index_info.index_id LEFT JOIN sys.columns column_info ON column_info.object_id=index_column.object_id AND column_info.column_id=index_column.column_id WHERE index_info.object_id=@P1 AND index_info.index_id > 0 ORDER BY index_info.index_id,index_column.key_ordinal,index_column.index_column_id",
                 &[&object_id],
             ).await.map_err(db_error)?.into_first_result().await.map_err(db_error)?;
+            let partition_metadata = client.query(
+                "SELECT partition_info.index_id,partition_info.partition_number,partition_info.rows,partition_info.data_compression_desc,data_space.name AS data_space_name,partition_scheme.name AS partition_scheme,partition_function.name AS partition_function,partition_function.type_desc AS partition_function_type,partition_function.boundary_value_on_right,partition_parameter.name AS partition_parameter,TYPE_NAME(partition_parameter.user_type_id) AS partition_parameter_type,partition_value.boundary_id,CONVERT(nvarchar(4000),partition_value.value) AS boundary_value FROM sys.partitions partition_info JOIN sys.indexes index_info ON index_info.object_id=partition_info.object_id AND index_info.index_id=partition_info.index_id JOIN sys.data_spaces data_space ON data_space.data_space_id=index_info.data_space_id LEFT JOIN sys.partition_schemes partition_scheme ON partition_scheme.data_space_id=data_space.data_space_id LEFT JOIN sys.partition_functions partition_function ON partition_function.function_id=partition_scheme.function_id LEFT JOIN sys.partition_parameters partition_parameter ON partition_parameter.function_id=partition_function.function_id LEFT JOIN sys.partition_range_values partition_value ON partition_value.function_id=partition_function.function_id WHERE partition_info.object_id=@P1 ORDER BY partition_info.index_id,partition_info.partition_number,partition_value.boundary_id",
+                &[&object_id],
+            ).await.map_err(db_error)?.into_first_result().await.map_err(db_error)?;
             let foreign_keys = client.query(
                 "SELECT fk.name,fk.is_disabled,fk.is_not_trusted,fk.delete_referential_action_desc,fk.update_referential_action_desc,parent_column.name AS parent_column,OBJECT_SCHEMA_NAME(fkc.referenced_object_id) AS referenced_schema,OBJECT_NAME(fkc.referenced_object_id) AS referenced_table,referenced_column.name AS referenced_column FROM sys.foreign_keys fk JOIN sys.foreign_key_columns fkc ON fkc.constraint_object_id=fk.object_id JOIN sys.columns parent_column ON parent_column.object_id=fkc.parent_object_id AND parent_column.column_id=fkc.parent_column_id JOIN sys.columns referenced_column ON referenced_column.object_id=fkc.referenced_object_id AND referenced_column.column_id=fkc.referenced_column_id WHERE fk.parent_object_id=@P1 ORDER BY fk.name,fkc.constraint_column_id",
                 &[&object_id],
@@ -169,6 +173,21 @@ impl SqlServerCatalogAdapter {
                         "key_ordinal": index.get::<i32,_>("key_ordinal"),
                         "included": index.get::<bool,_>("is_included_column").unwrap_or(false),
                         "column": index.get::<&str,_>("column_name")
+                    })).collect::<Vec<_>>(),
+                    "partitions": partition_metadata.iter().map(|partition| json!({
+                        "index_id": partition.get::<i32,_>("index_id").unwrap_or_default(),
+                        "partition_number": partition.get::<i32,_>("partition_number").unwrap_or_default(),
+                        "rows": partition.get::<i64,_>("rows").unwrap_or_default(),
+                        "compression": partition.get::<&str,_>("data_compression_desc").unwrap_or_default(),
+                        "data_space": partition.get::<&str,_>("data_space_name").unwrap_or_default(),
+                        "partition_scheme": partition.get::<&str,_>("partition_scheme"),
+                        "partition_function": partition.get::<&str,_>("partition_function"),
+                        "partition_function_type": partition.get::<&str,_>("partition_function_type"),
+                        "boundary_value_on_right": partition.get::<bool,_>("boundary_value_on_right"),
+                        "partition_parameter": partition.get::<&str,_>("partition_parameter"),
+                        "partition_parameter_type": partition.get::<&str,_>("partition_parameter_type"),
+                        "boundary_id": partition.get::<i32,_>("boundary_id"),
+                        "boundary_value": partition.get::<&str,_>("boundary_value")
                     })).collect::<Vec<_>>(),
                     "foreign_keys": foreign_keys.iter().map(|foreign_key| json!({
                         "name": foreign_key.get::<&str,_>("name").unwrap_or_default(),
