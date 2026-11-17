@@ -252,7 +252,7 @@ impl SqliteCatalogAdapter {
         let target_attributes = json!({
             "database_file": file,
             "filesystem_permissions": filesystem,
-            "foreign_keys_enabled": foreign_keys_enabled,
+            "inspection_connection_foreign_keys_enabled": foreign_keys_enabled,
             "journal_mode": journal_mode,
             "user_version": user_version,
             "application_id": application_id,
