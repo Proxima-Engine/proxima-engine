@@ -4,7 +4,7 @@
 
 <h1 align="center">Agata Proxima</h1>
 <p align="center"><strong>Database-independent tenant-security infrastructure.</strong></p>
-<p align="center">Agata Proxima defines a common tenant-security contract. Proxima Engine currently implements the PostgreSQL wire-protocol adapter, verifying signed tenant context and binding each accepted session to a tenant-specific PostgreSQL role. Other native database adapters are planned, not yet supported.</p>
+<p align="center">Agata Proxima defines a common tenant-security contract. Proxima Engine currently implements the PostgreSQL wire-protocol adapter, verifying signed tenant context and binding each accepted session to a tenant-specific PostgreSQL role. MySQL, MariaDB, SQL Server, MongoDB and CockroachDB are planned; VAULTDB is an Agata-native research target only. None is currently supported.</p>
 
 <p align="center">
   <a href="https://github.com/Proxima-Engine/proxima-engine/actions/workflows/ci.yml">Continuous integration</a> ·
@@ -37,7 +37,7 @@ https://github.com/user-attachments/assets/bca488eb-829c-4672-bbe9-b25878e5401c
 
 ## What is Agata Proxima?
 
-Agata Proxima is designed as an independent tenant-security platform. Proxima Security Core defines a database-neutral contract for tenant identity, protected resources, policy requirements, verification posture and fail-closed decisions. Database-specific adapters translate that contract into native controls. PostgreSQL is the first adapter implemented by Proxima Engine; other adapters remain planned until their native inspection and enforcement paths are built and tested.
+Agata Proxima is designed as an independent tenant-security platform. Proxima Security Core defines a database-neutral contract for tenant identity, protected resources, policy requirements, verification posture and fail-closed decisions. Database-specific adapters translate that contract into native controls. PostgreSQL is the first adapter implemented by Proxima Engine; MySQL, MariaDB, SQL Server, MongoDB and CockroachDB remain planned. VAULTDB is an Agata-owned embedded-engine research project without a Proxima tenant-security implementation.
 
 The product has two cooperating components:
 
@@ -48,7 +48,7 @@ Proxima Engine is a Rust service that sits between an application's existing Pos
 The current PostgreSQL Engine adapter provides:
 
 - **Signed tenant-context verification.** Validates tenant tokens using HMAC-SHA256, including token format, tenant identifier, expiry, and signature. Missing or invalid context is rejected when tenant enforcement is enabled.
-- **Tenant-to-role routing.** Maps the verified tenant identity to a configured PostgreSQL role and establishes a tenant-bound upstream database session.
+- **Tenant-to-role routing.** Maps the verified tenant identity to a PostgreSQL role derived from one configured global `PROXIMA_TENANT_ROLE_PREFIX` plus the normalized tenant ID, then establishes a tenant-bound upstream database session.
 - **PostgreSQL-native enforcement.** Works with database roles, grants, and Row-Level Security (RLS), keeping data authorization inside PostgreSQL.
 - **Protocol and connection controls.** Handles PostgreSQL startup and authentication negotiation, connection limits, upstream timeouts, and configurable client/upstream TLS.
 - **Security operations.** Includes a peer-scoped violation breaker, short-lived break-glass tokens with replay protection, and a local signed attestation ledger.
