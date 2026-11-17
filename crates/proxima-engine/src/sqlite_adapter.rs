@@ -125,22 +125,40 @@ impl SqliteCatalogAdapter {
             let table_name: String = row.try_get("tbl_name").map_err(db_error)?;
             let definition: Option<String> = row.try_get("sql").map_err(db_error)?;
             let kind = if object_type == "view" { ResourceKind::View } else { ResourceKind::Table };
-            let columns = if kind == ResourceKind::Table {
-                sqlx::query("SELECT cid,name,type,"notnull",dflt_value,pk,hidden FROM pragma_table_xinfo(?) ORDER BY cid")
-                    .bind(&name).fetch_all(&mut connection).await.map_err(db_error)?
-            } else {
-                Vec::new()
-            };
+            // SQLite's table-valued PRAGMA functions support both tables and views.
+            let columns = sqlx::query("SELECT cid,name,type,[notnull],dflt_value,pk,hidden FROM pragma_table_xinfo(?) ORDER BY cid")
+                .bind(&name).fetch_all(&mut connection).await.map_err(db_error)?;
             let indexes = if kind == ResourceKind::Table {
-                sqlx::query("SELECT seq,name,"unique",origin,partial FROM pragma_index_list(?) ORDER BY seq")
+                sqlx::query("SELECT seq,name,[unique],origin,partial FROM pragma_index_list(?) ORDER BY seq")
                     .bind(&name).fetch_all(&mut connection).await.map_err(db_error)?
             } else { Vec::new() };
             let foreign_keys = if kind == ResourceKind::Table {
-                sqlx::query("SELECT id,seq,"table","from","to",on_update,on_delete,"match" FROM pragma_foreign_key_list(?) ORDER BY id,seq")
+                sqlx::query("SELECT id,seq,[table],[from],[to],on_update,on_delete,[match] FROM pragma_foreign_key_list(?) ORDER BY id,seq")
                     .bind(&name).fetch_all(&mut connection).await.map_err(db_error)?
             } else { Vec::new() };
+            let mut index_state = Vec::new();
+            for index in &indexes {
+                let index_name: String = index.try_get("name").map_err(db_error)?;
+                let index_columns = sqlx::query("SELECT seqno,cid,name,[desc],coll,key FROM pragma_index_xinfo(?) ORDER BY seqno")
+                    .bind(&index_name).fetch_all(&mut connection).await.map_err(db_error)?;
+                index_state.push(json!({
+                    "sequence": index.try_get::<i64,_>("seq").map_err(db_error)?,
+                    "name": index_name,
+                    "unique": index.try_get::<i64,_>("unique").map_err(db_error)? != 0,
+                    "origin": index.try_get::<String,_>("origin").map_err(db_error)?,
+                    "partial": index.try_get::<i64,_>("partial").map_err(db_error)? != 0,
+                    "columns": index_columns.iter().map(|column| json!({
+                        "sequence": column.get::<i64,_>("seqno"),
+                        "column_id": column.get::<i64,_>("cid"),
+                        "name": column.get::<Option<String>,_>("name"),
+                        "descending": column.get::<i64,_>("desc") != 0,
+                        "collation": column.get::<Option<String>,_>("coll"),
+                        "key_column": column.get::<i64,_>("key") != 0
+                    })).collect::<Vec<_>>()
+                }));
+            }
             let triggers = sqlx::query(
-                "SELECT name,sql FROM sqlite_schema WHERE type='trigger' AND tbl_name=? ORDER BY name"
+                "SELECT name,sql FROM sqlite_master WHERE type='trigger' AND tbl_name=? ORDER BY name"
             ).bind(&table_name).fetch_all(&mut connection).await.map_err(db_error)?;
             let attributes = json!({
                 "sqlite_object_type": object_type,
@@ -154,13 +172,7 @@ impl SqliteCatalogAdapter {
                     "primary_key_ordinal": column.get::<i64,_>("pk"),
                     "hidden": column.get::<i64,_>("hidden")
                 })).collect::<Vec<_>>(),
-                "indexes": indexes.iter().map(|index| json!({
-                    "sequence": index.get::<i64,_>("seq"),
-                    "name": index.get::<String,_>("name"),
-                    "unique": index.get::<i64,_>("unique") != 0,
-                    "origin": index.get::<String,_>("origin"),
-                    "partial": index.get::<i64,_>("partial") != 0
-                })).collect::<Vec<_>>(),
+                "indexes": index_state,
                 "foreign_keys": foreign_keys.iter().map(|foreign_key| json!({
                     "id": foreign_key.get::<i64,_>("id"),
                     "sequence": foreign_key.get::<i64,_>("seq"),
