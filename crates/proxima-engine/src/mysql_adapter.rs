@@ -371,7 +371,9 @@ impl DatabaseAdapter for MySqlCatalogAdapter {
                 if protected.resource.kind != ResourceKind::Table {
                     resource_findings.push(finding("unsupported_mysql_policy_resource", &protected.resource, "The current database-per-tenant compiler manages tables only."));
                 }
-                if found.kind == ResourceKind::View
+                if found.kind == ResourceKind::View && found.attributes["view"].is_null() {
+                    resource_findings.push(finding("mysql_view_security_metadata_unavailable", &protected.resource, "View security metadata was not visible; definer/invoker behavior cannot be verified."));
+                } else if found.kind == ResourceKind::View
                     && found.attributes["view"]["security_type"].as_str().is_some_and(|value| value.eq_ignore_ascii_case("DEFINER")) {
                     resource_findings.push(finding("mysql_definer_view_requires_review", &protected.resource, "This view executes with definer privileges and may expose rows beyond the caller's direct grants."));
                 }
