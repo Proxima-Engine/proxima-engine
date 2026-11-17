@@ -159,10 +159,6 @@ impl SecurityCoreCoordinator {
         {
             return Err(SecurityCoreError::IdentityScopeMismatch);
         }
-        if request.policy.resources.len() != 1 {
-            return Err(SecurityCoreError::EvidenceCoverageIncomplete);
-        }
-
         let (report, snapshot) = self.inspect_and_verify_snapshot(kind, request).await?;
         if report.access_decision() != AccessDecision::Allow {
             return Ok(AccessDecision::Deny);
@@ -180,9 +176,18 @@ impl SecurityCoreCoordinator {
         {
             return Err(SecurityCoreError::EvidenceScopeMismatch);
         }
-        let required_operations: HashSet<_> = request.policy.resources[0].operations.iter().copied().collect();
+        if !same_protected_resource_scope(&request.policy.resources, &payload.protected_resources) {
+            return Err(SecurityCoreError::EvidenceCoverageIncomplete);
+        }
+        let required_operations: HashSet<_> = request.policy.resources.iter()
+            .flat_map(|resource| resource.operations.iter().copied())
+            .collect();
         let evidenced_operations: HashSet<_> = payload.verified_operations.iter().copied().collect();
-        if required_operations.len() != request.policy.resources[0].operations.len()
+        let declared_operation_count: usize = request.policy.resources.iter()
+            .map(|resource| resource.operations.len())
+            .sum();
+        if required_operations.len() != declared_operation_count
+            || evidenced_operations.len() != payload.verified_operations.len()
             || evidenced_operations != required_operations
         {
             return Err(SecurityCoreError::EvidenceCoverageIncomplete);
@@ -242,6 +247,14 @@ impl SecurityCoreCoordinator {
     }
 }
 
+
+fn same_protected_resource_scope(
+    expected: &[crate::security_core::ProtectedResource],
+    observed: &[crate::security_core::ProtectedResource],
+) -> bool {
+    expected.len() == observed.len()
+        && expected.iter().all(|resource| observed.contains(resource))
+}
 
 fn is_sha256(value: &str) -> bool {
     value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
