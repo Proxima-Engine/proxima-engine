@@ -18,6 +18,7 @@ use crate::security_core::{
 };
 use mongodb::{
     bson::{doc, Bson, Document},
+    options::ClientOptions,
     Client,
 };
 use serde_json::{json, Value};
@@ -70,7 +71,10 @@ impl MongoCatalogAdapter {
     }
 
     async fn connect_checked(&self) -> Result<Client, AdapterError> {
-        let client = Client::with_uri_str(&self.connection_uri).await.map_err(db_error)?;
+        let mut options = ClientOptions::parse(&self.connection_uri).await.map_err(db_error)?;
+        options.server_selection_timeout = Some(Duration::from_secs(10));
+        options.connect_timeout = Some(Duration::from_secs(10));
+        let client = Client::with_options(options).map_err(db_error)?;
         // Force authentication and server selection now, rather than treating
         // the driver's lazy Client construction as a successful connection.
         client.database(&self.database_name)
@@ -202,12 +206,23 @@ impl DatabaseAdapter for MongoCatalogAdapter {
                     let attrs = &found.unwrap().attributes;
                     let validator = attrs["options"]["validator"].clone();
                     let properties = validator.get("$jsonSchema").and_then(|schema| schema.get("properties"));
-                    if properties.and_then(|value| value.get(protected.tenant_key.as_str())).is_none() {
+                    let tenant_property = properties.and_then(|value| value.get(protected.tenant_key.as_str()));
+                    if tenant_property.is_none() {
                         resource_findings.push(finding("tenant_ownership_validator_missing", &protected.resource, "The collection validator does not declare the policy tenant ownership field."));
+                    } else if tenant_property.and_then(|property| property.get("bsonType")).is_none() {
+                        resource_findings.push(finding("tenant_ownership_type_unconstrained", &protected.resource, "The collection validator does not constrain the BSON type of the tenant ownership field."));
                     }
                     let required = validator.get("$jsonSchema").and_then(|schema| schema.get("required")).and_then(Value::as_array);
                     if !required.is_some_and(|fields| fields.iter().any(|field| field.as_str() == Some(protected.tenant_key.as_str()))) {
                         resource_findings.push(finding("tenant_ownership_not_required", &protected.resource, "The collection validator does not require the tenant ownership field."));
+                    }
+                    let validation_action = attrs["options"]["validationAction"].as_str().unwrap_or("error");
+                    if !validation_action.eq_ignore_ascii_case("error") {
+                        resource_findings.push(finding("mongodb_validator_not_rejecting_invalid_documents", &protected.resource, "The collection validationAction is not error, so invalid tenant documents may be accepted."));
+                    }
+                    let validation_level = attrs["options"]["validationLevel"].as_str().unwrap_or("strict");
+                    if !validation_level.eq_ignore_ascii_case("strict") {
+                        resource_findings.push(finding("mongodb_validator_not_strict", &protected.resource, "The collection validationLevel is not strict; existing documents may avoid full validation on updates."));
                     }
                 }
                 resource_findings.push(finding("mongodb_document_isolation_probe_required", &protected.resource, "MongoDB database roles do not automatically enforce tenant ownership for individual documents; independent tenant-scoped document probes are required."));
