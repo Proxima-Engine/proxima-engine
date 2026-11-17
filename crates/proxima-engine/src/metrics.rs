@@ -351,10 +351,10 @@ mod tests {
         assert!(output.contains("proxima_engine_database_bytes_total 80\n"));
         assert!(output.contains("proxima_engine_session_duration_seconds_total 0.002500\n"));
         assert!(output.contains("proxima_engine_authenticated_tenant_sessions_total 1\n"));
-        assert!(output.contains("proxima_engine_policy_admission_checks_total 2\\n"));
-        assert!(output.contains("proxima_engine_policy_admission_allowed_total 1\\n"));
-        assert!(output.contains("proxima_engine_policy_admission_denied_total 1\\n"));
-        assert!(output.contains("proxima_engine_policy_admission_session_revocations_total 1\\n"));
+        assert!(output.contains("proxima_engine_policy_admission_checks_total 2\n"));
+        assert!(output.contains("proxima_engine_policy_admission_allowed_total 1\n"));
+        assert!(output.contains("proxima_engine_policy_admission_denied_total 1\n"));
+        assert!(output.contains("proxima_engine_policy_admission_session_revocations_total 1\n"));
         assert!(output
             .contains("proxima_engine_query_roundtrip_latency_seconds_bucket{le=\"0.001\"} 1\n"));
         assert!(output
