@@ -334,8 +334,8 @@ mod tests {
    assert!(generate(&spec).is_err());
  }
  #[test] fn rejects_nul_and_unsafe_role_identifiers() {
-   let nul_identifier=json!({"tables":[{"schema":"public\\u0000","table":"orders","tenant_column":"tenant_id","tenants":[{"tenant_id":"a","role":"proxima_a"}]}]});
-   let nul_tenant=json!({"tables":[{"schema":"public","table":"orders","tenant_column":"tenant_id","tenants":[{"tenant_id":"a\\u0000b","role":"proxima_a"}]}]});
+   let nul_identifier=json!({"tables":[{"schema":format!("public{}", '\0'),"table":"orders","tenant_column":"tenant_id","tenants":[{"tenant_id":"a","role":"proxima_a"}]}]});
+   let nul_tenant=json!({"tables":[{"schema":"public","table":"orders","tenant_column":"tenant_id","tenants":[{"tenant_id":format!("a{}b", '\0'),"role":"proxima_a"}]}]});
    let invalid_role=json!({"tables":[{"schema":"public","table":"orders","tenant_column":"tenant_id","tenants":[{"tenant_id":"a","role":"proxima-a"}]}]});
    assert!(generate(&nul_identifier).is_err());
    assert!(generate(&nul_tenant).is_err());
