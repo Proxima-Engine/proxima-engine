@@ -111,3 +111,10 @@ Discovery tests cover invalid namespace and target mismatch without opening a da
 Added a TLS identity-verifying MySQL protocol adapter shared by MySQL and MariaDB. It discovers tables/views and routines, column definitions/defaults/nullability, table/schema grants, and computes a deterministic catalog fingerprint. Policy inspection checks registered resource presence and tenant-key existence/nullability, while explicitly flagging that native row-level security is unavailable and database-per-tenant grants require independent principal probes. Drift comparison uses discovery fingerprints. The adapter remains in development and does not claim runtime tenant enforcement, semantic verification, controlled deployment or signed admission. Metadata visibility is marked incomplete because information_schema results are privilege-filtered.
 
 Regression tests cover database-kind validation, target bounds and capability maturity. Tests and live TLS/catalog compatibility checks were authored but not executed in this session.
+
+
+## 12. Native MongoDB discovery and posture adapter — 17 November 2026
+
+Added a MongoDB Rust-driver adapter requiring verified TLS and rejecting insecure TLS URI options. It connects to the registered database, obtains authenticated effective privilege information, enumerates visible collections and views, captures collection options/validators and view metadata, and fingerprints the inventory. Policy inspection checks tenant ownership validator declarations and required fields, but explicitly records that MongoDB database-level roles do not provide document-level tenant filtering. Discovery is marked incomplete where authenticated visibility is privilege-scoped; verification always denies pending independent positive/negative document probes and runtime principal binding. The adapter remains in development.
+
+Regression tests cover TLS URI enforcement and capability maturity. Driver API compatibility, live MongoDB catalog permissions and tests were not executed in this session.
