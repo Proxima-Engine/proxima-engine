@@ -26,27 +26,20 @@ use sqlx::{
 use std::str::FromStr;
 
 fn grants_are_scoped_to_database(grants: &[String], database_name: &str) -> bool {
-    if grants.is_empty() || database_name.trim().is_empty() || database_name.contains('\\0') {
-        return false;
-    }
-    let escaped_database = database_name.replace('`', "``");
-    let expected_prefix = format!("`{escaped_database}`.");
+    if grants.is_empty() || database_name.trim().is_empty()
+        || database_name.chars().any(|character| character == char::from(0))
+    { return false; }
+    let escaped_database = database_name.replace(char::from(96), "``");
+    let expected_prefix = format!("{}{}{}.", char::from(96), escaped_database, char::from(96));
     grants.iter().all(|grant| {
-        let lower = grant.to_ascii_lowercase();
-        let Some(on_index) = lower.find(" on ") else {
-            // Role grants or unfamiliar grant syntax can expand access beyond
-            // the selected database, so the tenant session fails closed.
-            return false;
-        };
-        let privilege_clause = lower[..on_index].trim();
-        let scope = grant[on_index + 4..]
-            .split_once(" TO ")
-            .or_else(|| grant[on_index + 4..].split_once(" to "))
-            .map(|(scope, _)| scope.trim())
-            .unwrap_or_default();
-        if scope == "*.*" {
-            return privilege_clause == "grant usage";
-        }
+        let upper = grant.to_ascii_uppercase();
+        let Some(on_index) = upper.find(" ON ") else { return false; };
+        if !upper.starts_with("GRANT ") || upper.contains(" WITH GRANT OPTION") { return false; }
+        let privilege_clause = upper[..on_index].trim();
+        let scope_start = on_index + 4;
+        let Some(to_offset) = upper[scope_start..].find(" TO ") else { return false; };
+        let scope = grant[scope_start..scope_start + to_offset].trim();
+        if scope == "*.*" { return privilege_clause == "GRANT USAGE"; }
         scope.starts_with(&expected_prefix)
     })
 }
