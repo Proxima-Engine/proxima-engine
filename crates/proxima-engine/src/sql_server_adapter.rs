@@ -55,15 +55,18 @@ pub async fn bind_verified_tenant_context(
     let tenant = sql_server_unicode_literal(identity.tenant_id(), 128)?;
     let target_id = sql_server_unicode_literal(identity.target_id(), 256)?;
     let policy_id = sql_server_unicode_literal(identity.policy_id(), 128)?;
+    let principal_id = sql_server_unicode_literal(identity.principal_id(), 256)?;
     let policy_revision = identity.policy_revision();
     let statement = format!(
         "EXEC sys.sp_set_session_context @key=N'tenant_id', @value={tenant}, @read_only=1; \
          EXEC sys.sp_set_session_context @key=N'proxima_target_id', @value={target_id}, @read_only=1; \
          EXEC sys.sp_set_session_context @key=N'proxima_policy_id', @value={policy_id}, @read_only=1; \
+         EXEC sys.sp_set_session_context @key=N'proxima_principal_id', @value={principal_id}, @read_only=1; \
          EXEC sys.sp_set_session_context @key=N'proxima_policy_revision', @value={policy_revision}, @read_only=1; \
          SELECT CONVERT(nvarchar(128),SESSION_CONTEXT(N'tenant_id')) AS tenant_id, \
                 CONVERT(nvarchar(256),SESSION_CONTEXT(N'proxima_target_id')) AS target_id, \
                 CONVERT(nvarchar(128),SESSION_CONTEXT(N'proxima_policy_id')) AS policy_id, \
+                CONVERT(nvarchar(256),SESSION_CONTEXT(N'proxima_principal_id')) AS principal_id, \
                 TRY_CONVERT(bigint,SESSION_CONTEXT(N'proxima_policy_revision')) AS policy_revision;"
     );
     let rows = client.simple_query(statement).await.map_err(db_error)?
@@ -75,10 +78,12 @@ pub async fn bind_verified_tenant_context(
     let tenant: Option<&str> = row.get("tenant_id");
     let target_id: Option<&str> = row.get("target_id");
     let policy_id: Option<&str> = row.get("policy_id");
+    let principal_id: Option<&str> = row.get("principal_id");
     let revision: Option<i64> = row.get("policy_revision");
     if tenant != Some(identity.tenant_id())
         || target_id != Some(identity.target_id())
         || policy_id != Some(identity.policy_id())
+        || principal_id != Some(identity.principal_id())
         || revision != i64::try_from(identity.policy_revision()).ok()
     {
         return Err(error(
