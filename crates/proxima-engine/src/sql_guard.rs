@@ -60,7 +60,7 @@ pub fn blocks_tenant_session_mutation(sql: &str) -> bool {
 }
 
 /// Reject client startup options that could set a different role, disable RLS,
-/// or change replication semantics before the first SQL frame is inspected.
+/// change replication semantics, or redirect object resolution before SQL is inspected.
 pub fn blocks_tenant_startup_options(options: &str) -> bool {
     let compact: String = options.chars()
         .filter(|character| !character.is_whitespace() && *character!='\'' && *character!='"')
@@ -139,6 +139,8 @@ mod tests {
             "SET search_path = public",
             "SET LOCAL search_path TO public",
             "RESET search_path",
+            "SET SCHEMA public",
+            "RESET SCHEMA",
             "CREATE VIEW public.exposed_orders AS SELECT * FROM public.orders",
             "CREATE OR REPLACE VIEW public.exposed_orders AS SELECT * FROM public.orders",
             "CREATE MATERIALIZED VIEW public.exposed_orders AS SELECT * FROM public.orders",
