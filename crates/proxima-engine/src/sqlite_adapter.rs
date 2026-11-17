@@ -38,6 +38,7 @@ impl SqliteCatalogAdapter {
         let connection_uri = connection_uri.into();
         if target_id.trim().is_empty() || target_id.len() > 256 || target_id.contains('\0')
             || connection_uri.trim().is_empty() || connection_uri.len() > 4096
+            || connection_uri.contains('?') || connection_uri.contains('#')
             || !database_path.is_absolute()
         {
             return Err(error("invalid_sqlite_target", "A bounded target ID, absolute database file path and SQLite connection URI are required."));
