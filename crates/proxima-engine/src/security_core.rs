@@ -143,7 +143,7 @@ pub fn adapter_catalog() -> Vec<AdapterDescriptor> {
             kind: DatabaseKind::Redis,
             name: "Redis",
             maturity: AdapterMaturity::InDevelopment,
-            capabilities: AdapterCapabilities { policy_generation: true, ..AdapterCapabilities::default() },
+            capabilities: AdapterCapabilities { schema_inspection: true, policy_generation: true, drift_detection: true, ..AdapterCapabilities::default() },
             status_note: "TLS-verified Redis ACL user, key-pattern, command-rule and keyspace metadata discovery with fingerprint drift comparison are implemented. Tenant identity binding, keyless-command mediation, independent semantic probes, controlled ACL deployment and runtime admission are not implemented; ACLs cannot distinguish create-only from update-only upsert semantics.",
         },
         AdapterDescriptor {
