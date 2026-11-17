@@ -214,6 +214,14 @@ struct SignedNodePolicyStatus {
 /// PostgreSQL posture. A signed response is bound to this node, target,
 /// database, tenant, request timestamp and a 15-second expiry.
 #[derive(Clone)]
+struct CachedPolicyDecision {
+    checked_at: i64,
+    expires_at: i64,
+    allow: bool,
+    reason: String,
+}
+
+#[derive(Clone)]
 struct PolicyAdmissionClient {
     client: reqwest::Client,
     url: String,
@@ -221,6 +229,7 @@ struct PolicyAdmissionClient {
     target_id: String,
     tenant_role_prefix: String,
     signing_key: Vec<u8>,
+    cache: Arc<std::sync::Mutex<std::collections::HashMap<(String, String), CachedPolicyDecision>>>,
 }
 
 impl PolicyAdmissionClient {
@@ -264,6 +273,7 @@ impl PolicyAdmissionClient {
             client, url, node_id, target_id,
             tenant_role_prefix: tenant_role_prefix.to_owned(),
             signing_key,
+            cache: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         }))
     }
 
@@ -278,6 +288,19 @@ impl PolicyAdmissionClient {
             .duration_since(std::time::UNIX_EPOCH)
             .map_err(|error| io::Error::new(io::ErrorKind::PermissionDenied, error.to_string()))?
             .as_secs() as i64;
+        let cache_key = (database_name.to_owned(), tenant_id.to_owned());
+        if let Ok(cache) = self.cache.lock() {
+            if let Some(cached) = cache.get(&cache_key) {
+                if timestamp < cached.expires_at && timestamp < cached.checked_at + 5 {
+                    return if cached.allow {
+                        Ok(())
+                    } else {
+                        Err(io::Error::new(io::ErrorKind::PermissionDenied,
+                            format!("Tenant policy admission denied: {}", cached.reason)))
+                    };
+                }
+            }
+        }
         let canonical = NodePolicyStatusRequestCanonical {
             domain: "proxima-node-policy-status-request-v1",
             node_id: &self.node_id,
@@ -338,7 +361,16 @@ impl PolicyAdmissionClient {
         verifier.update(&payload_bytes);
         verifier.verify_slice(&signature)
             .map_err(|_| io::Error::new(io::ErrorKind::PermissionDenied, "Policy admission signature verification failed"))?;
-        if payload.decision != "allow" {
+        let allow = payload.decision == "allow";
+        if let Ok(mut cache) = self.cache.lock() {
+            cache.insert(cache_key, CachedPolicyDecision {
+                checked_at: timestamp,
+                expires_at: payload.expires_at,
+                allow,
+                reason: payload.reason.clone(),
+            });
+        }
+        if !allow {
             return Err(io::Error::new(io::ErrorKind::PermissionDenied,
                 format!("Tenant policy admission denied: {}", payload.reason)));
         }
@@ -1255,23 +1287,44 @@ async fn handle_connection(
         "PostgreSQL session established"
     );
 
+    let policy_identity = session.tenant_context.as_ref()
+        .map(|context| (session.database_name.clone(), context.tenant_id.clone()));
     let (mut client_reader, mut client_writer) = tokio::io::split(client);
     let (mut upstream_reader, mut upstream_writer) = tokio::io::split(upstream);
     let query_latency = Arc::new(QueryLatencyTracker::default());
-    let copy_result = tokio::try_join!(
-        copy_frontend_messages(
-            &mut client_reader,
-            &mut upstream_writer,
-            query_latency.clone(),
-            session.tenant_context.is_some(),
-        ),
-        copy_backend_messages(
-            &mut upstream_reader,
-            &mut client_writer,
-            query_latency,
-            session.tenant_context.is_some(),
-        ),
-    );
+    let copy_result = {
+        let copy_future = tokio::try_join!(
+            copy_frontend_messages(
+                &mut client_reader,
+                &mut upstream_writer,
+                query_latency.clone(),
+                session.tenant_context.is_some(),
+            ),
+            copy_backend_messages(
+                &mut upstream_reader,
+                &mut client_writer,
+                query_latency,
+                session.tenant_context.is_some(),
+            ),
+        );
+        tokio::pin!(copy_future);
+        if let (Some(admission), Some((database_name, tenant_id))) = (policy_admission, policy_identity.as_ref()) {
+            loop {
+                tokio::select! {
+                    result = &mut copy_future => break result,
+                    _ = tokio::time::sleep(std::time::Duration::from_secs(5)) => {
+                        if let Err(error) = admission.authorize(database_name, tenant_id).await {
+                            error!(peer = %peer, tenant = %tenant_id, %error,
+                                "active PostgreSQL session terminated because tenant policy posture is no longer verified");
+                            break Err(error);
+                        }
+                    }
+                }
+            }
+        } else {
+            copy_future.await
+        }
+    };
     let duration_micros = session_started_at
         .elapsed()
         .as_micros()
