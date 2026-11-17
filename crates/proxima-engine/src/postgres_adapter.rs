@@ -202,7 +202,8 @@ impl DatabaseAdapter for PostgresCatalogAdapter {
                     Operation::Execute => return Err(error("unsupported_operation", "EXECUTE is not a table-level PostgreSQL RLS operation.")),
                 };
                 let seed = format!("{}:{}:{}:{}:{:?}", policy.policy_id, policy.revision, schema, protected.resource.name, operation);
-                let suffix = &sha256(seed.as_bytes())[..16];
+                let digest = sha256(seed.as_bytes());
+                let suffix = &digest[..16];
                 let policy_name = format!("proxima_{}_{}", safe_name(&policy.policy_id), suffix);
                 let statement = match operation {
                     Operation::Read | Operation::Delete => format!("CREATE POLICY {} ON {} AS RESTRICTIVE FOR {} TO PUBLIC USING ({})", quote_ident(&policy_name), relation, command, tenant_expression),
@@ -325,4 +326,73 @@ fn safe_name(value: &str) -> String {
         if character.is_ascii_alphanumeric() || character == '_' { character.to_ascii_lowercase() } else { '_' }
     }).take(24).collect();
     if normalized.is_empty() { "policy".into() } else { normalized }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::security_core::{ResourceRef, SECURITY_MODEL_VERSION};
+
+    fn policy() -> TenantSecurityPolicy {
+        TenantSecurityPolicy {
+            schema_version: SECURITY_MODEL_VERSION.into(),
+            policy_id: "tenant_boundary".into(),
+            revision: 7,
+            tenant_identity_claim: "tenant_id".into(),
+            resources: vec![ProtectedResource {
+                resource: ResourceRef {
+                    namespace: Some("customer data".into()),
+                    name: "invoices".into(),
+                    kind: ResourceKind::Table,
+                },
+                tenant_key: "tenant_id".into(),
+                operations: vec![Operation::Read, Operation::Create, Operation::Update, Operation::Delete],
+            }],
+        }
+    }
+
+    fn adapter() -> PostgresCatalogAdapter {
+        let connector: PostgresConnector = Arc::new(|| Box::pin(async {
+            Err(error("test_connector_not_called", "This test exercises compilation only."))
+        }));
+        PostgresCatalogAdapter::new("test-target", "app_db", connector).unwrap()
+    }
+
+    #[test]
+    fn postgres_plan_is_review_only_and_emits_restrictive_operation_policies() {
+        let compiled = adapter().compile_policy(&policy()).unwrap();
+        assert_eq!(compiled.database_kind, DatabaseKind::PostgreSql);
+        assert_eq!(compiled.revision, 7);
+        assert!(compiled.requires_approval);
+        assert_eq!(compiled.changes.len(), 1);
+        let statements = compiled.changes[0].definition["statements"].as_array().unwrap();
+        assert_eq!(statements.len(), 4);
+        let sql = statements.iter().map(|value| value.as_str().unwrap()).collect::<Vec<_>>().join("\n");
+        assert!(sql.contains("AS RESTRICTIVE"));
+        assert!(sql.contains("current_setting('proxima.tenant_id', true)"));
+        assert!(sql.contains("\"customer data\".\"invoices\""));
+        assert!(sql.contains("WITH CHECK"));
+        assert_eq!(compiled.changes[0].definition["execution"], "not_executed");
+    }
+
+    #[test]
+    fn postgres_plan_rejects_execute_and_non_table_resources() {
+        let mut invalid = policy();
+        invalid.resources[0].operations.push(Operation::Execute);
+        assert_eq!(adapter().compile_policy(&invalid).unwrap_err().code, "unsupported_operation");
+
+        let mut invalid = policy();
+        invalid.resources[0].resource.kind = ResourceKind::View;
+        assert_eq!(adapter().compile_policy(&invalid).unwrap_err().code, "unsupported_resource_kind");
+    }
+
+    #[test]
+    fn postgres_adapter_does_not_claim_production_support() {
+        let descriptor = adapter().descriptor();
+        assert_eq!(descriptor.maturity, AdapterMaturity::InDevelopment);
+        assert!(!descriptor.capabilities.is_production_complete());
+        assert!(!descriptor.capabilities.policy_semantic_verification);
+        assert!(!descriptor.capabilities.controlled_policy_deployment);
+    }
 }
