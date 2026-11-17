@@ -260,7 +260,7 @@ impl SqliteCatalogAdapter {
             "query_only": true,
             "inspection_connection_trusted_schema_disabled": true
         });
-        let fingerprint = digest(&serde_json::to_vec(&json!({ "target_id": self.target_id, "database_path": self.database_path, "target": target_attributes, "resources": state }))
+        let fingerprint = digest(&serde_json::to_vec(&json!({ "target_id": self.target_id, "database_path": self.database_path.display().to_string(), "target": target_attributes, "resources": state }))
             .map_err(|_| error("sqlite_fingerprint_failed", "Could not serialize SQLite catalog state."))?);
         Ok(DiscoverySnapshot {
             database_kind: DatabaseKind::Sqlite,
