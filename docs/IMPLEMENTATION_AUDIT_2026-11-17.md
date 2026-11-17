@@ -138,3 +138,5 @@ MongoDB discovery now includes collection index definitions in addition to valid
 PostgreSQL discovery and policy inspection now include declarative partition parent/child relationships, partition keys and bounds, and each child partition's RLS state, FORCE RLS state and local policy expressions. Inspection flags directly addressable partitions without RLS, without local policies, with RLS not forced, or whose local policy expressions do not visibly reference the registered tenant key.
 
 SQL Server discovery also fingerprints partition schemes/functions/range boundaries, and inspection flags RLS predicate functions or table triggers that execute under an explicit EXECUTE AS principal.
+
+MongoDB tenant-field validation now also rejects validators whose BSON type constraint explicitly permits null, rather than treating a merely present bsonType declaration as sufficient.
