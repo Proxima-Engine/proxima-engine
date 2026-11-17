@@ -43,11 +43,11 @@ This is the complete technical guide to the public Rust data plane. Choose a tas
 ## External project resources
 
 - [Agata Proxima website](https://agataproxima.com)
-- [GitHub repository](https://github.com/Agata-Proxima/proxima-engine)
-- [GitHub Actions](https://github.com/Agata-Proxima/proxima-engine/actions)
-- [GitHub issues](https://github.com/Agata-Proxima/proxima-engine/issues)
-- [GitHub pull requests](https://github.com/Agata-Proxima/proxima-engine/pulls)
-- [GitHub releases](https://github.com/Agata-Proxima/proxima-engine/releases)
+- [GitHub repository](https://github.com/Proxima-Engine/proxima-engine)
+- [GitHub Actions](https://github.com/Proxima-Engine/proxima-engine/actions)
+- [GitHub issues](https://github.com/Proxima-Engine/proxima-engine/issues)
+- [GitHub pull requests](https://github.com/Proxima-Engine/proxima-engine/pulls)
+- [GitHub releases](https://github.com/Proxima-Engine/proxima-engine/releases)
 - [Discord community](https://discord.gg/xsYSuDMzg)
 
 ## Product boundary
