@@ -22,7 +22,7 @@ The Rust Policy Guard binary also exposes the adapter maturity catalog:
 cargo run -p proxima-engine --bin proxima-policy-guard -- adapters
 ```
 
-The `adapters` command prints the versioned Proxima Security Core catalog. PostgreSQL is marked `in_development`; MySQL, MariaDB, Microsoft SQL Server, MongoDB, CockroachDB and VAULTDB (Agata's embedded-engine research target) are marked `planned` with no enabled capabilities. A planned entry is not a supported database integration.
+The `adapters` command prints the versioned Proxima Security Core catalog. PostgreSQL, MySQL, MariaDB, Microsoft SQL Server, MongoDB and Redis are marked `in_development` with only the capabilities implemented by their current adapters/compilers. CockroachDB, SQLite, Oracle, DynamoDB, Cassandra, Elasticsearch/OpenSearch and VAULTDB remain `planned`. An in-development entry is not a supported database integration.
 
 The PostgreSQL `discover-postgres` command enumerates non-system tables, partitioned tables, foreign tables, views, materialized views, sequences, functions and procedures. It captures ownership, columns/defaults, RLS flags, native policies, constraints, indexes, triggers, view definitions/options and routine security/execute ACL metadata. It requires the registered target ID/database name and a TLS-verified, read-only inspection role through `PROXIMA_POSTGRES_ADAPTER_DATABASE_URL`, `PROXIMA_POSTGRES_ADAPTER_TARGET_ID`, `PROXIMA_POSTGRES_ADAPTER_DATABASE_NAME` and `PROXIMA_TENANT_ROLE_PREFIX`.
 
