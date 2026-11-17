@@ -227,7 +227,7 @@ impl DatabaseAdapter for PostgresCatalogAdapter {
                     "acl": default_acl.get::<_, String>(3)
                 })).collect::<Vec<_>>()
             });
-            let fingerprint = sha256(&serde_json::to_vec(&json!({"target":target_attributes,"resources":resources}))
+            let fingerprint = sha256(&serde_json::to_vec(&json!({"target_id":self.target_id,"database_name":self.database_name,"target":target_attributes,"resources":resources}))
                 .map_err(|_| error("fingerprint_serialization_failed", "Could not serialize discovered PostgreSQL resources."))?);
             Ok(DiscoverySnapshot {
                 database_kind: DatabaseKind::PostgreSql,
@@ -369,7 +369,11 @@ impl DatabaseAdapter for PostgresCatalogAdapter {
 
             let clock = client.query_one("SELECT to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"')", &[]).await.map_err(db_error)?;
             let observed_at: String = clock.get(0);
-            let fingerprint = sha256(&serde_json::to_vec(&fingerprint_rows).map_err(|_| error("fingerprint_serialization_failed", "Could not serialize PostgreSQL catalog state."))?);
+            let fingerprint = sha256(&serde_json::to_vec(&json!({
+                "target_id": self.target_id,
+                "database_name": self.database_name,
+                "resources": fingerprint_rows
+            })).map_err(|_| error("fingerprint_serialization_failed", "Could not serialize PostgreSQL catalog state."))?);
             snapshot_findings.push(SecurityFinding {
                 code: "semantic_verification_not_performed".into(),
                 resource: None,
@@ -676,7 +680,11 @@ impl DatabaseAdapter for PostgresCatalogAdapter {
                 "acl": row.get::<_, String>(3)
             })));
 
-            let fingerprint = sha256(&serde_json::to_vec(&state).map_err(|_| error("fingerprint_serialization_failed", "Could not serialize PostgreSQL catalog state."))?);
+            let fingerprint = sha256(&serde_json::to_vec(&json!({
+                "target_id": self.target_id,
+                "database_name": self.database_name,
+                "catalog": state
+            })).map_err(|_| error("fingerprint_serialization_failed", "Could not serialize PostgreSQL catalog state."))?);
             let clock = client.query_one("SELECT to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"')", &[]).await.map_err(db_error)?;
             let observed_at: String = clock.get(0);
             let detected = previous_fingerprint.is_some_and(|previous| previous != fingerprint.as_str());
