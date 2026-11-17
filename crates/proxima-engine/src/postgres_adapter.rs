@@ -229,7 +229,7 @@ impl DatabaseAdapter for PostgresCatalogAdapter {
             // to rely on behind transaction-pooling proxies.
             let role_prefix = quote_literal(&self.tenant_role_prefix);
             let tenant_expression = format!(
-                "left(current_user, char_length({role_prefix})) = {role_prefix} AND replace(({tenant_column})::text, '-', '_') = substring(current_user FROM char_length({role_prefix}) + 1)"
+                "pg_catalog.left(current_user, pg_catalog.char_length({role_prefix})) = {role_prefix} AND pg_catalog.replace(({tenant_column})::text, '-', '_') = pg_catalog.substring(current_user FROM pg_catalog.char_length({role_prefix}) + 1)"
             );
             let mut statements = vec![
                 format!("ALTER TABLE {relation} ENABLE ROW LEVEL SECURITY"),
