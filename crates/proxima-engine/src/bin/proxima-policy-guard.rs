@@ -167,7 +167,7 @@ fn generate(spec: &Value) -> Result<String, Box<dyn Error>> {
         for tenant in tenants {
             let id=tenant["tenant_id"].as_str().ok_or("tenant_id required")?;
             let role=tenant["role"].as_str().ok_or("role required")?;
-            if id.is_empty()||id.len()>256||id.contains('\\0')||!valid_role_name(role)
+            if id.is_empty()||id.len()>256||id.contains('\0')||!valid_role_name(role)
                 || !tenant_ids.insert(id)||!role_names.insert(role) {
                 return Err(format!("{schema}.{name}: invalid or duplicate tenant-to-role mapping").into());
             }
