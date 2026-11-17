@@ -118,6 +118,10 @@ impl MySqlCatalogAdapter {
                  FROM information_schema.TABLE_PRIVILEGES WHERE TABLE_SCHEMA=? AND TABLE_NAME=? \
                  ORDER BY GRANTEE,PRIVILEGE_TYPE"
             ).bind(&schema).bind(&name).fetch_all(&mut connection).await.map_err(db_error)?;
+            let column_privileges = sqlx::query(
+                "SELECT GRANTEE,COLUMN_NAME,PRIVILEGE_TYPE,IS_GRANTABLE \
+                 FROM information_schema.COLUMN_PRIVILEGES WHERE TABLE_SCHEMA=? AND TABLE_NAME=? ORDER BY GRANTEE,COLUMN_NAME,PRIVILEGE_TYPE"
+            ).bind(&schema).bind(&name).fetch_all(&mut connection).await.map_err(db_error)?;
             let schema_privileges = sqlx::query(
                 "SELECT GRANTEE,PRIVILEGE_TYPE,IS_GRANTABLE \
                  FROM information_schema.SCHEMA_PRIVILEGES WHERE TABLE_SCHEMA=? ORDER BY GRANTEE,PRIVILEGE_TYPE"
@@ -167,6 +171,12 @@ impl MySqlCatalogAdapter {
                 }))).collect::<Result<Vec<_>,AdapterError>>()?,
                 "table_privileges": privileges.iter().map(|grant| Ok(json!({
                     "grantee": grant.try_get::<String,_>("GRANTEE").map_err(db_error)?,
+                    "privilege": grant.try_get::<String,_>("PRIVILEGE_TYPE").map_err(db_error)?,
+                    "grantable": grant.try_get::<String,_>("IS_GRANTABLE").map_err(db_error)?
+                }))).collect::<Result<Vec<_>,AdapterError>>()?,
+                "column_privileges": column_privileges.iter().map(|grant| Ok(json!({
+                    "grantee": grant.try_get::<String,_>("GRANTEE").map_err(db_error)?,
+                    "column": grant.try_get::<String,_>("COLUMN_NAME").map_err(db_error)?,
                     "privilege": grant.try_get::<String,_>("PRIVILEGE_TYPE").map_err(db_error)?,
                     "grantable": grant.try_get::<String,_>("IS_GRANTABLE").map_err(db_error)?
                 }))).collect::<Result<Vec<_>,AdapterError>>()?,
