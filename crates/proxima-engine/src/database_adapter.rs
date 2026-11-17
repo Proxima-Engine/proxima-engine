@@ -35,6 +35,38 @@ pub struct InspectionRequest {
     pub policy: TenantSecurityPolicy,
 }
 
+/// A discovered native resource. Attributes contain database-specific catalog
+/// facts; credentials and connection strings must never be included.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DiscoveredResource {
+    pub namespace: Option<String>,
+    pub name: String,
+    pub kind: crate::security_core::ResourceKind,
+    pub owner: Option<String>,
+    pub attributes: Value,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DiscoveryRequest {
+    pub target: AdapterTarget,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub namespace: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DiscoverySnapshot {
+    pub database_kind: DatabaseKind,
+    pub target: AdapterTarget,
+    pub completeness: InspectionCompleteness,
+    pub resources: Vec<DiscoveredResource>,
+    pub findings: Vec<SecurityFinding>,
+    pub fingerprint: Option<String>,
+    pub observed_at: String,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ResourceInspection {
@@ -121,6 +153,22 @@ pub trait DatabaseAdapter: Send + Sync {
         &'a self,
         request: &'a InspectionRequest,
     ) -> AdapterFuture<'a, Result<InspectionSnapshot, AdapterError>>;
+
+    /// Enumerate native resources without assuming that a policy already names
+    /// them. Adapters that cannot provide complete discovery must return an
+    /// explicit error rather than silently returning a partial inventory.
+    fn discover<'a>(
+        &'a self,
+        _request: &'a DiscoveryRequest,
+    ) -> AdapterFuture<'a, Result<DiscoverySnapshot, AdapterError>> {
+        Box::pin(async {
+            Err(AdapterError {
+                code: "discovery_not_supported".into(),
+                detail: "This database adapter does not implement native resource discovery.".into(),
+                retryable: false,
+            })
+        })
+    }
 
     fn compile_policy(
         &self,
