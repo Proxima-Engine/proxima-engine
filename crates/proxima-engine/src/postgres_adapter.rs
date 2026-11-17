@@ -463,6 +463,42 @@ impl DatabaseAdapter for PostgresCatalogAdapter {
                 "acl": row.get::<_, String>(6)
             })));
 
+            let schema_rows = client.query(
+                "SELECT n.nspname, pg_catalog.pg_get_userbyid(n.nspowner), COALESCE(n.nspacl::text,'<default>') FROM pg_catalog.pg_namespace n WHERE n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname NOT LIKE 'pg_%' ORDER BY n.nspname",
+                &[],
+            ).await.map_err(db_error)?;
+            state.extend(schema_rows.into_iter().map(|row| json!({
+                "kind": "schema_privilege",
+                "schema": row.get::<_, String>(0),
+                "owner": row.get::<_, String>(1),
+                "acl": row.get::<_, String>(2)
+            })));
+
+            let database_rows = client.query(
+                "SELECT d.datname, pg_catalog.pg_get_userbyid(d.datdba), COALESCE(d.datacl::text,'<default>'), d.datallowconn, d.datistemplate FROM pg_catalog.pg_database d ORDER BY d.datname",
+                &[],
+            ).await.map_err(db_error)?;
+            state.extend(database_rows.into_iter().map(|row| json!({
+                "kind": "database_privilege",
+                "database": row.get::<_, String>(0),
+                "owner": row.get::<_, String>(1),
+                "acl": row.get::<_, String>(2),
+                "allow_connections": row.get::<_, bool>(3),
+                "is_template": row.get::<_, bool>(4)
+            })));
+
+            let default_acl_rows = client.query(
+                "SELECT pg_catalog.pg_get_userbyid(default_acl.defaclrole), COALESCE(namespace.nspname,''), default_acl.defaclobjtype::text, COALESCE(default_acl.defaclacl::text,'<default>') FROM pg_catalog.pg_default_acl default_acl LEFT JOIN pg_catalog.pg_namespace namespace ON namespace.oid=default_acl.defaclnamespace ORDER BY 1,2,3",
+                &[],
+            ).await.map_err(db_error)?;
+            state.extend(default_acl_rows.into_iter().map(|row| json!({
+                "kind": "default_privilege",
+                "owner_role": row.get::<_, String>(0),
+                "schema": row.get::<_, String>(1),
+                "object_type": row.get::<_, String>(2),
+                "acl": row.get::<_, String>(3)
+            })));
+
             let fingerprint = sha256(&serde_json::to_vec(&state).map_err(|_| error("fingerprint_serialization_failed", "Could not serialize PostgreSQL catalog state."))?);
             let clock = client.query_one("SELECT to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"')", &[]).await.map_err(db_error)?;
             let observed_at: String = clock.get(0);
