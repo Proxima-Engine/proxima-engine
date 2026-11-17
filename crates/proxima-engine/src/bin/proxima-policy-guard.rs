@@ -203,7 +203,7 @@ BEGIN
                AND format_type(a.atttypid,a.atttypmod) NOT LIKE 'character(%')
      THEN RAISE EXCEPTION 'Agata Proxima: tenant key type is unsupported'; END IF;
   IF owner_name = ANY({role_array}) THEN RAISE EXCEPTION 'Agata Proxima: tenant runtime roles must not own the protected table'; END IF;
-  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname=ANY({role_array}) AND (rolsuper OR rolbypassrls OR rolcreaterole OR rolcreatedb OR rolreplication))
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname=ANY({role_array}) AND (rolsuper OR rolbypassrls OR rolcreaterole OR rolcreatedb OR rolreplication OR NOT rolcanlogin))
      OR (WITH RECURSIVE member_roles(role_oid) AS (
           SELECT oid FROM pg_roles WHERE rolname=ANY({role_array})
           UNION SELECT am.roleid FROM pg_auth_members am JOIN member_roles mr ON am.member=mr.role_oid
