@@ -64,7 +64,11 @@ impl MySqlCatalogAdapter {
         let mut options = MySqlConnectOptions::from_str(&self.connection_url)
             .map_err(|_| error("invalid_mysql_connection_config", "The MySQL connection URL could not be parsed."))?;
         options = options.ssl_mode(MySqlSslMode::VerifyIdentity);
-        let mut connection = MySqlConnection::connect_with(&options).await.map_err(db_error)?;
+        let mut connection = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            MySqlConnection::connect_with(&options),
+        ).await.map_err(|_| error("mysql_connection_timeout", "The MySQL TLS connection exceeded the ten-second connection deadline."))?
+            .map_err(db_error)?;
         let row = sqlx::query("SELECT DATABASE() AS database_name, CURRENT_USER() AS authenticated_account")
             .fetch_one(&mut connection).await.map_err(db_error)?;
         let database: Option<String> = row.try_get("database_name").map_err(db_error)?;
@@ -120,6 +124,9 @@ impl MySqlCatalogAdapter {
                  LEFT JOIN information_schema.KEY_COLUMN_USAGE kcu ON kcu.CONSTRAINT_SCHEMA=tc.CONSTRAINT_SCHEMA AND kcu.TABLE_NAME=tc.TABLE_NAME AND kcu.CONSTRAINT_NAME=tc.CONSTRAINT_NAME \
                  WHERE tc.TABLE_SCHEMA=? AND tc.TABLE_NAME=? ORDER BY tc.CONSTRAINT_NAME,kcu.ORDINAL_POSITION"
             ).bind(&schema).bind(&name).fetch_all(&mut connection).await.map_err(db_error)?;
+            let partitions = sqlx::query(
+                "SELECT PARTITION_NAME,SUBPARTITION_NAME,PARTITION_METHOD,SUBPARTITION_METHOD,PARTITION_EXPRESSION,SUBPARTITION_EXPRESSION                  FROM information_schema.PARTITIONS WHERE TABLE_SCHEMA=? AND TABLE_NAME=? ORDER BY PARTITION_ORDINAL_POSITION,SUBPARTITION_ORDINAL_POSITION"
+            ).bind(&schema).bind(&name).fetch_all(&mut connection).await.map_err(db_error)?;
             let indexes = sqlx::query(
                 "SELECT INDEX_NAME,NON_UNIQUE,SEQ_IN_INDEX,COLUMN_NAME,INDEX_TYPE \
                  FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=? AND TABLE_NAME=? ORDER BY INDEX_NAME,SEQ_IN_INDEX"
@@ -171,6 +178,14 @@ impl MySqlCatalogAdapter {
                     "referenced_schema": item.try_get::<Option<String>,_>("REFERENCED_TABLE_SCHEMA").map_err(db_error)?,
                     "referenced_table": item.try_get::<Option<String>,_>("REFERENCED_TABLE_NAME").map_err(db_error)?,
                     "referenced_column": item.try_get::<Option<String>,_>("REFERENCED_COLUMN_NAME").map_err(db_error)?
+                }))).collect::<Result<Vec<_>,AdapterError>>()?,
+                "partitions": partitions.iter().map(|item| Ok(json!({
+                    "partition": item.try_get::<Option<String>,_>("PARTITION_NAME").map_err(db_error)?,
+                    "subpartition": item.try_get::<Option<String>,_>("SUBPARTITION_NAME").map_err(db_error)?,
+                    "method": item.try_get::<Option<String>,_>("PARTITION_METHOD").map_err(db_error)?,
+                    "subpartition_method": item.try_get::<Option<String>,_>("SUBPARTITION_METHOD").map_err(db_error)?,
+                    "expression": item.try_get::<Option<String>,_>("PARTITION_EXPRESSION").map_err(db_error)?,
+                    "subpartition_expression": item.try_get::<Option<String>,_>("SUBPARTITION_EXPRESSION").map_err(db_error)?
                 }))).collect::<Result<Vec<_>,AdapterError>>()?,
                 "indexes": indexes.iter().map(|item| Ok(json!({
                     "name": item.try_get::<String,_>("INDEX_NAME").map_err(db_error)?,
