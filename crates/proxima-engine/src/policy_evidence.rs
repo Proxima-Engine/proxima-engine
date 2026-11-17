@@ -250,22 +250,57 @@ fn admission_claims_bytes(admission: &SignedPolicyAdmission) -> Result<Vec<u8>, 
     }).map_err(|_| error("admission_serialization_failed", "The admission claims could not be serialized."))
 }
 
+fn operation_key(operation: Operation) -> &'static str {
+    match operation {
+        Operation::Read => "read",
+        Operation::Create => "create",
+        Operation::Update => "update",
+        Operation::Delete => "delete",
+        Operation::Execute => "execute",
+    }
+}
+
+fn required_semantic_checks(operations: &[Operation]) -> Vec<String> {
+    let mut required = Vec::with_capacity(operations.len() * 2);
+    for operation in operations {
+        let key = operation_key(*operation);
+        required.push(format!("own_tenant_allow:{key}"));
+        required.push(format!("cross_tenant_deny:{key}"));
+    }
+    required
+}
+
 fn validate_evidence_payload(payload: &PolicyEvidencePayload) -> Result<(), EvidenceError> {
     if payload.model_version != SECURITY_MODEL_VERSION || payload.policy_id.trim().is_empty()
         || payload.policy_revision == 0 || payload.target_id.trim().is_empty()
         || payload.tenant_id.trim().is_empty() || payload.fingerprint.len() != 64
         || hex::decode(&payload.fingerprint).map_or(true, |bytes| bytes.len() != 32)
-        || payload.observed_at_unix < 0 {
-        return Err(error("invalid_evidence_payload", "The policy evidence is missing a required identity, revision, fingerprint or timestamp."));
+        || payload.observed_at_unix < 0
+        || payload.checks.len() > 256
+        || payload.checks.iter().any(|check| check.check_id.trim().is_empty()
+            || check.check_id.len() > 128 || check.check_id.contains('\\0')
+            || check.detail.len() > 2048 || check.detail.contains('\\0'))
+    {
+        return Err(error("invalid_evidence_payload", "The policy evidence is missing a required identity, revision, fingerprint or timestamp, or contains malformed/bounded-check data."));
+    }
+    let mut check_ids = std::collections::HashSet::with_capacity(payload.checks.len());
+    if payload.checks.iter().any(|check| !check_ids.insert(check.check_id.as_str())) {
+        return Err(error("duplicate_evidence_check", "Evidence check identifiers must be unique."));
     }
     Ok(())
 }
 
 fn validate_admission_eligibility(payload: &PolicyEvidencePayload) -> Result<(), EvidenceError> {
+    let mut operations = std::collections::HashSet::with_capacity(payload.verified_operations.len());
+    let operations_unique = payload.verified_operations.iter().all(|operation| operations.insert(*operation));
+    let check_ids: std::collections::HashSet<&str> = payload.checks.iter().map(|check| check.check_id.as_str()).collect();
+    let semantic_coverage_complete = !payload.verified_operations.is_empty()
+        && operations_unique
+        && required_semantic_checks(&payload.verified_operations).iter().all(|required| check_ids.contains(required.as_str()));
     if payload.posture != SecurityPosture::Verified || payload.inspection != InspectionCompleteness::Complete
-        || !payload.findings.is_empty() || payload.verified_operations.is_empty()
+        || !payload.findings.is_empty() || !semantic_coverage_complete
         || payload.checks.is_empty() || payload.checks.iter().any(|check| !check.passed) {
-        return Err(error("evidence_not_admissible", "Only complete, verified evidence with no findings, explicit operations and all checks passing can authorize runtime admission."));
+        return Err(error("evidence_not_admissible", "Admission requires complete verified evidence, no findings, unique operations, and a passing own-tenant allow plus cross-tenant deny probe for every operation."));
     }
     Ok(())
 }
