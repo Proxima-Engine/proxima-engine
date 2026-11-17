@@ -299,7 +299,8 @@ impl VerificationReport {
     /// Fail closed: an incomplete, unavailable, degraded, unknown, or failing
     /// inspection can never be converted into an allow decision.
     pub fn access_decision(&self) -> AccessDecision {
-        if self.posture == SecurityPosture::Verified
+        if self.model_version == SECURITY_MODEL_VERSION
+            && self.posture == SecurityPosture::Verified
             && self.inspection == InspectionCompleteness::Complete
             && self.findings.is_empty()
         {
@@ -390,6 +391,10 @@ mod tests {
             findings: vec![],
         };
         assert_eq!(verified.access_decision(), AccessDecision::Allow);
+
+        let mut unknown_model = verified.clone();
+        unknown_model.model_version = "future.security.model".into();
+        assert_eq!(unknown_model.access_decision(), AccessDecision::Deny);
 
         for (posture, inspection) in [
             (SecurityPosture::Verified, InspectionCompleteness::Unavailable),
