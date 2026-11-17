@@ -192,8 +192,10 @@ pub fn compile_redis_acl(policy: &TenantSecurityPolicy) -> Result<CompiledPolicy
         if resource.operations.contains(&Operation::Read) { commands.push("+@read"); }
         if resource.operations.iter().any(|op| matches!(op, Operation::Create | Operation::Update | Operation::Delete)) { commands.push("+@write"); }
         if commands.is_empty() { return Err(error("empty_privilege_set", "No supported Redis command category was requested.")); }
+        let mut acl_template = vec!["reset".to_string(), "on".to_string(), format!("~{pattern}")];
+        acl_template.extend(commands.iter().map(|value| value.to_string()));
         changes.push(resource_change(resource, "redis_acl_user_template", json!({
-            "acl_template": ["reset", "on", "~".to_owned() + &pattern].into_iter().chain(commands.iter().map(|v| v.to_string())).collect::<Vec<_>>(),
+            "acl_template": acl_template,
             "username_template": "proxima:${tenant_id}",
             "password_source": "unique_secret_from_secret_manager",
             "transport": "TLS_required_outside_local_development",
