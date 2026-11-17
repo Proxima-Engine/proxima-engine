@@ -205,6 +205,8 @@ impl ElasticsearchCatalogAdapter {
             "distribution": if security_api == "opensearch_security_plugin" { "opensearch" } else { "elasticsearch" },
             "security_api": security_api,
             "index_pattern": self.index_pattern,
+            "endpoint_host": self.endpoint.host_str(),
+            "endpoint_port": self.endpoint.port_or_known_default(),
             "roles": roles.clone().unwrap_or(Value::Null),
             "role_mappings": role_mappings.clone().unwrap_or(Value::Null),
             "users": sanitize_user_catalog(users.clone().unwrap_or(Value::Null)),
