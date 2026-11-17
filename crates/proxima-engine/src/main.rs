@@ -259,6 +259,7 @@ impl PolicyAdmissionClient {
         uuid::Uuid::parse_str(&target_id)
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "PROXIMA_DATABASE_TARGET_ID must be a UUID"))?;
         let client = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
             .timeout(std::time::Duration::from_secs(5))
             .build()
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.to_string()))?;
