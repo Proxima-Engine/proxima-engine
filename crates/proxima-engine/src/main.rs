@@ -231,6 +231,12 @@ fn policy_admission_evidence_is_consistent(
     {
         return false;
     }
+    let Some(observed_at) = evidence.get("observed_at").and_then(serde_json::Value::as_i64) else {
+        return false;
+    };
+    if observed_at > payload.issued_at + 30 || observed_at < payload.issued_at - 90 {
+        return false;
+    }
     let Some(checks) = evidence.get("checks").and_then(serde_json::Value::as_array) else {
         return false;
     };
@@ -259,8 +265,12 @@ fn policy_admission_evidence_is_consistent(
             && check.get("tenant_role_prefix_matches").and_then(serde_json::Value::as_bool) == Some(true)
             && check.get("tenant_role_binding_valid").and_then(serde_json::Value::as_bool) == Some(true)
             && check.get("revision_id").and_then(serde_json::Value::as_str).is_some()
+            && check.get("revision_status").and_then(serde_json::Value::as_str) == Some("applied")
+            && check.get("revision_verified_at").and_then(serde_json::Value::as_str).is_some()
             && check.get("verification").and_then(|value| value.get("state")).and_then(serde_json::Value::as_str) == Some("protected")
             && check.get("latest_drift_state").and_then(serde_json::Value::as_str) == Some("protected")
+            && check.get("latest_drift_finding_code").and_then(serde_json::Value::as_str) == Some("protected")
+            && check.get("latest_drift_observed_at").and_then(serde_json::Value::as_str).is_some()
             && check.get("drift_event_fresh").and_then(serde_json::Value::as_bool) == Some(true);
         if !protected {
             return false;
@@ -1770,6 +1780,8 @@ mod policy_admission_evidence_tests {
         json!({
             "revision_id": "revision-1",
             "revision_version": 7,
+            "revision_status": "applied",
+            "revision_verified_at": "2026-11-17T10:00:00Z",
             "registration_enabled": true,
             "connection_status": "reachable",
             "schema_drift_detected": false,
@@ -1779,6 +1791,8 @@ mod policy_admission_evidence_tests {
             "tenant_role_binding_valid": true,
             "verification": {"state": "protected"},
             "latest_drift_state": "protected",
+            "latest_drift_finding_code": "protected",
+            "latest_drift_observed_at": "2026-11-17T10:00:00Z",
             "drift_event_fresh": true,
             "protected": true
         })
