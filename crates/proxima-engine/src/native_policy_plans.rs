@@ -308,6 +308,11 @@ mod tests {
         assert_eq!(compiled.database_kind, DatabaseKind::MySql);
         assert_eq!(compiled.changes[0].definition["required_isolation_model"], "one_database_per_tenant");
         assert_eq!(compiled.changes[0].definition["shared_table_row_level_isolation"], false);
+        let template = compiled.changes[0].definition["sql_template"].as_array().unwrap()
+            .iter().filter_map(|value| value.as_str()).collect::<Vec<_>>().join("\n");
+        assert!(template.contains("@'${trusted_application_host}'"));
+        assert!(!template.contains("@'%'"));
+        assert_eq!(compiled.changes[0].definition["host_placeholder"], "${trusted_application_host}");
     }
 
     #[test]
