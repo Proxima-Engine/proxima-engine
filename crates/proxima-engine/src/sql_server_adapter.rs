@@ -420,6 +420,12 @@ impl DatabaseAdapter for SqlServerCatalogAdapter {
                 if !enabled {
                     resource_findings.push(finding("sql_server_rls_policy_missing_or_disabled", &protected.resource, "No enabled SQL Server security policy predicate protects this table."));
                 }
+                if predicates.iter().any(|predicate| predicate["enabled"].as_bool() == Some(false)) {
+                    resource_findings.push(finding("sql_server_disabled_rls_policy_present", &protected.resource, "One or more SQL Server RLS predicates are disabled and may leave an intended operation unprotected."));
+                }
+                if predicates.iter().any(|predicate| predicate["schema_bound"].as_bool() != Some(true)) {
+                    resource_findings.push(finding("sql_server_rls_policy_not_schema_bound", &protected.resource, "An RLS security policy is not confirmed schema-bound."));
+                }
                 let has_filter = predicates.iter().any(|predicate| predicate["enabled"].as_bool() == Some(true) && predicate["predicate_type"].as_str() == Some("FILTER"));
                 let has_after_insert = predicates.iter().any(|predicate| predicate["enabled"].as_bool() == Some(true) && predicate["operation"].as_str() == Some("AFTER INSERT"));
                 let has_before_update = predicates.iter().any(|predicate| predicate["enabled"].as_bool() == Some(true) && predicate["operation"].as_str() == Some("BEFORE UPDATE"));
