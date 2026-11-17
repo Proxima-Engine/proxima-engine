@@ -378,6 +378,7 @@ impl DatabaseAdapter for MySqlCatalogAdapter {
         Box::pin(async move {
             self.validate_target(&request.target)?;
             request.policy.validate().map_err(|_| error("invalid_policy", "The canonical tenant policy failed validation."))?;
+            let _compiled_plan = self.compile_policy(&request.policy)?;
             let discovery = self.discover_inner(&DiscoveryRequest { target: request.target.clone(), namespace: None }).await?;
             let mut resources = Vec::with_capacity(request.policy.resources.len());
             let mut findings = discovery.findings.clone();
