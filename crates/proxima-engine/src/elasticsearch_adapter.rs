@@ -467,6 +467,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn descriptor_claims_discovery_only() {
+        let adapter = ElasticsearchCatalogAdapter::new(
+            "target",
+            "tenant-*",
+            "https://search.example.com:9200",
+            "ApiKey abc",
+        ).unwrap();
+        let descriptor = adapter.descriptor();
+        assert_eq!(descriptor.maturity, AdapterMaturity::InDevelopment);
+        assert!(descriptor.capabilities.schema_inspection);
+        assert!(descriptor.capabilities.drift_detection);
+        assert!(!descriptor.capabilities.tenant_identity_enforcement);
+        assert!(!descriptor.capabilities.policy_semantic_verification);
+        assert!(!descriptor.capabilities.policy_generation);
+        assert!(!descriptor.capabilities.controlled_policy_deployment);
+        assert!(!descriptor.capabilities.runtime_fail_closed_admission);
+        assert!(!descriptor.capabilities.signed_security_evidence);
+    }
+
+    #[test]
     fn requires_https_and_non_embedded_credentials() {
         assert!(ElasticsearchCatalogAdapter::new("target", "tenant-*", "http://localhost:9200", "ApiKey x").is_err());
         assert!(ElasticsearchCatalogAdapter::new("target", "tenant-*", "https://user:pass@example.com", "ApiKey x").is_err());
