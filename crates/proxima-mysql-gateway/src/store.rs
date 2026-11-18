@@ -80,6 +80,9 @@ impl Drop for StoreDocument {
         for credential in &mut self.migration {
             credential.password.zeroize();
         }
+        for key in &mut self.assertion_keys {
+            key.key_hex.zeroize();
+        }
         for assertion_key in &mut self.assertion_keys {
             assertion_key.key_hex.zeroize();
         }
@@ -495,10 +498,16 @@ impl TenantAccountDirectory for EncryptedTenantStore {
         };
         let tenant_id = Uuid::parse_str(&account.tenant_id)
             .map_err(|_| AccountError::DirectoryUnavailable)?;
-        let verifier = hex::decode(&account.verifier_hex)
+        let mut verifier_bytes = hex::decode(&account.verifier_hex)
             .map_err(|_| AccountError::DirectoryUnavailable)?;
-        let verifier: [u8; 32] = verifier.try_into()
-            .map_err(|_| AccountError::DirectoryUnavailable)?;
+        let verifier: [u8; 32] = match verifier_bytes.as_slice().try_into() {
+            Ok(verifier) => verifier,
+            Err(_) => {
+                verifier_bytes.zeroize();
+                return Err(AccountError::DirectoryUnavailable);
+            }
+        };
+        verifier_bytes.zeroize();
         Ok(Some(TenantAccount::from_verifier(
             account.username.clone(), tenant_id, verifier
         )))
