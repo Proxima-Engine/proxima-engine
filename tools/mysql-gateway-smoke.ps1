@@ -75,7 +75,7 @@ function Invoke-Probe {
     $probeArgs = @(
         "run", "-p", "proxima-mysql-gateway", "--bin", "proxima-mysql-probe", "--",
         "127.0.0.1", "13306", "localhost", $caFile,
-        $gatewayUsername, $GatewayPassword, $Assertion, $otherDatabase
+        $gatewayUsername, $GatewayPassword, $Assertion, $tenantDatabase, $otherDatabase
     )
     if ($ExpectDenied) { $probeArgs += "--expect-auth-denied" }
     $output = & cargo @probeArgs 2>&1
