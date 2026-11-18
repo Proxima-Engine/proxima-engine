@@ -15,7 +15,7 @@ The branch currently contains:
 - A tenant-bound packet relay that rejects commands that can change database, authentication or session protocol state.
 - Database-per-tenant provisioning plans with distinct runtime and migration accounts.
 - An asynchronous MySQL DDL executor and append-only, fsync-backed provisioning journal.
-- An AES-256-GCM encrypted local tenant registry for gateway verifiers, tenant-scoped assertion keys and upstream runtime/migration credentials.
+- An AES-256-GCM encrypted runtime registry for gateway verifiers, tenant-scoped assertion keys and upstream runtime credentials; migration passwords are never stored in or mounted to the gateway.
 - A provisioning CLI that writes the tenant record before marking the DDL journal complete and compensates the DDL if local registration fails.
 
 **It is still experimental and is not a production-supported database integration.** No real MySQL end-to-end gateway test or customer deployment has passed yet. The private Control Plane now has provider-aware tenant metadata, bootstrap, registration, token issuance, assertion-key rotation and revocation-state APIs, plus a dashboard provider selector. Live gateway-to-Control-Plane synchronization, automated fleet distribution, production packaging and verified customer deployment remain incomplete. Do not route production customer traffic through this branch.
@@ -45,7 +45,7 @@ The initial supported model is **one database per tenant**, with separate accoun
 - Runtime accounts are capped at 64 concurrent connections; migration accounts are capped at 4.
 - Account host matching is restricted to literal IPv4/IPv6 addresses. DNS names, wildcards, CIDR ranges and netmasks are rejected; configure the gateway's actual source IP.
 - Revocation locks tenant accounts and removes their grants; it does not drop customer data.
-- Runtime and migration credentials are distinct and stored encrypted locally.
+- Runtime credentials are encrypted in the gateway registry. Migration credentials are displayed once by the admin CLI and must be stored in the customer's separate secret manager.
 
 The MySQL server's own privilege checks are the enforcement boundary. The gateway additionally binds each physical client connection to one authenticated tenant and one upstream database session. It never retargets an authenticated upstream connection to another tenant.
 
@@ -77,7 +77,7 @@ The gateway does not parse arbitrary SQL to inject tenant predicates. MySQL data
 
 ## Encrypted local registry
 
-EncryptedTenantStore stores gateway password verifiers and tenant-specific runtime/migration credentials in one AES-256-GCM encrypted document.
+EncryptedTenantStore stores gateway password verifiers, tenant-specific runtime credentials and assertion keys in one AES-256-GCM encrypted document. Migration credentials are not part of the registry format. The gateway process has no migration password to decrypt or load.
 
 Required environment variables:
 
@@ -102,7 +102,8 @@ Required environment variables:
 - PROXIMA_MYSQL_UPSTREAM_CA_FILE
 - PROXIMA_MYSQL_PROVISIONING_USER
 - PROXIMA_MYSQL_PROVISIONING_PASSWORD
-- PROXIMA_MYSQL_ACCOUNT_HOST — exact host/IP that MySQL should match for the tenant accounts; wildcard patterns are rejected
+- PROXIMA_MYSQL_RUNTIME_ACCOUNT_HOST — exact static IPv4/IPv6 address of the gateway host/container; used only for the runtime account
+- PROXIMA_MYSQL_MIGRATION_ACCOUNT_HOST — exact static IPv4/IPv6 address of the dedicated migration runner; used only for the migration account. It must not be the gateway's runtime address unless the migration runner is deliberately colocated.
 - PROXIMA_MYSQL_SECRET_STORE_FILE
 - PROXIMA_MYSQL_SECRET_STORE_KEY_FILE
 - PROXIMA_MYSQL_PROVISIONING_JOURNAL_FILE
@@ -119,11 +120,15 @@ Provision a tenant from the repository root:
 
     cargo run -p proxima-mysql-gateway --bin proxima-mysql-admin -- provision <tenant-uuid> <gateway-username>
 
-The CLI generates independent high-entropy runtime, migration and gateway credentials. It sends DDL only over verified TLS, persists the runtime and migration credentials plus a per-tenant assertion signing key in the encrypted local registry, and prints the gateway password once. The gateway does not receive the signing key through its environment; it loads the tenant-specific key from the encrypted registry. The provisioning administrator password is read from the process environment and is not persisted by the gateway. Do not capture CLI output in CI logs, shell transcripts or source control.
+The CLI generates independent high-entropy runtime, migration and gateway credentials. It sends DDL only over verified TLS, stores only the runtime credential, gateway verifier and per-tenant assertion signing key in the encrypted runtime registry, and prints the gateway and migration passwords once. The migration password is never written to the registry or mounted into the gateway; store it in the customer's migration secret manager. The provisioning administrator password is read from the process environment and is not persisted. Do not capture CLI output in CI logs, shell transcripts or source control.
 
-Rotate all tenant credentials (gateway, runtime and migration) with:
+Rotate the gateway and runtime credentials with (the migration account is deliberately unchanged):
 
     cargo run -p proxima-mysql-gateway --bin proxima-mysql-admin -- rotate <tenant-uuid> <gateway-username>
+
+Rotate the migration credential separately from the configured migration-runner host. The new password is verified over TLS and displayed once; update the external secret manager immediately:
+
+    cargo run -p proxima-mysql-gateway --bin proxima-mysql-admin -- rotate-migration <tenant-uuid>
 
 Revoke a tenant with:
 
