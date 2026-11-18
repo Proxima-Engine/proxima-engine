@@ -247,7 +247,7 @@ impl EncryptedTenantStore {
         });
         self.persist(&next)?;
         *document = next;
-        Ok(gateway_password)
+        Ok(gateway_password.to_string())
     }
 
     /// Rotate all three credentials atomically in the encrypted local registry.
