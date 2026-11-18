@@ -130,17 +130,17 @@ impl fmt::Debug for TenantUpstreamCredentials {
 }
 impl Drop for TenantUpstreamCredentials {
     fn drop(&mut self) {
-        use zeroize::Zeroize;
-        self.password.zeroize();
-    }
-}
-impl Drop for TenantUpstreamCredentials {
-    fn drop(&mut self) {
         self.password.zeroize();
     }
 }
 
-pub trait TenantUpstreamCredentialStore: Send + Sync {
+/// Supplies the tenant-specific signing key issued by the trusted Control Plane.
+/// Keys are scoped to a tenant/organization and are never shared gateway-wide.
+pub trait TenantAssertionKeyStore: Send + Sync {
+    fn load_assertion_key(&self, tenant_id: Uuid) -> Result<Option<Vec<u8>>, AccountError>;
+}
+
+pub trait TenantUpstreamCredentialStore: TenantAssertionKeyStore + Send + Sync {
     fn load_runtime_credentials(&self, tenant_id: Uuid) -> Result<Option<TenantUpstreamCredentials>, AccountError>;
 }
 
@@ -157,12 +157,6 @@ impl fmt::Debug for TenantMigrationCredentials {
             .field("username", &self.username)
             .field("password", &"[REDACTED]")
             .finish()
-    }
-}
-impl Drop for TenantMigrationCredentials {
-    fn drop(&mut self) {
-        use zeroize::Zeroize;
-        self.password.zeroize();
     }
 }
 impl Drop for TenantMigrationCredentials {
@@ -209,12 +203,15 @@ pub fn authenticate_and_resolve<
     challenge: &[u8; 20],
     client_tls_active: bool,
     account_directory: &D,
-    assertion_key: &[u8],
     now: u64,
     credential_store: &C,
 ) -> Result<AuthenticatedTenantSession, AccountError> {
     let tenant_id = authenticate(handshake, challenge, client_tls_active, account_directory)?;
-    let route = crate::tenant::authorize_handshake(handshake, tenant_id, assertion_key, now)
+    let assertion_key = credential_store
+        .load_assertion_key(tenant_id)?
+        .ok_or(AccountError::DirectoryUnavailable)?;
+    let assertion_key = Zeroizing::new(assertion_key);
+    let route = crate::tenant::authorize_handshake(handshake, tenant_id, &assertion_key, now)
         .map_err(|_| AccountError::InvalidAuthenticationResponse)?;
     let mut credentials = credential_store
         .load_runtime_credentials(tenant_id)?
@@ -339,6 +336,15 @@ mod tests {
 
 
     struct MemoryCredentialStore(TenantUpstreamCredentials);
+    impl TenantAssertionKeyStore for MemoryCredentialStore {
+        fn load_assertion_key(&self, tenant_id: Uuid) -> Result<Option<Vec<u8>>, AccountError> {
+            if self.0.tenant_id == tenant_id {
+                Ok(Some(b"0123456789abcdef0123456789abcdef".to_vec()))
+            } else {
+                Ok(None)
+            }
+        }
+    }
     impl TenantUpstreamCredentialStore for MemoryCredentialStore {
         fn load_runtime_credentials(&self, tenant_id: Uuid) -> Result<Option<TenantUpstreamCredentials>, AccountError> {
             if self.0.tenant_id == tenant_id { Ok(Some(self.0.clone())) } else { Ok(None) }
@@ -368,8 +374,7 @@ mod tests {
             crate::tenant::TENANT_ASSERTION_ATTRIBUTE.into(), assertion
         ));
         let session = authenticate_and_resolve(
-            &handshake, &challenge, true, &directory,
-            b"0123456789abcdef0123456789abcdef", 100, &store
+            &handshake, &challenge, true, &directory, 100, &store
         ).unwrap();
         assert_eq!(session.tenant_id, tenant);
         assert_eq!(session.upstream_username, runtime_name);
@@ -400,8 +405,7 @@ mod tests {
         ));
         assert_eq!(
             authenticate_and_resolve(
-                &handshake, &challenge, true, &directory,
-                b"0123456789abcdef0123456789abcdef", 100, &store
+                &handshake, &challenge, true, &directory, 100, &store
             ),
             Err(AccountError::DirectoryUnavailable)
         );
