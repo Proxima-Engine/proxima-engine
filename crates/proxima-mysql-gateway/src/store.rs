@@ -653,7 +653,9 @@ fn read_bounded(path: &Path) -> Result<Vec<u8>, StoreError> {
 }
 
 fn encrypt_document(key: &[u8; 32], document: &StoreDocument) -> Result<Vec<u8>, StoreError> {
-    let mut plaintext = serde_json::to_vec(document).map_err(|_| StoreError::StoreUnavailable)?;
+    let mut plaintext = Zeroizing::new(
+        serde_json::to_vec(document).map_err(|_| StoreError::StoreUnavailable)?
+    );
     if plaintext.len() > MAX_STORE_BYTES {
         return Err(StoreError::StoreUnavailable);
     }
@@ -663,7 +665,6 @@ fn encrypt_document(key: &[u8; 32], document: &StoreDocument) -> Result<Vec<u8>,
     let cipher = LessSafeKey::new(unbound);
     let nonce = Nonce::assume_unique_for_key(nonce_bytes);
     if cipher.seal_in_place_append_tag(nonce, Aad::from(AAD), &mut plaintext).is_err() {
-        plaintext.zeroize();
         return Err(StoreError::StoreUnavailable);
     }
     let mut output = Vec::with_capacity(MAGIC.len() + NONCE_LEN + plaintext.len());
