@@ -8,7 +8,7 @@ This branch now contains an independent `proxima-mysql-gateway` crate with bound
 
 MySQL does not provide PostgreSQL-style row-level security. Proxima will not emulate RLS by rewriting arbitrary SQL. The initial supported model is **one database per tenant**, with separate database accounts:
 
-- Runtime account: SELECT, INSERT, UPDATE, DELETE, EXECUTE and SHOW VIEW, scoped to that tenant database only.
+- Runtime account: SELECT, INSERT, UPDATE and DELETE only, scoped to that tenant database. Routine execution and schema inspection are not granted by default.
 - Migration account: schema-management privileges scoped to that same tenant database only.
 - Neither account receives global privileges, GRANT OPTION, user/role administration, FILE, SUPER, SYSTEM_USER, or cross-database grants.
 - Both accounts require TLS.
