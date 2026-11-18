@@ -77,10 +77,18 @@ try {
     if ($ownB.Trim() -ne "tenant-b-secret") { throw "Tenant B returned unexpected own-tenant data." }
     Assert-MySqlDenied -Name "Tenant B cannot read Tenant A" -User "ap_test_b_runtime" -Password ("b" * 64) -Sql "SELECT secret FROM ap_test_tenant_a.records"
     Assert-MySqlDenied -Name "Tenant B cannot write Tenant A" -User "ap_test_b_runtime" -Password ("b" * 64) -Sql "UPDATE ap_test_tenant_a.records SET secret='forbidden' WHERE id=1"
+    Assert-MySqlDenied -Name "Runtime account cannot inspect MySQL system users" -User "ap_test_a_runtime" -Password ("a" * 64) -Sql "SELECT user, host FROM mysql.user"
+    Assert-MySqlDenied -Name "Runtime account cannot create database users" -User "ap_test_a_runtime" -Password ("a" * 64) -Sql "CREATE USER 'ap_forbidden'@'127.0.0.1' IDENTIFIED BY 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'"
 
     Write-Host "--- Migration account checks ---" -ForegroundColor Cyan
     Assert-MySqlSuccess -Name "Tenant A migrator can create objects in Tenant A" -User "ap_test_a_migrator" -Password ("c" * 64) -Sql "CREATE TABLE ap_test_tenant_a.migration_probe (id INT)" -RequireTls | Out-Null
     Assert-MySqlDenied -Name "Tenant A migrator cannot create objects in Tenant B" -User "ap_test_a_migrator" -Password ("c" * 64) -Sql "CREATE TABLE ap_test_tenant_b.forbidden (id INT)"
+
+    Write-Host "--- Credential rotation checks ---" -ForegroundColor Cyan
+    Assert-MySqlSuccess -Name "Rotate Tenant B runtime password" -User "root" -Password $rootPassword -Sql "ALTER USER 'ap_test_b_runtime'@'127.0.0.1' IDENTIFIED BY 'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff' REQUIRE SSL" | Out-Null
+    Assert-MySqlDenied -Name "Old Tenant B password is rejected after rotation" -User "ap_test_b_runtime" -Password ("b" * 64) -Sql "SELECT 1"
+    $rotated = Assert-MySqlSuccess -Name "New Tenant B password works after rotation" -User "ap_test_b_runtime" -Password ("f" * 64) -Sql "SELECT secret FROM ap_test_tenant_b.records" -RequireTls
+    if ($rotated.Trim() -ne "tenant-b-secret") { throw "Tenant B credential rotation changed tenant data or routing." }
 
     Write-Host "--- Revocation checks ---" -ForegroundColor Cyan
     Assert-MySqlSuccess -Name "Lock Tenant A runtime account" -User "root" -Password $rootPassword -Sql "ALTER USER 'ap_test_a_runtime'@'127.0.0.1' ACCOUNT LOCK" | Out-Null
