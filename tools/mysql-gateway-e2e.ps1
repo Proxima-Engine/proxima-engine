@@ -7,7 +7,11 @@ $certDir = Join-Path $repoRoot "dev\mysql-certs"
 $secretDir = Join-Path $repoRoot "dev\mysql-secrets"
 $dataDir = Join-Path $repoRoot "dev\mysql-data"
 $rootPassword = "proxima-mysql-dev-only"
-$adminPassword = [Convert]::ToHexString([System.Security.Cryptography.RandomNumberGenerator]::GetBytes(32)).ToLowerInvariant()
+$adminRandom = New-Object byte[] 32
+$adminRng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+$adminRng.GetBytes($adminRandom)
+$adminRng.Dispose()
+$adminPassword = [BitConverter]::ToString($adminRandom).Replace("-", "").ToLowerInvariant()
 $tenantA = $null
 $tenantB = $null
 $tenantAProvisioned = $false
@@ -93,14 +97,28 @@ function New-Tenant {
     if (-not $passwordMatch.Success -or -not $assertionMatch.Success) {
         throw "Provisioning output did not contain the one-time gateway password and local test assertion. Output: $text"
     }
+    $tenantHex = $tenant.ToString("N")
+    $tenantBytes = New-Object byte[] 16
+    for ($index = 0; $index -lt 16; $index++) {
+        $tenantBytes[$index] = [Convert]::ToByte($tenantHex.Substring($index * 2, 2), 16)
+    }
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $tenantDigest = $sha.ComputeHash($tenantBytes)
+    }
+    finally {
+        $sha.Dispose()
+    }
+    $tenantSuffix = [BitConverter]::ToString($tenantDigest).Replace("-", "").ToLowerInvariant().Substring(0, 27)
+
     return [pscustomobject]@{
         Id = $tenant
         Username = $Username
         Password = $passwordMatch.Groups[1].Value
         Assertion = $assertionMatch.Groups[1].Value
         Database = "ap_t_$($tenant.ToString('N'))"
-        RuntimeUser = "ap_r_$(([Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Convert]::FromHexString($tenant.ToString('N')))).ToLowerInvariant()).Substring(0,27))"
-        MigrationUser = "ap_m_$(([Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Convert]::FromHexString($tenant.ToString('N')))).ToLowerInvariant()).Substring(0,27))"
+        RuntimeUser = "ap_r_$tenantSuffix"
+        MigrationUser = "ap_m_$tenantSuffix"
     }
 }
 
@@ -151,9 +169,9 @@ GRANT ALL PRIVILEGES ON *.* TO 'proxima_provisioner'@'%' WITH GRANT OPTION;
     $env:PROXIMA_MYSQL_STATEMENT_TIMEOUT_MS = "30000"
 
     Write-Host "--- Provision two isolated tenants through the real MySQL DDL executor ---" -ForegroundColor Cyan
-    $tenantA = New-Tenant -Username "gateway_e2e_a"
+    $tenantA = New-Tenant -Username "gw_a_$([Guid]::NewGuid().ToString('N').Substring(0,8))"
     $tenantAProvisioned = $true
-    $tenantB = New-Tenant -Username "gateway_e2e_b"
+    $tenantB = New-Tenant -Username "gw_b_$([Guid]::NewGuid().ToString('N').Substring(0,8))"
     $tenantBProvisioned = $true
 
     $probeSql = @"
