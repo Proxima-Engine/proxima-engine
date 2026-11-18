@@ -360,6 +360,11 @@ impl Command {
     }
 }
 
+pub fn server_capabilities(supports_tls: bool) -> u32 {
+    let capabilities = server_capabilities(supports_tls);
+    capabilities
+}
+
 pub fn encode_server_handshake(
     connection_id: u32,
     challenge: &[u8; 20],
