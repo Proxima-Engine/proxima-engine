@@ -820,7 +820,7 @@ mod tests {
     #[test]
     fn admin_executor_allows_only_exact_tenant_grant_profiles() {
         let tenant_id = Uuid::new_v4();
-        let plan = build_provisioning_plan(tenant_id, "10.0.0.12", PASSWORD_A, PASSWORD_B).unwrap();
+        let plan = build_provisioning_plan(tenant_id, "10.0.0.12", "10.0.0.13", PASSWORD_A, PASSWORD_B).unwrap();
         for statement in plan.statements() {
             assert!(is_allowed_admin_statement(statement), "rejected generated statement: {}", statement);
         }
@@ -841,7 +841,7 @@ mod tests {
     fn admin_executor_allows_tenant_rotation_and_revocation_statements() {
         let tenant_id = Uuid::new_v4();
         let identity = MySqlTenantIdentity::for_tenant(tenant_id);
-        for statement in build_password_rotation(&identity, "10.0.0.12", PASSWORD_B, PASSWORD_A).unwrap() {
+        for statement in build_password_rotation(&identity, "10.0.0.12", "10.0.0.13", PASSWORD_B, PASSWORD_A).unwrap() {
             assert!(is_allowed_admin_statement(&statement));
         }
         for statement in build_runtime_password_rotation(&identity, "10.0.0.12", PASSWORD_B).unwrap() {
@@ -850,7 +850,7 @@ mod tests {
         for statement in build_migration_password_rotation(&identity, "10.0.0.12", PASSWORD_A).unwrap() {
             assert!(is_allowed_admin_statement(&statement));
         }
-        for statement in build_revocation(&identity, "10.0.0.12").unwrap() {
+        for statement in build_revocation(&identity, "10.0.0.12", "10.0.0.13").unwrap() {
             assert!(is_allowed_admin_statement(&statement));
         }
     }
