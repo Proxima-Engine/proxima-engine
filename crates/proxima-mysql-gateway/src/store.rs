@@ -758,9 +758,9 @@ fn decrypt_plaintext(key: &[u8; 32], encrypted: &[u8]) -> Result<Zeroizing<Vec<u
     let nonce = Nonce::assume_unique_for_key(nonce_bytes);
     let plaintext = cipher.open_in_place(nonce, Aad::from(AAD), &mut ciphertext)
         .map_err(|_| StoreError::CorruptStore)?;
-    let mut result = Zeroizing::new(plaintext.to_vec());
+    let result = Zeroizing::new(plaintext.to_vec());
     ciphertext.zeroize();
-    Ok(std::mem::take(&mut *result).into())
+    Ok(result)
 }
 
 fn decrypt_document(key: &[u8; 32], encrypted: &[u8]) -> Result<StoreDocument, StoreError> {
