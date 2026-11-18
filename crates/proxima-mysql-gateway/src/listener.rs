@@ -303,7 +303,16 @@ impl MySqlGateway {
             .await
             .map_err(|_| GatewayError::TransportFailed)?;
 
-        relay_session(client, upstream, self.config.max_packet_size).await
+        let gateway_username = handshake.username.clone();
+        let tenant_id = session.tenant_id;
+        relay_session(
+            client,
+            upstream,
+            self.config.max_packet_size,
+            Arc::clone(&self.account_directory),
+            gateway_username,
+            tenant_id,
+        ).await
     }
 }
 
@@ -358,6 +367,9 @@ async fn relay_session(
     client: ServerTlsStream<TcpStream>,
     upstream: ClientTlsStream<TcpStream>,
     max_packet_size: usize,
+    account_directory: Arc<dyn TenantAccountDirectory>,
+    gateway_username: String,
+    tenant_id: uuid::Uuid,
 ) -> Result<(), GatewayError> {
     let (mut client_reader, mut client_writer) = tokio::io::split(client);
     let (mut upstream_reader, mut upstream_writer) = tokio::io::split(upstream);
@@ -392,6 +404,22 @@ async fn relay_session(
                     break;
                 }
                 Ok(_) => {
+                    // Re-check the local registry at every command boundary.
+                    // The admin CLI updates the encrypted file atomically, so
+                    // a revoked account cannot continue issuing new commands
+                    // through an already-open client connection.
+                    let still_authorized = matches!(
+                        account_directory.find_account(&gateway_username),
+                        Ok(Some(account)) if account.tenant_id == tenant_id
+                    );
+                    if !still_authorized {
+                        let error = command_error_packet(
+                            packet.sequence.wrapping_add(1),
+                            "Tenant authorization has been revoked",
+                        );
+                        let _ = local_tx.send(error).await;
+                        break;
+                    }
                     if write_packet(&mut upstream_writer, &packet, max_packet_size).await.is_err() {
                         break;
                     }
