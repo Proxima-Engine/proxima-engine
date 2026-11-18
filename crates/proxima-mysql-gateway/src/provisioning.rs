@@ -83,9 +83,15 @@ impl MySqlDdlExecutor for MySqlAdminExecutor {
             payload.push(0x03); // COM_QUERY
             payload.extend_from_slice(statement.as_bytes());
             let request = Packet { sequence: 0, payload };
-            if write_packet(&mut self.stream, &request, self.max_packet_size).await.is_err() {
-                self.usable = false;
-                return Err(DdlExecutionError);
+            match timeout(
+                self.statement_timeout,
+                write_packet(&mut self.stream, &request, self.max_packet_size),
+            ).await {
+                Ok(Ok(())) => {}
+                _ => {
+                    self.usable = false;
+                    return Err(DdlExecutionError);
+                }
             }
             let response = match timeout(
                 self.statement_timeout,
