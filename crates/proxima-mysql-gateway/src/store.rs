@@ -218,7 +218,9 @@ impl EncryptedTenantStore {
 
     fn persist(&self, document: &StoreDocument) -> Result<(), StoreError> {
         let encrypted = encrypt_document(&self.key, document)?;
-        let parent = self.path.parent().ok_or(StoreError::InvalidConfiguration)?;
+        let parent = self.path.parent()
+            .filter(|path| !path.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
         fs::create_dir_all(parent).map_err(|_| StoreError::StoreUnavailable)?;
         reject_symlink_if_present(&self.path)?;
         let mut random = [0u8; 8];
@@ -231,6 +233,7 @@ impl EncryptedTenantStore {
         let write_result = (|| {
             file.write_all(&encrypted)?;
             file.sync_all()?;
+            drop(file);
             fs::rename(&temp_path, &self.path)?;
             if let Ok(directory) = File::open(parent) {
                 let _ = directory.sync_all();
