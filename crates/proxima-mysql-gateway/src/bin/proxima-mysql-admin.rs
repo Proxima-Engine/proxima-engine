@@ -166,8 +166,8 @@ async fn provision(tenant_value: String, gateway_username: String) -> Result<(),
     let username_for_store = gateway_username.clone();
     let runtime_username = identity.runtime_username.clone();
     let migration_username = identity.migration_username.clone();
-    let runtime_password_for_store = runtime_password.clone();
-    let migration_password_for_store = migration_password.clone();
+    let runtime_password_for_store = Zeroizing::new(runtime_password.to_string());
+    let migration_password_for_store = Zeroizing::new(migration_password.to_string());
 
     let (created, gateway_password) = execute_provisioning_with_finalize(
         &plan,
@@ -203,7 +203,7 @@ async fn provision(tenant_value: String, gateway_username: String) -> Result<(),
         if encoded.len() != 64 || !encoded.bytes().all(|byte| byte.is_ascii_hexdigit()) {
             return Err("PROXIMA_MYSQL_TENANT_ASSERTION_KEY must be exactly 64 hexadecimal characters".into());
         }
-        let key = hex::decode(encoded).map_err(|_| "invalid tenant assertion key".to_owned())?;
+        let key = Zeroizing::new(hex::decode(encoded).map_err(|_| "invalid tenant assertion key".to_owned())?);
         let now = SystemTime::now().duration_since(UNIX_EPOCH)
             .map_err(|_| "system clock is before Unix epoch".to_owned())?.as_secs();
         let assertion = TenantAssertion::issue(created.tenant_id, now + 900, &key)
@@ -340,6 +340,8 @@ async fn rotate(tenant_value: String, gateway_username: String) -> Result<(), St
     println!("Tenant credentials rotated.");
     println!("Gateway username: {gateway_username}");
     println!("Gateway password (shown once): {gateway_password}");
+    let mut gateway_password = gateway_password;
+    gateway_password.zeroize();
     println!("Runtime and migration credentials were rotated and stored encrypted; their values were not printed.");
     Ok(())
 }
