@@ -121,14 +121,45 @@ pub async fn connect_upstream(
     session: &AuthenticatedTenantSession,
 ) -> Result<TlsStream<TcpStream>, UpstreamError> {
     validate_session_identity(session)?;
+    connect_authenticated(
+        config,
+        &session.upstream_username,
+        &session.upstream_password,
+        Some(&session.database_name),
+    ).await
+}
 
+/// Connect with a trusted MySQL administrative account. This is reserved for
+/// the provisioning executor; application sessions must use connect_upstream.
+pub async fn connect_admin(
+    config: &UpstreamTlsConfig,
+    username: &str,
+    password: &str,
+) -> Result<TlsStream<TcpStream>, UpstreamError> {
+    if username.is_empty()
+        || username.len() > 32
+        || username.bytes().any(|byte| byte == 0 || byte.is_ascii_control())
+        || password.is_empty()
+        || password.len() > 1024
+    {
+        return Err(UpstreamError::InvalidConfiguration);
+    }
+    connect_authenticated(config, username, password, None).await
+}
+
+async fn connect_authenticated(
+    config: &UpstreamTlsConfig,
+    username: &str,
+    password: &str,
+    database: Option<&str>,
+) -> Result<TlsStream<TcpStream>, UpstreamError> {
     let tcp = timeout(
         config.connect_timeout,
         TcpStream::connect((config.host.as_str(), config.port)),
     )
-        .await
-        .map_err(|_| UpstreamError::ConnectTimeout)?
-        .map_err(|_| UpstreamError::TransportFailed)?;
+    .await
+    .map_err(|_| UpstreamError::ConnectTimeout)?
+    .map_err(|_| UpstreamError::TransportFailed)?;
 
     let mut tcp = tcp;
     let greeting_packet = timeout(
@@ -147,7 +178,7 @@ pub async fn connect_upstream(
         return Err(UpstreamError::UnsupportedAuthenticationPlugin);
     }
 
-    let client_flags = CLIENT_LONG_PASSWORD
+    let mut client_flags = CLIENT_LONG_PASSWORD
         | CLIENT_LONG_FLAG
         | CLIENT_PROTOCOL_41
         | CLIENT_SSL
@@ -158,8 +189,10 @@ pub async fn connect_upstream(
         | CLIENT_PLUGIN_AUTH
         | CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA
         | CLIENT_SESSION_TRACK
-        | CLIENT_DEPRECATE_EOF
-        | CLIENT_CONNECT_WITH_DB;
+        | CLIENT_DEPRECATE_EOF;
+    if database.is_some() {
+        client_flags |= CLIENT_CONNECT_WITH_DB;
+    }
     validate_client_capabilities(client_flags, greeting.capability_flags)
         .map_err(|_| UpstreamError::UnsupportedServerCapabilities)?;
 
@@ -181,7 +214,14 @@ pub async fn connect_upstream(
         .as_slice()
         .try_into()
         .map_err(|_| UpstreamError::InvalidServerGreeting)?;
-    let response = build_handshake_response(session, &challenge, client_flags, config.max_packet_size);
+    let response = build_handshake_response(
+        username,
+        password,
+        database,
+        &challenge,
+        client_flags,
+        config.max_packet_size,
+    );
     write_packet(
         &mut upstream,
         &Packet { sequence: 2, payload: response },
@@ -211,7 +251,7 @@ pub async fn connect_upstream(
             Ok(upstream)
         }
         [0x01, 0x04] => {
-            let mut clear_password = session.upstream_password.as_bytes().to_vec();
+            let mut clear_password = password.as_bytes().to_vec();
             clear_password.push(0);
             write_packet(
                 &mut upstream,
@@ -258,23 +298,27 @@ fn build_ssl_request(capabilities: u32) -> Vec<u8> {
 }
 
 fn build_handshake_response(
-    session: &AuthenticatedTenantSession,
+    username: &str,
+    password: &str,
+    database: Option<&str>,
     challenge: &[u8; 20],
     capabilities: u32,
     max_packet_size: usize,
 ) -> Vec<u8> {
-    let auth = caching_sha2_response(session.upstream_password.as_bytes(), challenge);
+    let auth = caching_sha2_response(password.as_bytes(), challenge);
     let mut payload = Vec::with_capacity(128);
     payload.extend_from_slice(&capabilities.to_le_bytes());
     payload.extend_from_slice(&(max_packet_size as u32).to_le_bytes());
     payload.push(45);
     payload.extend_from_slice(&[0u8; 23]);
-    payload.extend_from_slice(session.upstream_username.as_bytes());
+    payload.extend_from_slice(username.as_bytes());
     payload.push(0);
     payload.push(auth.len() as u8);
     payload.extend_from_slice(&auth);
-    payload.extend_from_slice(session.database_name.as_bytes());
-    payload.push(0);
+    if let Some(database) = database {
+        payload.extend_from_slice(database.as_bytes());
+        payload.push(0);
+    }
     payload.extend_from_slice(b"caching_sha2_password\0");
     payload
 }
