@@ -8,3 +8,7 @@ data
 *.log
 *.pem
 *.key
+# Never send local MySQL development material to Docker build contexts
+dev/mysql-certs/
+dev/mysql-secrets/
+dev/mysql-data/
