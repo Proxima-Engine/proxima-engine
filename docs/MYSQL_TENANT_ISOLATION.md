@@ -38,7 +38,7 @@ MySQL does not provide PostgreSQL-style row-level security. Proxima will not cla
 
 The initial supported model is **one database per tenant**, with separate accounts:
 
-- Runtime account: SELECT, INSERT, UPDATE, DELETE, EXECUTE, CREATE TEMPORARY TABLES, LOCK TABLES and SHOW VIEW, all scoped to that tenant database. EXECUTE permits tenant-local stored routines; CREATE TEMPORARY TABLES does not grant persistent DDL; LOCK TABLES cannot cross the tenant database boundary.
+- Runtime account: SELECT, INSERT, UPDATE and DELETE only, scoped to that tenant database. Routine execution, temporary-table creation, table locks, views and all DDL are excluded by default. Additional capabilities require a separately reviewed least-privilege grant profile.
 - Migration account: schema-management privileges scoped to that same tenant database.
 - No global grants, GRANT OPTION, account administration, FILE, SUPER, SYSTEM_USER or cross-database grants are issued to tenant accounts.
 - Both accounts require TLS.
@@ -129,7 +129,7 @@ Revoke a tenant with:
 
     cargo run -p proxima-mysql-gateway --bin proxima-mysql-admin -- revoke <tenant-uuid>
 
-Revocation removes local gateway credentials first, so the running gateway rejects new commands on existing client sessions at the next command boundary and rejects new connections. The CLI then locks the two MySQL accounts and revokes their grants. An already-running query may complete; immediate termination of in-flight queries is not guaranteed.
+Revocation removes local gateway credentials first. The running gateway rejects new commands and polls active sessions once per second, closing sessions when their account or assertion is no longer valid. The CLI then locks the two MySQL accounts and revokes their grants. A query already in flight may be interrupted when the upstream connection is closed.
 
 If provisioning is interrupted by a process crash or an ambiguous MySQL response, the journal blocks automatic reprovisioning. Inspect the actual MySQL databases and accounts first, manually restore or remove any partial resources, then acknowledge the inspected state:
 
@@ -137,7 +137,7 @@ If provisioning is interrupted by a process crash or an ambiguous MySQL response
 
 The acknowledgement records an operator note; it does not change MySQL state or perform cleanup.
 
-For local-only testing, setting PROXIMA_MYSQL_ISSUE_LOCAL_ASSERTION=true allows the CLI to print a 15-minute assertion signed with PROXIMA_MYSQL_TENANT_ASSERTION_KEY. **Do not enable this in production.** Production assertions must be issued by the authenticated Control Plane; that API integration is not implemented yet.
+For local-only testing, setting PROXIMA_MYSQL_ISSUE_LOCAL_ASSERTION=true allows the CLI to print a 60-minute assertion signed with PROXIMA_MYSQL_TENANT_ASSERTION_KEY. **Do not enable this in production.** Production assertions must be issued by the authenticated Control Plane; that API integration is not implemented yet.
 
 MySQL DDL implicitly commits. The append-only journal records each operation and fsyncs every event. If the process crashes during provisioning, the tenant is blocked from automatic reprovisioning until an operator inspects the MySQL state and explicitly acknowledges reconciliation. Never delete or edit the journal to bypass this block.
 
@@ -167,7 +167,7 @@ Run the separate gateway:
 
     cargo run -p proxima-mysql-gateway
 
-The gateway loads each tenant's assertion verification key from the encrypted registry after authenticating that tenant's gateway account. The shared assertion key is not present in gateway process configuration. The provisioning process stores the Control Plane-derived tenant/organization key with that tenant's encrypted credentials. The current Control Plane signer uses the 64 ASCII hexadecimal characters returned by its organization key derivation directly as HMAC key bytes; the gateway intentionally matches that representation. Rotate a tenant key with `cargo run -p proxima-mysql-gateway --bin proxima-mysql-admin -- rotate-assertion-key <tenant-uuid>` after coordinating the same key change with the Control Plane. New connections using old assertions will fail after the registry key changes; existing authenticated sessions are not automatically terminated. The gateway uses its own TLS certificate for client connections and a separately verified CA/server name for the upstream MySQL connection. Do not disable upstream certificate verification in production.
+The gateway loads each tenant's assertion verification key from the encrypted registry after authenticating that tenant's gateway account. The shared assertion key is not present in gateway process configuration. The provisioning process stores the Control Plane-derived tenant/organization key with that tenant's encrypted credentials. The current Control Plane signer uses the 64 ASCII hexadecimal characters returned by its organization key derivation directly as HMAC key bytes; the gateway intentionally matches that representation. Rotate a tenant key with `cargo run -p proxima-mysql-gateway --bin proxima-mysql-admin -- rotate-assertion-key <tenant-uuid>` after coordinating the same key change with the Control Plane. New connections using old assertions will fail after the registry key changes; existing authenticated sessions are not automatically terminated. The gateway uses its own TLS certificate for client connections and a separately verified CA/server name for the upstream MySQL connection. The Docker Compose profile runs as UID 65532 with a read-only root filesystem, read-only encrypted-registry mount, and only the CA certificate plus gateway certificate/key mounted into the container. It does not mount the CA private key or MySQL server private key into the gateway. Do not disable upstream certificate verification in production.
 
 ## Verification
 
@@ -179,7 +179,7 @@ This formats the Rust workspace, runs workspace tests and gateway Clippy, then r
 - Direct MySQL 8.4 grant-boundary tests.
 - A full gateway protocol probe covering TLS, gateway authentication, signed tenant assertions, cross-database denial, blocked database/session switching and revocation.
 
-The gateway smoke test builds the optional Docker gateway profile and uses a disposable development CA, a development-only MySQL root password and a fixed private Docker subnet. It writes all keys, certificates and tenant data under the gitignored dev directory. Do not reuse this Compose topology or its root password in production. The Docker image defaults to a non-root user; the local Compose profile runs as root only to read Windows bind-mounted development secrets after copying the registry key into a private tmpfs file.
+The gateway smoke test builds the optional Docker gateway profile and uses a disposable development CA, a development-only MySQL root password and a fixed private Docker subnet. It writes all keys, certificates and tenant data under the gitignored dev directory. Do not reuse this Compose topology or its root password in production. The Docker image and local Compose gateway profile run as UID 65532. The gateway copies the registry key from the read-only development secret mount into a private tmpfs file before startup. The encrypted registry is mounted read-only; the local admin CLI is the only writer.
 
 No GitHub Actions run is required for this local workflow.
 
