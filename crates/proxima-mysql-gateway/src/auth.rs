@@ -339,7 +339,7 @@ mod tests {
     impl TenantAssertionKeyStore for MemoryCredentialStore {
         fn load_assertion_key(&self, tenant_id: Uuid) -> Result<Option<Vec<u8>>, AccountError> {
             if self.0.tenant_id == tenant_id {
-                Ok(Some(b"0123456789abcdef0123456789abcdef".to_vec()))
+                Ok(Some(b"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_vec()))
             } else {
                 Ok(None)
             }
