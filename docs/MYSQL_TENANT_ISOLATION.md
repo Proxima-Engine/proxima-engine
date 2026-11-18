@@ -106,7 +106,7 @@ Required environment variables:
 - PROXIMA_MYSQL_SECRET_STORE_FILE
 - PROXIMA_MYSQL_SECRET_STORE_KEY_FILE
 - PROXIMA_MYSQL_PROVISIONING_JOURNAL_FILE
-- PROXIMA_MYSQL_TENANT_ASSERTION_KEY — the tenant/organization-scoped 32-byte signing key supplied by the authenticated Control Plane, encoded as 64 hexadecimal characters
+- PROXIMA_MYSQL_TENANT_ASSERTION_KEY — the tenant/organization-scoped signing key supplied by the authenticated Control Plane as 64 ASCII hexadecimal characters. Preserve this exact string representation when deriving the HMAC key; do not hex-decode it
 
 Optional timeout/size variables:
 
@@ -166,7 +166,7 @@ Run the separate gateway:
 
     cargo run -p proxima-mysql-gateway
 
-The gateway loads each tenant's assertion verification key from the encrypted registry after authenticating that tenant's gateway account. The shared assertion key is not present in gateway process configuration. The provisioning process stores the Control Plane-derived tenant/organization key with that tenant's encrypted credentials. The gateway uses its own TLS certificate for client connections and a separately verified CA/server name for the upstream MySQL connection. Do not disable upstream certificate verification in production.
+The gateway loads each tenant's assertion verification key from the encrypted registry after authenticating that tenant's gateway account. The shared assertion key is not present in gateway process configuration. The provisioning process stores the Control Plane-derived tenant/organization key with that tenant's encrypted credentials. The current Control Plane signer uses the 64 ASCII hexadecimal characters returned by its organization key derivation directly as HMAC key bytes; the gateway intentionally matches that representation. The gateway uses its own TLS certificate for client connections and a separately verified CA/server name for the upstream MySQL connection. Do not disable upstream certificate verification in production.
 
 ## Verification
 
