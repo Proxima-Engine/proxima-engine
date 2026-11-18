@@ -8,7 +8,17 @@ use crate::{
     protocol::Packet,
     upstream::{connect_admin, read_packet, write_packet, UpstreamTlsConfig},
 };
-use std::{fmt, future::Future, pin::Pin, time::Duration};
+use serde::{Deserialize, Serialize};
+use std::{
+    collections::HashSet,
+    fmt,
+    future::Future,
+    fs::{self, File, OpenOptions},
+    io::{BufRead, BufReader, Write},
+    path::{Path, PathBuf},
+    pin::Pin,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 use tokio::{net::TcpStream, time::timeout};
 use tokio_rustls::client::TlsStream;
 
@@ -113,6 +123,160 @@ pub trait ProvisioningJournal {
     fn step_compensated(&mut self, tenant_id: &str, step: usize) -> Result<(), JournalError>;
     fn needs_reconciliation(&mut self, tenant_id: &str, failed_step: usize) -> Result<(), JournalError>;
     fn complete(&mut self, tenant_id: &str) -> Result<(), JournalError>;
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct JournalEvent {
+    tenant_id: String,
+    event: String,
+    step: Option<usize>,
+    timestamp: u64,
+}
+
+/// Append-only, fsync-backed journal. A tenant left active by a process crash
+/// is blocked on restart until an operator explicitly acknowledges reconciliation.
+pub struct FileProvisioningJournal {
+    path: PathBuf,
+    file: File,
+    active: HashSet<String>,
+    blocked: HashSet<String>,
+}
+
+impl FileProvisioningJournal {
+    pub fn open(path: impl Into<PathBuf>) -> Result<Self, JournalError> {
+        let path = path.into();
+        match fs::symlink_metadata(&path) {
+            Ok(metadata) if metadata.file_type().is_symlink() => return Err(JournalError),
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => return Err(JournalError),
+        }
+        let parent = path.parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        fs::create_dir_all(parent).map_err(|_| JournalError)?;
+
+        let mut active = HashSet::new();
+        let mut blocked = HashSet::new();
+        if path.exists() {
+            let file = File::open(&path).map_err(|_| JournalError)?;
+            let reader = BufReader::new(file);
+            for line in reader.lines() {
+                let line = line.map_err(|_| JournalError)?;
+                let event: JournalEvent = serde_json::from_str(&line).map_err(|_| JournalError)?;
+                apply_journal_state(&event, &mut active, &mut blocked);
+            }
+        }
+        // A begin without a terminal event is ambiguous after a restart.
+        blocked.extend(active.drain());
+
+        let mut options = OpenOptions::new();
+        options.create(true).append(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let file = options.open(&path).map_err(|_| JournalError)?;
+        Ok(Self { path, file, active, blocked })
+    }
+
+    fn append(&mut self, tenant_id: &str, event: &str, step: Option<usize>) -> Result<(), JournalError> {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|_| JournalError)?
+            .as_secs();
+        let record = JournalEvent {
+            tenant_id: tenant_id.to_owned(),
+            event: event.to_owned(),
+            step,
+            timestamp,
+        };
+        let mut bytes = serde_json::to_vec(&record).map_err(|_| JournalError)?;
+        bytes.push(b'\n');
+        self.file.write_all(&bytes).map_err(|_| JournalError)?;
+        self.file.sync_data().map_err(|_| JournalError)?;
+        Ok(())
+    }
+
+    /// Resolve a crash or ambiguous DDL outcome after an operator has inspected
+    /// the MySQL server and confirmed that the tenant is safe to retry.
+    pub fn acknowledge_reconciliation(
+        &mut self,
+        tenant_id: &str,
+        operator_note: &str,
+    ) -> Result<(), JournalError> {
+        if operator_note.trim().is_empty() || operator_note.len() > 1024
+            || !self.blocked.contains(tenant_id)
+        {
+            return Err(JournalError);
+        }
+        self.append(tenant_id, "reconciled", None)?;
+        self.blocked.remove(tenant_id);
+        Ok(())
+    }
+
+    pub fn reconciliation_required(&self, tenant_id: &str) -> bool {
+        self.blocked.contains(tenant_id)
+    }
+}
+
+fn apply_journal_state(
+    event: &JournalEvent,
+    active: &mut HashSet<String>,
+    blocked: &mut HashSet<String>,
+) {
+    match event.event.as_str() {
+        "begin" => {
+            active.insert(event.tenant_id.clone());
+            blocked.remove(&event.tenant_id);
+        }
+        "complete" | "reconciled" => {
+            active.remove(&event.tenant_id);
+            blocked.remove(&event.tenant_id);
+        }
+        "needs_reconciliation" => {
+            active.remove(&event.tenant_id);
+            blocked.insert(event.tenant_id.clone());
+        }
+        _ => {}
+    }
+}
+
+impl ProvisioningJournal for FileProvisioningJournal {
+    fn begin(&mut self, tenant_id: &str) -> Result<(), JournalError> {
+        if tenant_id.is_empty() || self.active.contains(tenant_id) || self.blocked.contains(tenant_id) {
+            return Err(JournalError);
+        }
+        self.append(tenant_id, "begin", None)?;
+        self.active.insert(tenant_id.to_owned());
+        Ok(())
+    }
+    fn step_started(&mut self, tenant_id: &str, step: usize) -> Result<(), JournalError> {
+        if !self.active.contains(tenant_id) { return Err(JournalError); }
+        self.append(tenant_id, "step_started", Some(step))
+    }
+    fn step_applied(&mut self, tenant_id: &str, step: usize) -> Result<(), JournalError> {
+        if !self.active.contains(tenant_id) { return Err(JournalError); }
+        self.append(tenant_id, "step_applied", Some(step))
+    }
+    fn step_compensated(&mut self, tenant_id: &str, step: usize) -> Result<(), JournalError> {
+        if !self.active.contains(tenant_id) { return Err(JournalError); }
+        self.append(tenant_id, "step_compensated", Some(step))
+    }
+    fn needs_reconciliation(&mut self, tenant_id: &str, failed_step: usize) -> Result<(), JournalError> {
+        if !self.active.contains(tenant_id) { return Err(JournalError); }
+        self.append(tenant_id, "needs_reconciliation", Some(failed_step))?;
+        self.active.remove(tenant_id);
+        self.blocked.insert(tenant_id.to_owned());
+        Ok(())
+    }
+    fn complete(&mut self, tenant_id: &str) -> Result<(), JournalError> {
+        if !self.active.contains(tenant_id) { return Err(JournalError); }
+        self.append(tenant_id, "complete", None)?;
+        self.active.remove(tenant_id);
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
