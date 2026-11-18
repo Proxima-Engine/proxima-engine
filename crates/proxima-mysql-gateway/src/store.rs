@@ -19,9 +19,10 @@ use std::{
     fs::{self, File, OpenOptions},
     io::{Read, Write},
     path::{Path, PathBuf},
-    sync::RwLock,
-    time::SystemTime,
+    sync::{Mutex, RwLock},
+    time::{Duration, Instant},
 };
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 use zeroize::{Zeroize, Zeroizing};
 
@@ -29,6 +30,7 @@ const MAGIC: &[u8; 8] = b"APMYSQL1";
 const AAD: &[u8] = b"agata-proxima-mysql-secret-store-v1";
 const NONCE_LEN: usize = 12;
 const MAX_STORE_BYTES: usize = 16 * 1024 * 1024;
+const MAX_ENCRYPTED_STORE_BYTES: usize = MAX_STORE_BYTES + MAGIC.len() + NONCE_LEN + 16;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StoreError {
@@ -138,7 +140,8 @@ pub struct EncryptedTenantStore {
     path: PathBuf,
     key: [u8; 32],
     document: RwLock<StoreDocument>,
-    loaded_metadata: RwLock<Option<(u64, SystemTime)>>,
+    loaded_metadata: RwLock<Option<[u8; 32]>>,
+    last_reload_check: Mutex<Instant>,
 }
 
 impl fmt::Debug for EncryptedTenantStore {
@@ -163,22 +166,23 @@ impl EncryptedTenantStore {
         let path = path.into();
         let mut key = Zeroizing::new(load_key(key_file.as_ref())?);
         reject_symlink_if_present(&path)?;
-        let document = if path.exists() {
-            let encrypted = read_bounded(&path)?;
-            decrypt_document(&key, &encrypted)?
+        let encrypted = read_bounded_optional(&path)?;
+        let loaded_metadata = encrypted.as_ref().map(|bytes| content_fingerprint(bytes));
+        let document = if let Some(encrypted) = encrypted.as_deref() {
+            decrypt_document(&key, encrypted)?
         } else {
             StoreDocument { version: 1, ..StoreDocument::default() }
         };
         if document.version != 1 {
             return Err(StoreError::CorruptStore);
         }
-        let loaded_metadata = metadata_stamp(&path)?;
         let key = std::mem::take(&mut *key);
         Ok(Self {
             path,
             key,
             document: RwLock::new(document),
             loaded_metadata: RwLock::new(loaded_metadata),
+            last_reload_check: Mutex::new(Instant::now() - Duration::from_secs(1)),
         })
     }
 
@@ -186,14 +190,22 @@ impl EncryptedTenantStore {
     /// file. Called at connection authorization boundaries so a gateway process
     /// observes provisioning and revocation performed by the admin CLI.
     pub fn reload_from_disk(&self) -> Result<(), StoreError> {
+        {
+            let now = Instant::now();
+            let mut last_check = self.last_reload_check.lock().map_err(|_| StoreError::StoreUnavailable)?;
+            if now.duration_since(*last_check) < Duration::from_millis(250) {
+                return Ok(());
+            }
+            *last_check = now;
+        }
         reject_symlink_if_present(&self.path)?;
-        let stamp = metadata_stamp(&self.path)?;
+        let encrypted = read_bounded_optional(&self.path)?;
+        let stamp = encrypted.as_ref().map(|bytes| content_fingerprint(bytes));
         if self.loaded_metadata.read().map_err(|_| StoreError::StoreUnavailable)?.as_ref() == stamp.as_ref() {
             return Ok(());
         }
-        let document = if stamp.is_some() {
-            let encrypted = read_bounded(&self.path)?;
-            decrypt_document(&self.key, &encrypted)?
+        let document = if let Some(encrypted) = encrypted.as_deref() {
+            decrypt_document(&self.key, encrypted)?
         } else {
             StoreDocument { version: 1, ..StoreDocument::default() }
         };
@@ -488,8 +500,9 @@ impl EncryptedTenantStore {
             let _ = fs::remove_file(&temp_path);
             return Err(StoreError::StoreUnavailable);
         }
-        let stamp = metadata_stamp(&self.path).ok().flatten();
+        let stamp = Some(content_fingerprint(&encrypted));
         *self.loaded_metadata.write().map_err(|_| StoreError::StoreUnavailable)? = stamp;
+        *self.last_reload_check.lock().map_err(|_| StoreError::StoreUnavailable)? = Instant::now();
         Ok(())
     }
 }
@@ -622,12 +635,18 @@ fn load_key(path: &Path) -> Result<[u8; 32], StoreError> {
     Ok(key)
 }
 
-fn metadata_stamp(path: &Path) -> Result<Option<(u64, SystemTime)>, StoreError> {
-    match fs::metadata(path) {
-        Ok(metadata) => {
-            let modified = metadata.modified().map_err(|_| StoreError::StoreUnavailable)?;
-            Ok(Some((metadata.len(), modified)))
-        }
+fn content_fingerprint(bytes: &[u8]) -> [u8; 32] {
+    let digest = Sha256::digest(bytes);
+    let mut fingerprint = [0u8; 32];
+    fingerprint.copy_from_slice(&digest);
+    fingerprint
+}
+
+fn read_bounded_optional(path: &Path) -> Result<Option<Vec<u8>>, StoreError> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => Err(StoreError::StoreUnavailable),
+        Ok(metadata) if !metadata.is_file() => Err(StoreError::CorruptStore),
+        Ok(_) => read_bounded(path).map(Some),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(_) => Err(StoreError::StoreUnavailable),
     }
@@ -635,15 +654,16 @@ fn metadata_stamp(path: &Path) -> Result<Option<(u64, SystemTime)>, StoreError> 
 
 fn read_bounded(path: &Path) -> Result<Vec<u8>, StoreError> {
     let metadata = fs::metadata(path).map_err(|_| StoreError::StoreUnavailable)?;
-    if !metadata.is_file() || metadata.len() as usize > MAX_STORE_BYTES {
+    let size = usize::try_from(metadata.len()).map_err(|_| StoreError::CorruptStore)?;
+    if !metadata.is_file() || size > MAX_ENCRYPTED_STORE_BYTES {
         return Err(StoreError::CorruptStore);
     }
     let mut file = File::open(path).map_err(|_| StoreError::StoreUnavailable)?;
-    let mut bytes = Vec::with_capacity(metadata.len() as usize);
-    file.take((MAX_STORE_BYTES + 1) as u64)
+    let mut bytes = Vec::with_capacity(size);
+    file.take((MAX_ENCRYPTED_STORE_BYTES + 1) as u64)
         .read_to_end(&mut bytes)
         .map_err(|_| StoreError::StoreUnavailable)?;
-    if bytes.len() > MAX_STORE_BYTES {
+    if bytes.len() > MAX_ENCRYPTED_STORE_BYTES {
         return Err(StoreError::CorruptStore);
     }
     Ok(bytes)
@@ -673,7 +693,7 @@ fn encrypt_document(key: &[u8; 32], document: &StoreDocument) -> Result<Vec<u8>,
 
 fn decrypt_document(key: &[u8; 32], encrypted: &[u8]) -> Result<StoreDocument, StoreError> {
     if encrypted.len() < MAGIC.len() + NONCE_LEN + 16
-        || encrypted.len() > MAX_STORE_BYTES + MAGIC.len() + NONCE_LEN + 16
+        || encrypted.len() > MAX_ENCRYPTED_STORE_BYTES
         || &encrypted[..MAGIC.len()] != MAGIC
     {
         return Err(StoreError::CorruptStore);
@@ -995,5 +1015,11 @@ mod tests {
             ).err(),
             Some(StoreError::InvalidAccount)
         );
+    }    #[test]
+    fn encrypted_registry_fingerprint_detects_same_length_content_changes() {
+        assert_ne!(content_fingerprint(b"tenant-a"), content_fingerprint(b"tenant-b"));
+        assert_eq!(content_fingerprint(b"stable"), content_fingerprint(b"stable"));
     }
+
+
 }
