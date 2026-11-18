@@ -454,26 +454,13 @@ async fn relay_session(
                         let _ = local_tx.send(error).await;
                         break;
                     }
-                    let assertion_key = match credential_store.load_assertion_key(tenant_id) {
-                        Ok(Some(key)) => Zeroizing::new(key),
-                        _ => {
-                            let error = command_error_packet(
-                                packet.sequence.wrapping_add(1),
-                                "Tenant assertion key is no longer available",
-                            );
-                            let _ = local_tx.send(error).await;
-                            break;
-                        }
-                    };
-                    let assertion_valid = TenantAssertion::verify(
+                    let assertion_valid = session_assertion_is_current(
+                        credential_store.as_ref(),
                         &tenant_assertion,
-                        &assertion_key,
+                        tenant_id,
+                        assertion_expires_at,
                         now,
-                    )
-                    .is_ok_and(|assertion| {
-                        assertion.tenant_id == tenant_id
-                            && assertion.expires_at == assertion_expires_at
-                    });
+                    );
                     if !assertion_valid {
                         let error = command_error_packet(
                             packet.sequence.wrapping_add(1),
@@ -582,6 +569,22 @@ async fn relay_session(
     Ok(())
 }
 
+fn session_assertion_is_current<K: TenantAssertionKeyStore + ?Sized>(
+    store: &K,
+    token: &str,
+    tenant_id: uuid::Uuid,
+    expected_expiry: u64,
+    now: u64,
+) -> bool {
+    let key = match store.load_assertion_key(tenant_id) {
+        Ok(Some(key)) => Zeroizing::new(key),
+        _ => return false,
+    };
+    TenantAssertion::verify(token, &key, now).is_ok_and(|assertion| {
+        assertion.tenant_id == tenant_id && assertion.expires_at == expected_expiry
+    })
+}
+
 fn command_error_packet(sequence: u8, message: &str) -> Packet {
     let mut payload = vec![0xff, 0x14, 0x04, b'#'];
     payload.extend_from_slice(b"42000");
@@ -596,6 +599,43 @@ fn is_local_infile_request(packet: &Packet) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct TestAssertionKeyStore {
+        key: Option<Vec<u8>>,
+    }
+
+    impl TenantAssertionKeyStore for TestAssertionKeyStore {
+        fn load_assertion_key(
+            &self,
+            _tenant_id: uuid::Uuid,
+        ) -> Result<Option<Vec<u8>>, AccountError> {
+            Ok(self.key.clone())
+        }
+    }
+
+    #[test]
+    fn active_session_revalidates_assertion_against_current_tenant_key() {
+        let tenant_id = uuid::Uuid::new_v4();
+        let now = 1_800_000_000u64;
+        let expiry = now + 600;
+        let original_key = b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_vec();
+        let token = TenantAssertion::issue(tenant_id, expiry, &original_key).unwrap();
+
+        let valid_store = TestAssertionKeyStore { key: Some(original_key.clone()) };
+        assert!(session_assertion_is_current(&valid_store, &token, tenant_id, expiry, now));
+
+        let rotated_store = TestAssertionKeyStore {
+            key: Some(b"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_vec()),
+        };
+        assert!(!session_assertion_is_current(&rotated_store, &token, tenant_id, expiry, now));
+
+        let revoked_store = TestAssertionKeyStore { key: None };
+        assert!(!session_assertion_is_current(&revoked_store, &token, tenant_id, expiry, now));
+
+        assert!(!session_assertion_is_current(&valid_store, &token, uuid::Uuid::new_v4(), expiry, now));
+        assert!(!session_assertion_is_current(&valid_store, &token, tenant_id, expiry + 1, now));
+        assert!(!session_assertion_is_current(&valid_store, &token, tenant_id, expiry, expiry));
+    }
 
     #[test]
     fn upstream_local_infile_request_is_identified_and_rejected() {
