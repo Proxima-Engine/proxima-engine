@@ -35,6 +35,10 @@ pub struct UpstreamTlsConfig {
 }
 
 impl UpstreamTlsConfig {
+    pub fn max_packet_size(&self) -> usize {
+        self.max_packet_size
+    }
+
     pub fn from_ca_file(
         host: String,
         port: u16,
