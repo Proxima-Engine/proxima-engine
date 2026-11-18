@@ -268,7 +268,12 @@ fn apply_journal_state(
             blocked.insert(event.tenant_id.clone());
         }
         "reconciled" => {
-            if !blocked.remove(&event.tenant_id) { return Err(JournalError); }
+            // A crash can leave an unfinished begin event without an explicit
+            // needs_reconciliation record. The operator acknowledgement must
+            // be able to close that ambiguous active state on the next restart.
+            if !blocked.remove(&event.tenant_id) && !active.remove(&event.tenant_id) {
+                return Err(JournalError);
+            }
         }
         _ => return Err(JournalError),
     }
