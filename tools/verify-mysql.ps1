@@ -9,6 +9,8 @@ try {
     Write-Host "[1/5] Format Rust workspace" -ForegroundColor Cyan
     & cargo fmt -p proxima-mysql-gateway
     if ($LASTEXITCODE -ne 0) { throw "cargo fmt failed." }
+    & git diff --check
+    if ($LASTEXITCODE -ne 0) { throw "Git whitespace validation failed." }
 
     Write-Host "[2/5] Rust workspace tests" -ForegroundColor Cyan
     & cargo test -p proxima-mysql-gateway --all-targets
