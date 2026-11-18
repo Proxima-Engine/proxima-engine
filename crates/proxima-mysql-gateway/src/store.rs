@@ -5,6 +5,7 @@
 //! protected key file and is never stored beside the encrypted registry.
 use crate::auth::{
     AccountError, GatewayCredentialMaterial, TenantAccount, TenantAccountDirectory,
+    TenantMigrationCredentialStore, TenantMigrationCredentials,
     TenantUpstreamCredentialStore, TenantUpstreamCredentials,
 };
 use crate::isolation::MySqlTenantIdentity;
@@ -60,6 +61,8 @@ struct StoreDocument {
     version: u32,
     accounts: Vec<StoredGatewayAccount>,
     upstream: Vec<StoredUpstreamCredential>,
+    #[serde(default)]
+    migration: Vec<StoredMigrationCredential>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -72,6 +75,13 @@ struct StoredGatewayAccount {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct StoredUpstreamCredential {
+    tenant_id: String,
+    username: String,
+    password: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct StoredMigrationCredential {
     tenant_id: String,
     username: String,
     password: String,
@@ -90,6 +100,7 @@ impl fmt::Debug for EncryptedTenantStore {
             .field("key", &"[REDACTED]")
             .field("account_count", &self.document.read().map(|d| d.accounts.len()).unwrap_or(0))
             .field("tenant_credential_count", &self.document.read().map(|d| d.upstream.len()).unwrap_or(0))
+            .field("migration_credential_count", &self.document.read().map(|d| d.migration.len()).unwrap_or(0))
             .finish()
     }
 }
@@ -125,11 +136,16 @@ impl EncryptedTenantStore {
         gateway_credential: GatewayCredentialMaterial,
         upstream_username: &str,
         upstream_password: &str,
+        migration_username: &str,
+        migration_password: &str,
     ) -> Result<String, StoreError> {
         validate_gateway_username(gateway_username)?;
         let identity = MySqlTenantIdentity::for_tenant(tenant_id);
         if upstream_username != identity.runtime_username
+            || migration_username != identity.migration_username
             || !valid_password(upstream_password)
+            || !valid_password(migration_password)
+            || upstream_password == migration_password
         {
             return Err(StoreError::InvalidAccount);
         }
@@ -139,7 +155,9 @@ impl EncryptedTenantStore {
         if document.accounts.iter().any(|account| account.username == gateway_username) {
             return Err(StoreError::DuplicateAccount);
         }
-        if document.upstream.iter().any(|entry| entry.tenant_id == tenant_id.to_string()) {
+        if document.upstream.iter().any(|entry| entry.tenant_id == tenant_id.to_string())
+            || document.migration.iter().any(|entry| entry.tenant_id == tenant_id.to_string())
+        {
             return Err(StoreError::TenantAlreadyRegistered);
         }
         let mut next = document.clone();
@@ -166,6 +184,11 @@ impl EncryptedTenantStore {
             username: upstream_username.to_owned(),
             password: upstream_password.to_owned(),
         });
+        next.migration.push(StoredMigrationCredential {
+            tenant_id: tenant_id.to_string(),
+            username: migration_username.to_owned(),
+            password: migration_password.to_owned(),
+        });
         self.persist(&next)?;
         *document = next;
         Ok(gateway_password)
@@ -183,6 +206,7 @@ impl EncryptedTenantStore {
             }
         }
         next.upstream.retain(|entry| entry.tenant_id != tenant_id.to_string());
+        next.migration.retain(|entry| entry.tenant_id != tenant_id.to_string());
         self.persist(&next)?;
         *document = next;
         Ok(())
@@ -220,6 +244,25 @@ impl EncryptedTenantStore {
         let mut document = self.document.write().map_err(|_| StoreError::StoreUnavailable)?;
         let mut next = document.clone();
         let entry = next.upstream.iter_mut()
+            .find(|entry| entry.tenant_id == tenant_id.to_string())
+            .ok_or(StoreError::InvalidAccount)?;
+        entry.password = password.to_owned();
+        self.persist(&next)?;
+        *document = next;
+        Ok(())
+    }
+
+    pub fn rotate_migration_password(
+        &self,
+        tenant_id: Uuid,
+        password: &str,
+    ) -> Result<(), StoreError> {
+        if !valid_password(password) {
+            return Err(StoreError::InvalidAccount);
+        }
+        let mut document = self.document.write().map_err(|_| StoreError::StoreUnavailable)?;
+        let mut next = document.clone();
+        let entry = next.migration.iter_mut()
             .find(|entry| entry.tenant_id == tenant_id.to_string())
             .ok_or(StoreError::InvalidAccount)?;
         entry.password = password.to_owned();
@@ -296,6 +339,22 @@ impl TenantUpstreamCredentialStore for EncryptedTenantStore {
             return Ok(None);
         };
         Ok(Some(TenantUpstreamCredentials {
+            tenant_id,
+            username: entry.username.clone(),
+            password: entry.password.clone(),
+        }))
+    }
+}
+
+impl TenantMigrationCredentialStore for EncryptedTenantStore {
+    fn load_migration_credentials(&self, tenant_id: Uuid) -> Result<Option<TenantMigrationCredentials>, AccountError> {
+        let document = self.document.read().map_err(|_| AccountError::DirectoryUnavailable)?;
+        let Some(entry) = document.migration.iter()
+            .find(|entry| entry.tenant_id == tenant_id.to_string())
+        else {
+            return Ok(None);
+        };
+        Ok(Some(TenantMigrationCredentials {
             tenant_id,
             username: entry.username.clone(),
             password: entry.password.clone(),
@@ -442,7 +501,7 @@ mod tests {
         let identity = MySqlTenantIdentity::for_tenant(tenant);
         let runtime_password = "c".repeat(64);
         store.register_tenant(
-            tenant, "gateway_a", gateway, &identity.runtime_username, &runtime_password
+            tenant, "gateway_a", gateway, &identity.runtime_username, &runtime_password, &identity.migration_username, &"d".repeat(64)
         ).unwrap();
 
         let encrypted = fs::read(dir.path().join("tenants.enc")).unwrap();
@@ -455,6 +514,9 @@ mod tests {
         assert_eq!(account.tenant_id, tenant);
         let upstream = reopened.load_runtime_credentials(tenant).unwrap().unwrap();
         assert_eq!(upstream.password, runtime_password);
+        let migration = reopened.load_migration_credentials(tenant).unwrap().unwrap();
+        assert_eq!(migration.username, MySqlTenantIdentity::for_tenant(tenant).migration_username);
+        assert_eq!(migration.password, "d".repeat(64));
     }
 
     #[test]
@@ -468,7 +530,7 @@ mod tests {
         let gateway = generate_gateway_credential().unwrap();
         let identity = MySqlTenantIdentity::for_tenant(tenant);
         let gateway_password = store.register_tenant(
-            tenant, "gateway_auth_test", gateway, &identity.runtime_username, &"9".repeat(64)
+            tenant, "gateway_auth_test", gateway, &identity.runtime_username, &"9".repeat(64), &identity.migration_username, &"8".repeat(64)
         ).unwrap();
 
         let challenge = [0x5au8; 20];
@@ -502,7 +564,7 @@ mod tests {
         let tenant = Uuid::new_v4();
         let gateway = generate_gateway_credential().unwrap();
         let identity = MySqlTenantIdentity::for_tenant(tenant);
-        store.register_tenant(tenant, "gateway_b", gateway, &identity.runtime_username, &"d".repeat(64)).unwrap();
+        store.register_tenant(tenant, "gateway_b", gateway, &identity.runtime_username, &"d".repeat(64), &identity.migration_username, &"e".repeat(64)).unwrap();
         drop(store);
 
         let path = dir.path().join("tenants.enc");
@@ -522,10 +584,11 @@ mod tests {
         let tenant = Uuid::new_v4();
         let gateway = generate_gateway_credential().unwrap();
         let identity = MySqlTenantIdentity::for_tenant(tenant);
-        store.register_tenant(tenant, "gateway_c", gateway, &identity.runtime_username, &"e".repeat(64)).unwrap();
+        store.register_tenant(tenant, "gateway_c", gateway, &identity.runtime_username, &"e".repeat(64), &identity.migration_username, &"f".repeat(64)).unwrap();
         store.revoke_tenant(tenant).unwrap();
         assert!(store.find_account("gateway_c").unwrap().is_none());
         assert!(store.load_runtime_credentials(tenant).unwrap().is_none());
+        assert!(store.load_migration_credentials(tenant).unwrap().is_none());
     }
 
     #[test]
@@ -549,7 +612,9 @@ mod tests {
                 "invalid username",
                 generate_gateway_credential().unwrap(),
                 "invalid",
-                &"f".repeat(64)
+                &"f".repeat(64),
+                "invalid_migrator",
+                &"g".repeat(64)
             ).err(),
             Some(StoreError::InvalidAccount)
         );
