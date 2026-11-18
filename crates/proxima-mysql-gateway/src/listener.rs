@@ -29,7 +29,6 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, Semaphore};
 use tokio::time::timeout;
 use tokio_rustls::{client::TlsStream as ClientTlsStream, server::TlsStream as ServerTlsStream, TlsAcceptor};
-use zeroize::Zeroize;
 
 static NEXT_CONNECTION_ID: AtomicU32 = AtomicU32::new(1);
 
