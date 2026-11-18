@@ -10,9 +10,10 @@ $adminRng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
 $adminRng.GetBytes($adminRandom)
 $adminRng.Dispose()
 $adminPassword = [BitConverter]::ToString($adminRandom).Replace("-", "").ToLowerInvariant()
-$tenantId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
-$gatewayUsername = "gateway_smoke_test"
-$tenantDatabase = "ap_t_aaaaaaaaaaaa4aaa8aaaaaaaaaaaaaaa"
+$tenantId = [Guid]::NewGuid().ToString()
+$tenantCompact = $tenantId.Replace("-", "").ToLowerInvariant()
+$gatewayUsername = "gw_smoke_$($tenantCompact.Substring(0, 8))"
+$tenantDatabase = "ap_t_$tenantCompact"
 $otherDatabase = "ap_t_other"
 $accountHost = "172.31.90.3"
 $certDir = Join-Path $repoRoot "dev\mysql-certs"
