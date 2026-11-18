@@ -432,6 +432,18 @@ async fn relay_session(
                     break;
                 }
                 Ok(_) => {
+                    let now = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .map(|duration| duration.as_secs())
+                        .unwrap_or(u64::MAX);
+                    if now >= assertion_expires_at {
+                        let error = command_error_packet(
+                            packet.sequence.wrapping_add(1),
+                            "Tenant assertion has expired",
+                        );
+                        let _ = local_tx.send(error).await;
+                        break;
+                    }
                     // Re-check the local registry at every command boundary.
                     // The admin CLI updates the encrypted file atomically, so
                     // a revoked account cannot continue issuing new commands
