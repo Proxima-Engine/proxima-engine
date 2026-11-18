@@ -68,7 +68,7 @@ async fn run() -> Result<(), String> {
     ).map_err(|_| "invalid MySQL upstream TLS configuration; check host, port, server name, CA file and limits".to_owned())?;
 
     let store = Arc::new(
-        EncryptedTenantStore::open_gateway(store_file, store_key_file)
+        EncryptedTenantStore::open(store_file, store_key_file)
             .map_err(|error| format!("cannot open encrypted MySQL tenant store: {error}"))?
     );
     let account_directory = store.clone();
