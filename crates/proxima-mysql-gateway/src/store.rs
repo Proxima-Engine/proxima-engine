@@ -20,10 +20,10 @@ use std::{
     io::{Read, Write},
     path::{Path, PathBuf},
     sync::RwLock,
+    time::SystemTime,
 };
 use uuid::Uuid;
 use zeroize::{Zeroize, Zeroizing};
-use zeroize::Zeroize;
 
 const MAGIC: &[u8; 8] = b"APMYSQL1";
 const AAD: &[u8] = b"agata-proxima-mysql-secret-store-v1";
@@ -122,6 +122,7 @@ pub struct EncryptedTenantStore {
     path: PathBuf,
     key: [u8; 32],
     document: RwLock<StoreDocument>,
+    loaded_metadata: RwLock<Option<(u64, SystemTime)>>,
 }
 
 impl fmt::Debug for EncryptedTenantStore {
@@ -154,8 +155,14 @@ impl EncryptedTenantStore {
         if document.version != 1 {
             return Err(StoreError::CorruptStore);
         }
+        let loaded_metadata = metadata_stamp(&path)?;
         let key = std::mem::take(&mut *key);
-        Ok(Self { path, key, document: RwLock::new(document) })
+        Ok(Self {
+            path,
+            key,
+            document: RwLock::new(document),
+            loaded_metadata: RwLock::new(loaded_metadata),
+        })
     }
 
     /// Refresh the in-memory snapshot from the atomically replaced encrypted
@@ -163,7 +170,11 @@ impl EncryptedTenantStore {
     /// observes provisioning and revocation performed by the admin CLI.
     pub fn reload_from_disk(&self) -> Result<(), StoreError> {
         reject_symlink_if_present(&self.path)?;
-        let document = if self.path.exists() {
+        let stamp = metadata_stamp(&self.path)?;
+        if self.loaded_metadata.read().map_err(|_| StoreError::StoreUnavailable)?.as_ref() == stamp.as_ref() {
+            return Ok(());
+        }
+        let document = if stamp.is_some() {
             let encrypted = read_bounded(&self.path)?;
             decrypt_document(&self.key, &encrypted)?
         } else {
@@ -174,6 +185,7 @@ impl EncryptedTenantStore {
         }
         let mut current = self.document.write().map_err(|_| StoreError::StoreUnavailable)?;
         *current = document;
+        *self.loaded_metadata.write().map_err(|_| StoreError::StoreUnavailable)? = stamp;
         Ok(())
     }
 
@@ -394,7 +406,9 @@ impl EncryptedTenantStore {
         reject_symlink_if_present(&self.path)?;
         let mut random = [0u8; 8];
         SystemRandom::new().fill(&mut random).map_err(|_| StoreError::StoreUnavailable)?;
-        let temp_path = self.path.with_extension(format!("tmp-{}", hex::encode(random)));
+        let temp_suffix = hex::encode(random);
+        random.zeroize();
+        let temp_path = self.path.with_extension(format!("tmp-{temp_suffix}"));
         let mut options = OpenOptions::new();
         options.write(true).create_new(true);
         set_private_file_mode(&mut options);
@@ -413,6 +427,8 @@ impl EncryptedTenantStore {
             let _ = fs::remove_file(&temp_path);
             return Err(StoreError::StoreUnavailable);
         }
+        *self.loaded_metadata.write().map_err(|_| StoreError::StoreUnavailable)? =
+            metadata_stamp(&self.path)?;
         Ok(())
     }
 }
@@ -518,6 +534,17 @@ fn load_key(path: &Path) -> Result<[u8; 32], StoreError> {
     };
     bytes.zeroize();
     Ok(key)
+}
+
+fn metadata_stamp(path: &Path) -> Result<Option<(u64, SystemTime)>, StoreError> {
+    match fs::metadata(path) {
+        Ok(metadata) => {
+            let modified = metadata.modified().map_err(|_| StoreError::StoreUnavailable)?;
+            Ok(Some((metadata.len(), modified)))
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(_) => Err(StoreError::StoreUnavailable),
+    }
 }
 
 fn read_bounded(path: &Path) -> Result<Vec<u8>, StoreError> {
