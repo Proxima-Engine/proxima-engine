@@ -117,12 +117,12 @@ GRANT ALL PRIVILEGES ON *.* TO 'proxima_provisioner'@'%' WITH GRANT OPTION;
     $provisionOutput = Invoke-AdminCli -Arguments @("provision", $tenantId, $gatewayUsername)
     $provisioned = $true
     $gatewayPasswordLine = ($provisionOutput -split '\r?\n' | Where-Object { $_ -like "Gateway password (shown once): *" } | Select-Object -Last 1)
-    $assertionLine = ($provisionOutput -split '\r?\n' | Where-Object { $_ -like "LOCAL DEVELOPMENT ASSERTION (15 minutes): *" } | Select-Object -Last 1)
+    $assertionLine = ($provisionOutput -split '\r?\n' | Where-Object { $_ -like "LOCAL DEVELOPMENT ASSERTION (60 minutes): *" } | Select-Object -Last 1)
     if (-not $gatewayPasswordLine -or -not $assertionLine) {
         throw "Provisioning did not return the one-time gateway credential and local test assertion."
     }
     $gatewayPassword = $gatewayPasswordLine.Substring("Gateway password (shown once): ".Length).Trim()
-    $assertion = $assertionLine.Substring("LOCAL DEVELOPMENT ASSERTION (15 minutes): ".Length).Trim()
+    $assertion = $assertionLine.Substring("LOCAL DEVELOPMENT ASSERTION (60 minutes): ".Length).Trim()
 
     Write-Host "--- Prepare tenant and cross-tenant tables ---" -ForegroundColor Cyan
     $setupSql = @"
@@ -135,7 +135,7 @@ INSERT INTO $otherDatabase.records VALUES (1, 'tenant-b-secret') ON DUPLICATE KE
     Invoke-RootSql -Sql $setupSql | Out-Null
 
     Write-Host "--- Start standalone MySQL gateway container ---" -ForegroundColor Cyan
-    & docker compose -f $composeFile --profile gateway up -d --build --wait mysql-gateway
+    & docker compose -f $composeFile --profile gateway up -d --wait mysql-gateway
     if ($LASTEXITCODE -ne 0) { throw "MySQL gateway container did not start." }
     $gatewayStarted = $true
 
