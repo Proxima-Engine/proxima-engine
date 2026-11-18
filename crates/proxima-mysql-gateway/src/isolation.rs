@@ -111,8 +111,8 @@ pub fn build_provisioning_plan(
     let migration_user = quote_account(&identity.migration_username, account_host);
     let statements = vec![
         format!("CREATE DATABASE {database} CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci"),
-        format!("CREATE USER {runtime_user} IDENTIFIED BY '{runtime_password}' REQUIRE SSL"),
-        format!("CREATE USER {migration_user} IDENTIFIED BY '{migration_password}' REQUIRE SSL"),
+        format!("CREATE USER {runtime_user} IDENTIFIED BY '{runtime_password}' REQUIRE SSL WITH MAX_USER_CONNECTIONS 64"),
+        format!("CREATE USER {migration_user} IDENTIFIED BY '{migration_password}' REQUIRE SSL WITH MAX_USER_CONNECTIONS 4"),
         format!("GRANT SELECT, INSERT, UPDATE, DELETE ON {database}.* TO {runtime_user}"),
         format!("GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX, DROP, REFERENCES, CREATE VIEW, SHOW VIEW, TRIGGER, EVENT, CREATE ROUTINE, ALTER ROUTINE, EXECUTE ON {database}.* TO {migration_user}"),
     ];
@@ -224,6 +224,8 @@ mod tests {
         assert!(sql.contains("GRANT SELECT, INSERT, UPDATE, DELETE ON"));
         assert!(!sql.contains("GRANT EXECUTE"));
         assert!(!sql.contains("GRANT SHOW VIEW"));
+        assert!(sql.contains("MAX_USER_CONNECTIONS 64"));
+        assert!(sql.contains("MAX_USER_CONNECTIONS 4"));
         assert!(sql.contains(" TO 'ap_r_"));
         assert!(sql.contains(" TO 'ap_m_"));
         assert!(!sql.contains("ON *.*"));
