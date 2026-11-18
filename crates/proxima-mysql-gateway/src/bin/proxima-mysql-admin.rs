@@ -139,6 +139,18 @@ async fn provision(tenant_value: String, gateway_username: String) -> Result<(),
         .map_err(|_| "operating-system random source unavailable".to_owned())?);
     let gateway_credential = generate_gateway_credential()
         .map_err(|_| "operating-system random source unavailable".to_owned())?;
+    let mut assertion_key_hex = required("PROXIMA_MYSQL_TENANT_ASSERTION_KEY")?;
+    if assertion_key_hex.len() != 64
+        || !assertion_key_hex.bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        assertion_key_hex.zeroize();
+        return Err("PROXIMA_MYSQL_TENANT_ASSERTION_KEY must be a tenant-scoped 32-byte key encoded as 64 hexadecimal characters".into());
+    }
+    let decoded_assertion_key = hex::decode(&assertion_key_hex);
+    assertion_key_hex.zeroize();
+    let assertion_key = Zeroizing::new(
+        decoded_assertion_key.map_err(|_| "invalid tenant assertion key".to_owned())?
+    );
 
     let identity = MySqlTenantIdentity::for_tenant(tenant_id);
     let plan = build_provisioning_plan(
@@ -168,6 +180,7 @@ async fn provision(tenant_value: String, gateway_username: String) -> Result<(),
     let migration_username = identity.migration_username.clone();
     let runtime_password_for_store = Zeroizing::new(runtime_password.to_string());
     let migration_password_for_store = Zeroizing::new(migration_password.to_string());
+    let assertion_key_for_store = assertion_key.clone();
 
     let (created, gateway_password) = execute_provisioning_with_finalize(
         &plan,
@@ -182,6 +195,7 @@ async fn provision(tenant_value: String, gateway_username: String) -> Result<(),
                 &runtime_password_for_store,
                 &migration_username,
                 &migration_password_for_store,
+                &assertion_key_for_store,
             ).map(Zeroizing::new).map_err(|_| ())
         },
         move |identity, _gateway_password| {
@@ -199,17 +213,9 @@ async fn provision(tenant_value: String, gateway_username: String) -> Result<(),
     println!("The upstream runtime and migration passwords are encrypted in the local secret store and were not printed.");
 
     if env::var("PROXIMA_MYSQL_ISSUE_LOCAL_ASSERTION").ok().as_deref() == Some("true") {
-        let mut encoded = required("PROXIMA_MYSQL_TENANT_ASSERTION_KEY")?;
-        if encoded.len() != 64 || !encoded.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-            encoded.zeroize();
-            return Err("PROXIMA_MYSQL_TENANT_ASSERTION_KEY must be exactly 64 hexadecimal characters".into());
-        }
-        let decoded = hex::decode(&encoded).map_err(|_| "invalid tenant assertion key".to_owned());
-        encoded.zeroize();
-        let key = Zeroizing::new(decoded?);
         let now = SystemTime::now().duration_since(UNIX_EPOCH)
             .map_err(|_| "system clock is before Unix epoch".to_owned())?.as_secs();
-        let mut assertion = TenantAssertion::issue(created.tenant_id, now + 900, &key)
+        let mut assertion = TenantAssertion::issue(created.tenant_id, now + 900, &assertion_key)
             .map_err(|_| "could not issue local tenant assertion".to_owned())?;
         println!("LOCAL DEVELOPMENT ASSERTION (15 minutes): {assertion}");
         assertion.zeroize();
