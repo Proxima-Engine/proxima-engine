@@ -78,6 +78,7 @@ impl MySqlDdlExecutor for MySqlAdminExecutor {
             if !self.usable || statement.is_empty()
                 || statement.len() + 1 > self.max_packet_size
                 || statement.as_bytes().contains(&0)
+                || !is_allowed_admin_statement(statement)
             {
                 return Err(DdlExecutionError);
             }
@@ -124,6 +125,38 @@ impl MySqlDdlExecutor for MySqlAdminExecutor {
             }
         })
     }
+}
+
+fn is_allowed_admin_statement(statement: &str) -> bool {
+    if statement.contains(';')
+        || statement.contains('\n')
+        || statement.contains('\r')
+        || statement.contains('#')
+        || statement.contains("--")
+        || statement.contains("/*")
+        || statement.contains("*/")
+    {
+        return false;
+    }
+    let mut upper = statement.trim_start().to_ascii_uppercase();
+    let account_prefix = upper.starts_with("CREATE USER 'AP_R_")
+        || upper.starts_with("CREATE USER 'AP_M_")
+        || upper.starts_with("ALTER USER 'AP_R_")
+        || upper.starts_with("ALTER USER 'AP_M_")
+        || upper.starts_with("REVOKE ALL PRIVILEGES, GRANT OPTION FROM 'AP_R_")
+        || upper.starts_with("REVOKE ALL PRIVILEGES, GRANT OPTION FROM 'AP_M_")
+        || upper.starts_with("DROP USER IF EXISTS 'AP_R_")
+        || upper.starts_with("DROP USER IF EXISTS 'AP_M_");
+    let database_prefix = upper.starts_with("CREATE DATABASE `AP_T_")
+        || upper.starts_with("DROP DATABASE `AP_T_");
+    let scoped_grant = upper.starts_with("GRANT ")
+        && upper.contains(" ON `AP_T_")
+        && (upper.contains(".* TO 'AP_R_") || upper.contains(".* TO 'AP_M_"))
+        && !upper.contains(" ON *.*")
+        && !upper.contains("WITH GRANT OPTION");
+    let allowed = account_prefix || database_prefix || scoped_grant;
+    upper.zeroize();
+    allowed
 }
 
 pub trait ProvisioningJournal {
@@ -578,6 +611,22 @@ mod tests {
         let _ = execute_provisioning(&plan, &mut executor, &mut journal).await;
         assert_eq!(executor.calls.len(), 1);
         assert!(!executor.calls.iter().any(|sql| sql.starts_with("DROP DATABASE")));
+    }
+
+    #[test]
+    fn admin_executor_accepts_only_tenant_scoped_ddl() {
+        assert!(is_allowed_admin_statement("CREATE DATABASE `ap_t_123` CHARACTER SET utf8mb4"));
+        assert!(is_allowed_admin_statement("CREATE USER 'ap_r_123'@'127.0.0.1' IDENTIFIED BY 'secret' REQUIRE SSL"));
+        assert!(is_allowed_admin_statement("GRANT SELECT ON `ap_t_123`.* TO 'ap_r_123'@'127.0.0.1'"));
+        assert!(is_allowed_admin_statement("ALTER USER 'ap_m_123'@'127.0.0.1' ACCOUNT LOCK"));
+        assert!(is_allowed_admin_statement("REVOKE ALL PRIVILEGES, GRANT OPTION FROM 'ap_r_123'@'127.0.0.1'"));
+        assert!(is_allowed_admin_statement("DROP USER IF EXISTS 'ap_r_123'@'127.0.0.1'"));
+        assert!(is_allowed_admin_statement("DROP DATABASE `ap_t_123`"));
+        assert!(!is_allowed_admin_statement("SELECT 1"));
+        assert!(!is_allowed_admin_statement("GRANT ALL PRIVILEGES ON *.* TO 'attacker'@'%'"));
+        assert!(!is_allowed_admin_statement("CREATE USER 'root'@'%' IDENTIFIED BY 'secret'"));
+        assert!(!is_allowed_admin_statement("DROP DATABASE mysql"));
+        assert!(!is_allowed_admin_statement("CREATE DATABASE `ap_t_123`; DROP DATABASE mysql"));
     }
 
     #[tokio::test]
