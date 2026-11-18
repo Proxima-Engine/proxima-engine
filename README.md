@@ -17,7 +17,7 @@
 
 **Start:** [What is Agata Proxima?](#what-is-agata-proxima) · [Customer Docker install](docs/NODE_ENROLLMENT.md#2-one-command-docker-installation-hosted-cloud) · [Guided customer install (Windows/Linux)](docs/CUSTOMER_DEPLOYMENT_EXECUTOR.md#install-the-engine-customer-node) · [Deployment executor](docs/CUSTOMER_DEPLOYMENT_EXECUTOR.md) · [Launch evaluation](docs/LAUNCH.md) · [Quickstart](docs/QUICKSTART.md) · [Local developer mode](docs/LOCAL_DEVELOPMENT.md) · [Engine CLI](docs/CLI.md) · [Documentation index](docs/README.md)
 
-**Technical guides:** [Architecture](docs/ARCHITECTURE.md) · [Tenant isolation](docs/TENANT_ISOLATION.md) · [Driver integrations](docs/INTEGRATIONS.md) · [API and metrics](docs/API.md) · [Security](docs/SECURITY.md) · [Deployment](docs/DEPLOYMENT.md) · [Verification](docs/VERIFICATION.md)
+**Technical guides:** [Architecture](docs/ARCHITECTURE.md) · [Tenant isolation](docs/TENANT_ISOLATION.md) · [MySQL tenant isolation (development; not yet supported)](docs/MYSQL_TENANT_ISOLATION.md) · [Driver integrations](docs/INTEGRATIONS.md) · [API and metrics](docs/API.md) · [Security](docs/SECURITY.md) · [Deployment](docs/DEPLOYMENT.md) · [Verification](docs/VERIFICATION.md)
 
 
 
