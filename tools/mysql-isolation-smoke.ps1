@@ -101,6 +101,7 @@ try {
     Assert-MySqlSuccess -Name "Tenant A migrator can create a tenant-local stored routine" -User "ap_test_a_migrator" -Password ("c" * 64) -Sql "CREATE PROCEDURE ap_test_tenant_a.tenant_count() SELECT COUNT(*) FROM ap_test_tenant_a.records" -RequireTls | Out-Null
     Assert-MySqlSuccess -Name "Tenant B migrator can create a tenant-local stored routine" -User "ap_test_b_migrator" -Password ("d" * 64) -Sql "CREATE PROCEDURE ap_test_tenant_b.tenant_count() SELECT COUNT(*) FROM ap_test_tenant_b.records" -RequireTls | Out-Null
     Assert-MySqlDenied -Name "Tenant A migrator cannot create objects in Tenant B" -User "ap_test_a_migrator" -Password ("c" * 64) -Sql "CREATE TABLE ap_test_tenant_b.forbidden (id INT)"
+    Assert-MySqlDenied -Name "Tenant A migrator cannot read Tenant B" -User "ap_test_a_migrator" -Password ("c" * 64) -Sql "SELECT secret FROM ap_test_tenant_b.records"
 
     Write-Host "--- Credential rotation checks ---" -ForegroundColor Cyan
     Assert-MySqlSuccess -Name "Rotate Tenant B runtime password" -User "root" -Password $rootPassword -Sql "ALTER USER 'ap_test_b_runtime'@'127.0.0.1' IDENTIFIED BY 'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff' REQUIRE SSL" | Out-Null
