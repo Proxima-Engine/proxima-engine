@@ -128,6 +128,9 @@ impl ServerHandshake {
         let protocol_version = c.u8()?;
         if protocol_version != 10 { return Err(ProtocolError::InvalidHandshake); }
         let server_version = c.nul_string()?;
+        if server_version.is_empty() || server_version.len() > 128 {
+            return Err(ProtocolError::InvalidHandshake);
+        }
         let connection_id = c.u32_le()?;
         let mut auth = c.take(8)?.to_vec();
         c.skip(1)?;
@@ -156,6 +159,7 @@ impl ServerHandshake {
         } else {
             None
         };
+        if c.remaining() != 0 { return Err(ProtocolError::TrailingBytes); }
         Ok(Self {
             protocol_version, server_version, connection_id, capability_flags,
             character_set, status_flags, auth_plugin_data: auth, auth_plugin_name,
