@@ -895,7 +895,7 @@ mod tests {
         assert_eq!(store.load_assertion_key(tenant_b).unwrap().unwrap().as_slice(), key_b.as_slice());
 
         store.rotate_assertion_key(tenant_a, key_a_next).unwrap();
-        assert_eq!(store.load_assertion_key(tenant_a).unwrap().unwrap().as_slice(), key_a.as_slice()_next);
+        assert_eq!(store.load_assertion_key(tenant_a).unwrap().unwrap().as_slice(), key_a_next.as_slice());
         assert_eq!(store.load_assertion_key(tenant_b).unwrap().unwrap().as_slice(), key_b.as_slice());
 
         store.revoke_tenant(tenant_a).unwrap();
