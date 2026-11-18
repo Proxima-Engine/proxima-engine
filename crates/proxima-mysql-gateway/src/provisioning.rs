@@ -18,11 +18,11 @@ pub trait MySqlDdlExecutor {
 
 pub trait ProvisioningJournal {
     fn begin(&mut self, tenant_id: &str) -> Result<(), JournalError>;
-    fn step_started(&mut self, tenant_id: &str, step: usize) -> Result<(), ()>;
-    fn step_applied(&mut self, tenant_id: &str, step: usize) -> Result<(), ()>;
-    fn step_compensated(&mut self, tenant_id: &str, step: usize) -> Result<(), ()>;
-    fn needs_reconciliation(&mut self, tenant_id: &str, failed_step: usize) -> Result<(), ()>;
-    fn complete(&mut self, tenant_id: &str) -> Result<(), ()>;
+    fn step_started(&mut self, tenant_id: &str, step: usize) -> Result<(), JournalError>;
+    fn step_applied(&mut self, tenant_id: &str, step: usize) -> Result<(), JournalError>;
+    fn step_compensated(&mut self, tenant_id: &str, step: usize) -> Result<(), JournalError>;
+    fn needs_reconciliation(&mut self, tenant_id: &str, failed_step: usize) -> Result<(), JournalError>;
+    fn complete(&mut self, tenant_id: &str) -> Result<(), JournalError>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -155,7 +155,7 @@ mod tests {
         fail_at: Option<usize>,
     }
     impl MySqlDdlExecutor for FakeExecutor {
-        fn execute(&mut self, statement: &str) -> Result<(), ()> {
+        fn execute(&mut self, statement: &str) -> Result<(), DdlExecutionError> {
             let index = self.calls.len();
             self.calls.push(statement.to_owned());
             if self.fail_at == Some(index) { Err(DdlExecutionError) } else { Ok(()) }
@@ -165,22 +165,22 @@ mod tests {
     #[derive(Default)]
     struct FakeJournal { events: Vec<String> }
     impl ProvisioningJournal for FakeJournal {
-        fn begin(&mut self, tenant_id: &str) -> Result<(), ()> {
+        fn begin(&mut self, tenant_id: &str) -> Result<(), JournalError> {
             self.events.push(format!("begin:{tenant_id}")); Ok(())
         }
-        fn step_started(&mut self, _tenant_id: &str, step: usize) -> Result<(), ()> {
+        fn step_started(&mut self, _tenant_id: &str, step: usize) -> Result<(), JournalError> {
             self.events.push(format!("started:{step}")); Ok(())
         }
-        fn step_applied(&mut self, _tenant_id: &str, step: usize) -> Result<(), ()> {
+        fn step_applied(&mut self, _tenant_id: &str, step: usize) -> Result<(), JournalError> {
             self.events.push(format!("applied:{step}")); Ok(())
         }
-        fn step_compensated(&mut self, _tenant_id: &str, step: usize) -> Result<(), ()> {
+        fn step_compensated(&mut self, _tenant_id: &str, step: usize) -> Result<(), JournalError> {
             self.events.push(format!("compensated:{step}")); Ok(())
         }
-        fn needs_reconciliation(&mut self, _tenant_id: &str, step: usize) -> Result<(), ()> {
+        fn needs_reconciliation(&mut self, _tenant_id: &str, step: usize) -> Result<(), JournalError> {
             self.events.push(format!("reconcile:{step}")); Ok(())
         }
-        fn complete(&mut self, tenant_id: &str) -> Result<(), ()> {
+        fn complete(&mut self, tenant_id: &str) -> Result<(), JournalError> {
             self.events.push(format!("complete:{tenant_id}")); Ok(())
         }
     }
