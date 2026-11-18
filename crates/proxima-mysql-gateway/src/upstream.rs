@@ -269,7 +269,7 @@ fn caching_sha2_response(password: &[u8], challenge: &[u8; 20]) -> Vec<u8> {
     stage_one.iter().zip(mask.iter()).map(|(left, right)| left ^ right).collect()
 }
 
-async fn read_packet<R: AsyncRead + Unpin>(
+pub(crate) async fn read_packet<R: AsyncRead + Unpin>(
     reader: &mut R,
     max_packet_size: usize,
 ) -> Result<Packet, UpstreamError> {
@@ -286,7 +286,7 @@ async fn read_packet<R: AsyncRead + Unpin>(
     Ok(Packet { sequence: header[3], payload })
 }
 
-async fn write_packet<W: AsyncWrite + Unpin>(
+pub(crate) async fn write_packet<W: AsyncWrite + Unpin>(
     writer: &mut W,
     packet: &Packet,
     max_packet_size: usize,
