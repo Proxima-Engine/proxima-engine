@@ -143,7 +143,7 @@ impl EncryptedTenantStore {
     /// gateway service identity and administrators.
     pub fn open(path: impl Into<PathBuf>, key_file: impl AsRef<Path>) -> Result<Self, StoreError> {
         let path = path.into();
-        let key = load_key(key_file.as_ref())?;
+        let mut key = Zeroizing::new(load_key(key_file.as_ref())?);
         reject_symlink_if_present(&path)?;
         let document = if path.exists() {
             let encrypted = read_bounded(&path)?;
@@ -154,6 +154,7 @@ impl EncryptedTenantStore {
         if document.version != 1 {
             return Err(StoreError::CorruptStore);
         }
+        let key = std::mem::take(&mut *key);
         Ok(Self { path, key, document: RwLock::new(document) })
     }
 
