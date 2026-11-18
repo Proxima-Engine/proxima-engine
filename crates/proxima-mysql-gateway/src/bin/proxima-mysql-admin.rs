@@ -261,7 +261,7 @@ async fn revoke(tenant_value: String) -> Result<(), String> {
         executor.execute(&statement).await
             .map_err(|_| "tenant secrets are revoked locally, but MySQL account locking/grant revocation failed; inspect the upstream accounts".to_owned())?;
     }
-    println!("Tenant revoked. New gateway commands are denied; existing in-flight queries may finish.");
+    println!("Tenant revoked. The gateway closes active sessions on its next revocation poll; in-flight queries may be interrupted.");
     Ok(())
 }
 
