@@ -213,15 +213,15 @@ DROP USER IF EXISTS '$migrationUser'@'$accountHost';
             Write-Warning "Could not fully clean disposable MySQL test resources: $_"
         }
     }
+    try {
+        Invoke-RootSql -Sql "DROP USER IF EXISTS 'proxima_provisioner'@'%';" | Out-Null
+    } catch {
+        Write-Warning "Could not remove the disposable MySQL provisioning account before container cleanup: $_"
+    }
     if ($gatewayStarted) {
         & docker compose -f $composeFile --profile gateway stop mysql-gateway | Out-Null
     }
     & docker compose -f $composeFile --profile gateway down -v --remove-orphans | Out-Null
-    try {
-        Invoke-RootSql -Sql "DROP USER IF EXISTS 'proxima_provisioner'@'%';" | Out-Null
-    } catch {
-        Write-Warning "Could not remove the disposable MySQL provisioning account: $_"
-    }
     foreach ($name in $environmentNames) {
         [Environment]::SetEnvironmentVariable($name, $originalEnvironment[$name], "Process")
     }
@@ -229,5 +229,7 @@ DROP USER IF EXISTS '$migrationUser'@'$accountHost';
     $adminPassword = $null
     $gatewayPassword = $null
     $assertion = $null
+    $rotatedAssertion = $null
+    $rotatedAssertionKey = $null
     Pop-Location
 }
