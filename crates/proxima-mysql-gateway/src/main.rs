@@ -6,6 +6,7 @@ use proxima_mysql_gateway::{
 use std::{env, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
+use zeroize::Zeroizing;
 
 fn required(name: &str) -> Result<String, String> {
     env::var(name)
@@ -18,6 +19,18 @@ fn required(name: &str) -> Result<String, String> {
                 Ok(value)
             }
         })
+}
+
+fn assertion_key() -> Result<Vec<u8>, String> {
+    let encoded = Zeroizing::new(required("PROXIMA_MYSQL_TENANT_ASSERTION_KEY")?);
+    if encoded.len() != 64 || !encoded.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err("PROXIMA_MYSQL_TENANT_ASSERTION_KEY must be exactly 64 hexadecimal characters".into());
+    }
+    let mut decoded = Zeroizing::new(
+        hex::decode(&*encoded)
+            .map_err(|_| "PROXIMA_MYSQL_TENANT_ASSERTION_KEY is invalid hexadecimal".to_owned())?
+    );
+    Ok(std::mem::take(&mut *decoded))
 }
 
 fn parse_u64(name: &str, default: u64) -> Result<u64, String> {
@@ -95,6 +108,7 @@ async fn run() -> Result<(), String> {
         client_certificate_file,
         client_private_key_file,
         upstream,
+        tenant_assertion_key: assertion_key()?,
         max_connections,
         max_packet_size,
         handshake_timeout,
