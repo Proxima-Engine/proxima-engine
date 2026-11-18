@@ -61,7 +61,7 @@ Shared-table multi-tenant schemas are explicitly unsupported by this model. If a
 6. The gateway loads that tenant's runtime password from the encrypted local registry.
 7. The gateway connects to the upstream MySQL server over verified TLS using that tenant's runtime account.
 8. MySQL independently enforces the tenant database grants.
-9. The client connection remains bound to that tenant until it closes. Missing, malformed, expired, revoked or mismatched context fails closed.
+9. The client connection remains bound to that tenant until it closes. Assertions are checked when a physical client connection is established; expiry does not retroactively terminate an already authenticated session. Missing, malformed, expired, revoked or mismatched context fails closed.
 
 The MySQL upstream endpoint must not be reachable directly by untrusted application networks. If clients can bypass the gateway and connect with some other privileged credential, the gateway cannot enforce the intended boundary.
 
@@ -167,7 +167,7 @@ Run the separate gateway:
 
     cargo run -p proxima-mysql-gateway
 
-The gateway loads each tenant's assertion verification key from the encrypted registry after authenticating that tenant's gateway account. The shared assertion key is not present in gateway process configuration. The provisioning process stores the Control Plane-derived tenant/organization key with that tenant's encrypted credentials. The current Control Plane signer uses the 64 ASCII hexadecimal characters returned by its organization key derivation directly as HMAC key bytes; the gateway intentionally matches that representation. The gateway uses its own TLS certificate for client connections and a separately verified CA/server name for the upstream MySQL connection. Do not disable upstream certificate verification in production.
+The gateway loads each tenant's assertion verification key from the encrypted registry after authenticating that tenant's gateway account. The shared assertion key is not present in gateway process configuration. The provisioning process stores the Control Plane-derived tenant/organization key with that tenant's encrypted credentials. The current Control Plane signer uses the 64 ASCII hexadecimal characters returned by its organization key derivation directly as HMAC key bytes; the gateway intentionally matches that representation. Rotate a tenant key with `cargo run -p proxima-mysql-gateway --bin proxima-mysql-admin -- rotate-assertion-key <tenant-uuid>` after coordinating the same key change with the Control Plane. New connections using old assertions will fail after the registry key changes; existing authenticated sessions are not automatically terminated. The gateway uses its own TLS certificate for client connections and a separately verified CA/server name for the upstream MySQL connection. Do not disable upstream certificate verification in production.
 
 ## Verification
 
