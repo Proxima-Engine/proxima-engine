@@ -20,3 +20,4 @@ rustls = { version = "0.23", features = ["ring"] }
 tokio-rustls = "0.26"
 rustls-pemfile = "2.2"
 tracing = "0.1"
+ring = "0.17.14"
