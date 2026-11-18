@@ -257,12 +257,15 @@ async fn connect_authenticated(
         [0x01, 0x04] => {
             let mut clear_password = password.as_bytes().to_vec();
             clear_password.push(0);
-            write_packet(
+            let mut packet = Packet { sequence: 4, payload: clear_password };
+            let write_result = write_packet(
                 &mut upstream,
-                &Packet { sequence: 4, payload: clear_password },
+                &packet,
                 config.max_packet_size,
             )
-            .await?;
+            .await;
+            packet.payload.zeroize();
+            write_result?;
             let ok = timeout(
                 config.handshake_timeout,
                 read_packet(&mut upstream, config.max_packet_size),
