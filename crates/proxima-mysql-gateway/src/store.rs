@@ -5,7 +5,7 @@
 //! protected key file and is never stored beside the encrypted registry.
 use crate::auth::{
     AccountError, GatewayCredentialMaterial, TenantAccount, TenantAccountDirectory,
-    TenantMigrationCredentialStore, TenantMigrationCredentials,
+    TenantAssertionKeyStore, TenantMigrationCredentialStore, TenantMigrationCredentials,
     TenantUpstreamCredentialStore, TenantUpstreamCredentials,
 };
 use crate::isolation::MySqlTenantIdentity;
@@ -65,6 +65,8 @@ struct StoreDocument {
     upstream: Vec<StoredUpstreamCredential>,
     #[serde(default)]
     migration: Vec<StoredMigrationCredential>,
+    #[serde(default)]
+    assertion_keys: Vec<StoredTenantAssertionKey>,
 }
 
 impl Drop for StoreDocument {
@@ -77,6 +79,9 @@ impl Drop for StoreDocument {
         }
         for credential in &mut self.migration {
             credential.password.zeroize();
+        }
+        for assertion_key in &mut self.assertion_keys {
+            assertion_key.key_hex.zeroize();
         }
     }
 }
@@ -115,6 +120,17 @@ struct StoredMigrationCredential {
 impl Drop for StoredMigrationCredential {
     fn drop(&mut self) {
         self.password.zeroize();
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct StoredTenantAssertionKey {
+    tenant_id: String,
+    key_hex: String,
+}
+impl Drop for StoredTenantAssertionKey {
+    fn drop(&mut self) {
+        self.key_hex.zeroize();
     }
 }
 
@@ -201,6 +217,7 @@ impl EncryptedTenantStore {
         upstream_password: &str,
         migration_username: &str,
         migration_password: &str,
+        assertion_key: &[u8],
     ) -> Result<String, StoreError> {
         self.reload_from_disk()?;
         validate_gateway_username(gateway_username)?;
@@ -210,6 +227,7 @@ impl EncryptedTenantStore {
             || !valid_password(upstream_password)
             || !valid_password(migration_password)
             || upstream_password == migration_password
+            || assertion_key.len() < 32
         {
             return Err(StoreError::InvalidAccount);
         }
@@ -217,6 +235,7 @@ impl EncryptedTenantStore {
         let gateway_password = Zeroizing::new(gateway_password);
         let verifier = Zeroizing::new(verifier);
         let verifier_hex = hex::encode(*verifier);
+        let mut assertion_key_hex = Zeroizing::new(hex::encode(assertion_key));
         let mut document = self.document.write().map_err(|_| StoreError::StoreUnavailable)?;
         if document.accounts.iter().any(|account| {
             account.username == gateway_username
@@ -226,6 +245,7 @@ impl EncryptedTenantStore {
         }
         if document.upstream.iter().any(|entry| entry.tenant_id == tenant_id.to_string())
             || document.migration.iter().any(|entry| entry.tenant_id == tenant_id.to_string())
+            || document.assertion_keys.iter().any(|entry| entry.tenant_id == tenant_id.to_string())
         {
             return Err(StoreError::TenantAlreadyRegistered);
         }
@@ -260,9 +280,13 @@ impl EncryptedTenantStore {
             username: migration_username.to_owned(),
             password: migration_password.to_owned(),
         });
+        next.assertion_keys.push(StoredTenantAssertionKey {
+            tenant_id: tenant_id.to_string(),
+            key_hex: std::mem::take(&mut *assertion_key_hex),
+        });
         self.persist(&next)?;
         *document = next;
-        Ok(gateway_password.to_string())
+        Ok(std::mem::take(&mut *gateway_password))
     }
 
     /// Rotate all three credentials atomically in the encrypted local registry.
@@ -328,6 +352,7 @@ impl EncryptedTenantStore {
         }
         next.upstream.retain(|entry| entry.tenant_id != tenant_id.to_string());
         next.migration.retain(|entry| entry.tenant_id != tenant_id.to_string());
+        next.assertion_keys.retain(|entry| entry.tenant_id != tenant_id.to_string());
         self.persist(&next)?;
         *document = next;
         Ok(())
@@ -372,6 +397,27 @@ impl EncryptedTenantStore {
             .find(|entry| entry.tenant_id == tenant_id.to_string())
             .ok_or(StoreError::InvalidAccount)?;
         entry.password = password.to_owned();
+        self.persist(&next)?;
+        *document = next;
+        Ok(())
+    }
+
+    pub fn rotate_assertion_key(
+        &self,
+        tenant_id: Uuid,
+        assertion_key: &[u8],
+    ) -> Result<(), StoreError> {
+        self.reload_from_disk()?;
+        if assertion_key.len() < 32 {
+            return Err(StoreError::InvalidKey);
+        }
+        let mut assertion_key_hex = Zeroizing::new(hex::encode(assertion_key));
+        let mut document = self.document.write().map_err(|_| StoreError::StoreUnavailable)?;
+        let mut next = document.clone();
+        let entry = next.assertion_keys.iter_mut()
+            .find(|entry| entry.tenant_id == tenant_id.to_string())
+            .ok_or(StoreError::InvalidAccount)?;
+        entry.key_hex = std::mem::take(&mut *assertion_key_hex);
         self.persist(&next)?;
         *document = next;
         Ok(())
@@ -458,6 +504,25 @@ impl TenantAccountDirectory for EncryptedTenantStore {
         Ok(Some(TenantAccount::from_verifier(
             account.username.clone(), tenant_id, verifier
         )))
+    }
+}
+
+impl TenantAssertionKeyStore for EncryptedTenantStore {
+    fn load_assertion_key(&self, tenant_id: Uuid) -> Result<Option<Vec<u8>>, AccountError> {
+        self.reload_from_disk().map_err(|_| AccountError::DirectoryUnavailable)?;
+        let document = self.document.read().map_err(|_| AccountError::DirectoryUnavailable)?;
+        let Some(entry) = document.assertion_keys.iter()
+            .find(|entry| entry.tenant_id == tenant_id.to_string())
+        else {
+            return Ok(None);
+        };
+        let mut key = hex::decode(&entry.key_hex)
+            .map_err(|_| AccountError::DirectoryUnavailable)?;
+        if key.len() < 32 {
+            key.zeroize();
+            return Err(AccountError::DirectoryUnavailable);
+        }
+        Ok(Some(key))
     }
 }
 
