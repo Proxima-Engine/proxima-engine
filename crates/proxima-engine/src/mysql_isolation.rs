@@ -86,9 +86,9 @@ pub fn build_provisioning_plan(
     let runtime_user = quote_account(&identity.runtime_username, account_host);
     let migration_user = quote_account(&identity.migration_username, account_host);
     let statements = vec![
-        format!("CREATE DATABASE IF NOT EXISTS {database} CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci"),
-        format!("CREATE USER IF NOT EXISTS {runtime_user} IDENTIFIED BY '{runtime_password}' REQUIRE SSL"),
-        format!("CREATE USER IF NOT EXISTS {migration_user} IDENTIFIED BY '{migration_password}' REQUIRE SSL"),
+        format!("CREATE DATABASE {database} CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci"),
+        format!("CREATE USER {runtime_user} IDENTIFIED BY '{runtime_password}' REQUIRE SSL"),
+        format!("CREATE USER {migration_user} IDENTIFIED BY '{migration_password}' REQUIRE SSL"),
         format!("GRANT SELECT, INSERT, UPDATE, DELETE, EXECUTE, SHOW VIEW ON {database}.* TO {runtime_user}"),
         format!("GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX, DROP, REFERENCES, CREATE VIEW, SHOW VIEW, TRIGGER, EVENT, CREATE ROUTINE, ALTER ROUTINE, EXECUTE ON {database}.* TO {migration_user}"),
     ];
