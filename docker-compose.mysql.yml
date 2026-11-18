@@ -5,7 +5,6 @@ services:
     restart: unless-stopped
     environment:
       MYSQL_ROOT_PASSWORD: proxima-mysql-dev-only
-      MYSQL_ROOT_HOST: "%"
       MYSQL_DATABASE: proxima_test
     ports:
       - "127.0.0.1:3307:3306"
@@ -45,8 +44,6 @@ services:
       - ALL
     tmpfs:
       - /tmp
-    env_file:
-      - ./dev/mysql-secrets/mysql-gateway.env
     environment:
       PROXIMA_MYSQL_LISTEN_ADDR: 0.0.0.0:13306
       PROXIMA_MYSQL_UPSTREAM_HOST: mysql-test
@@ -64,7 +61,7 @@ services:
     volumes:
       - ./dev/mysql-certs:/run/mysql-certs:ro
       - ./dev/mysql-secrets/mysql-store-key:/run/secrets/mysql-store-key:ro
-      - ./dev/mysql-data:/var/lib/proxima-mysql:ro
+      - ./dev/mysql-data:/var/lib/proxima-mysql
     networks:
       mysql-isolation:
         ipv4_address: 172.31.90.3
