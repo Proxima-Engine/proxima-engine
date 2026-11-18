@@ -6,5 +6,4 @@
 
 pub mod auth;
 pub mod protocol;
-pub mod provisioning;
 pub mod tenant;
