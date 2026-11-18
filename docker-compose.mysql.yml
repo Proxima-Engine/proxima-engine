@@ -35,6 +35,8 @@ services:
     container_name: proxima-mysql-gateway
     restart: unless-stopped
     user: "0:0"
+    entrypoint: ["/bin/sh", "-c"]
+    command: "install -m 600 /run/secrets/mysql-store-key /tmp/mysql-store-key && exec /usr/local/bin/proxima-mysql-gateway"
     read_only: true
     security_opt:
       - no-new-privileges:true
@@ -53,7 +55,7 @@ services:
       PROXIMA_MYSQL_TLS_CERT_FILE: /run/mysql-certs/gateway-cert.pem
       PROXIMA_MYSQL_TLS_KEY_FILE: /run/mysql-certs/gateway-key.pem
       PROXIMA_MYSQL_SECRET_STORE_FILE: /var/lib/proxima-mysql/tenants.enc
-      PROXIMA_MYSQL_SECRET_STORE_KEY_FILE: /run/secrets/mysql-store-key
+      PROXIMA_MYSQL_SECRET_STORE_KEY_FILE: /tmp/mysql-store-key
       PROXIMA_MYSQL_TENANT_ASSERTION_KEY: \${PROXIMA_MYSQL_TENANT_ASSERTION_KEY:-}
       PROXIMA_MYSQL_MAX_CONNECTIONS: "128"
     ports:
