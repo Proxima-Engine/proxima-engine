@@ -370,6 +370,27 @@ pub fn encode_server_handshake(
 mod tests {
     use super::*;
 
+
+    #[test]
+    fn generated_server_greeting_parses_with_expected_auth_plugin_and_capabilities() {
+        let challenge = [11u8; 20];
+        let frame = encode_server_handshake(42, &challenge, "Proxima-MySQL-0.1", true).unwrap();
+        let packet = Packet::decode(&frame, 4096).unwrap();
+        let greeting = ServerHandshake::parse(&packet.payload).unwrap();
+        assert_eq!(greeting.connection_id, 42);
+        assert_eq!(greeting.auth_plugin_name.as_deref(), Some("caching_sha2_password"));
+        assert_eq!(greeting.auth_plugin_data.len(), 20);
+        assert!(greeting.capability_flags & CLIENT_SSL != 0);
+    }
+
+    #[test]
+    fn tenant_switch_commands_are_rejected() {
+        assert_eq!(Command::parse(&[0x02, b'd', b'b']), Err(CommandError::ForbiddenTenantSwitch(Command::InitDb)));
+        assert_eq!(Command::parse(&[0x11]), Err(CommandError::ForbiddenTenantSwitch(Command::ChangeUser)));
+        assert_eq!(Command::parse(&[0x1f]), Err(CommandError::ForbiddenTenantSwitch(Command::ResetConnection)));
+        assert_eq!(Command::parse(&[0x03, b'S', b'E', b'L']), Ok(Command::Query));
+    }
+
     #[test]
     fn packet_round_trip_and_sequence_validation() {
         let packet = Packet { sequence: 7, payload: b"hello".to_vec() };
