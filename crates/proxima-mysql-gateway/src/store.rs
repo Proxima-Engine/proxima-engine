@@ -597,7 +597,7 @@ impl TenantMigrationCredentialStore for EncryptedTenantStore {
 fn load_key(path: &Path) -> Result<[u8; 32], StoreError> {
     reject_symlink_if_present(path)?;
     let metadata = fs::metadata(path).map_err(|_| StoreError::StoreUnavailable)?;
-    if !metadata.is_file() {
+    if !metadata.is_file() || metadata.len() > 128 {
         return Err(StoreError::InvalidConfiguration);
     }
     #[cfg(unix)]
