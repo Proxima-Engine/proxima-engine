@@ -450,6 +450,19 @@ async fn relay_session(
             packet = server_rx.recv(), if !server_closed => {
                 match packet {
                     Some(packet) => {
+                        // Never forward a LOCAL INFILE request to the client.
+                        // A malicious or compromised upstream server could
+                        // otherwise induce a client driver to upload a local file.
+                        if packet.payload.first() == Some(&0xfb) {
+                            let error = command_error_packet(
+                                packet.sequence.wrapping_add(1),
+                                "LOCAL INFILE is disabled by the Proxima MySQL gateway",
+                            );
+                            write_packet(&mut client_writer, &error, max_packet_size)
+                                .await
+                                .map_err(|_| GatewayError::TransportFailed)?;
+                            break;
+                        }
                         write_packet(&mut client_writer, &packet, max_packet_size)
                             .await
                             .map_err(|_| GatewayError::TransportFailed)?;
