@@ -199,16 +199,20 @@ async fn provision(tenant_value: String, gateway_username: String) -> Result<(),
     println!("The upstream runtime and migration passwords are encrypted in the local secret store and were not printed.");
 
     if env::var("PROXIMA_MYSQL_ISSUE_LOCAL_ASSERTION").ok().as_deref() == Some("true") {
-        let encoded = required("PROXIMA_MYSQL_TENANT_ASSERTION_KEY")?;
+        let mut encoded = required("PROXIMA_MYSQL_TENANT_ASSERTION_KEY")?;
         if encoded.len() != 64 || !encoded.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            encoded.zeroize();
             return Err("PROXIMA_MYSQL_TENANT_ASSERTION_KEY must be exactly 64 hexadecimal characters".into());
         }
-        let key = Zeroizing::new(hex::decode(encoded).map_err(|_| "invalid tenant assertion key".to_owned())?);
+        let decoded = hex::decode(&encoded).map_err(|_| "invalid tenant assertion key".to_owned());
+        encoded.zeroize();
+        let key = Zeroizing::new(decoded?);
         let now = SystemTime::now().duration_since(UNIX_EPOCH)
             .map_err(|_| "system clock is before Unix epoch".to_owned())?.as_secs();
-        let assertion = TenantAssertion::issue(created.tenant_id, now + 900, &key)
+        let mut assertion = TenantAssertion::issue(created.tenant_id, now + 900, &key)
             .map_err(|_| "could not issue local tenant assertion".to_owned())?;
         println!("LOCAL DEVELOPMENT ASSERTION (15 minutes): {assertion}");
+        assertion.zeroize();
         println!("Do not enable local assertion issuance in production; production assertions must come from the authenticated Control Plane.");
     } else {
         println!("Tenant assertion: obtain it from the authenticated Agata Control Plane. Local assertion issuance is disabled.");
