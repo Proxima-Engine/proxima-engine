@@ -54,8 +54,8 @@ CREATE USER 'ap_test_a_runtime'@'127.0.0.1' IDENTIFIED BY 'aaaaaaaaaaaaaaaaaaaaa
 CREATE USER 'ap_test_b_runtime'@'127.0.0.1' IDENTIFIED BY 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' REQUIRE SSL;
 CREATE USER 'ap_test_a_migrator'@'127.0.0.1' IDENTIFIED BY 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc' REQUIRE SSL;
 CREATE USER 'ap_test_b_migrator'@'127.0.0.1' IDENTIFIED BY 'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd' REQUIRE SSL;
-GRANT SELECT, INSERT, UPDATE, DELETE, EXECUTE, SHOW VIEW ON ap_test_tenant_a.* TO 'ap_test_a_runtime'@'127.0.0.1';
-GRANT SELECT, INSERT, UPDATE, DELETE, EXECUTE, SHOW VIEW ON ap_test_tenant_b.* TO 'ap_test_b_runtime'@'127.0.0.1';
+GRANT SELECT, INSERT, UPDATE, DELETE ON ap_test_tenant_a.* TO 'ap_test_a_runtime'@'127.0.0.1';
+GRANT SELECT, INSERT, UPDATE, DELETE ON ap_test_tenant_b.* TO 'ap_test_b_runtime'@'127.0.0.1';
 GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX, DROP, REFERENCES, CREATE VIEW, SHOW VIEW, TRIGGER, EVENT, CREATE ROUTINE, ALTER ROUTINE, EXECUTE ON ap_test_tenant_a.* TO 'ap_test_a_migrator'@'127.0.0.1';
 GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX, DROP, REFERENCES, CREATE VIEW, SHOW VIEW, TRIGGER, EVENT, CREATE ROUTINE, ALTER ROUTINE, EXECUTE ON ap_test_tenant_b.* TO 'ap_test_b_migrator'@'127.0.0.1';
 CREATE TABLE ap_test_tenant_a.records (id INT PRIMARY KEY, secret VARCHAR(100) NOT NULL);
