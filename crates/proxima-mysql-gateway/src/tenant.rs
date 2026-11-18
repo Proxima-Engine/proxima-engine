@@ -132,7 +132,7 @@ fn validate_key(key: &[u8]) -> Result<(), TenantError> {
 mod tests {
     use super::*;
     use crate::protocol::{ClientHandshake, CLIENT_CONNECT_ATTRS, CLIENT_PROTOCOL_41, CLIENT_SECURE_CONNECTION};
-    const KEY: &[u8] = b"0123456789abcdef0123456789abcdef";
+    const KEY: &[u8] = b"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
     fn handshake(token: &str, requested_database: Option<&str>) -> ClientHandshake {
         ClientHandshake {
@@ -153,6 +153,21 @@ mod tests {
         let token = TenantAssertion::issue(tenant, 500, KEY).unwrap();
         let route = authorize_handshake(&handshake(&token, None), tenant, KEY, 100).unwrap();
         assert_eq!(route.database_name, format!("ap_t_{}", tenant.simple()));
+    }
+
+    #[test]
+    fn control_plane_hex_signing_key_is_used_as_ascii_hmac_bytes() {
+        let tenant = Uuid::new_v4();
+        let token = TenantAssertion::issue(tenant, 500, KEY).unwrap();
+        assert_eq!(TenantAssertion::verify(&token, KEY, 100).unwrap().tenant_id, tenant);
+
+        // The Control Plane currently passes its 64-character organization
+        // key representation directly to HMAC; decoding it changes the key.
+        let decoded = hex::decode(KEY).unwrap();
+        assert_eq!(
+            TenantAssertion::verify(&token, &decoded, 100),
+            Err(TenantError::InvalidSignature)
+        );
     }
 
     #[test]
