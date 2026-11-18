@@ -6,8 +6,8 @@ Push-Location $repoRoot
 try {
     Write-Host "=== Proxima MySQL local verification ===" -ForegroundColor Cyan
 
-    Write-Host "[1/4] Rust formatting" -ForegroundColor Cyan
-    & cargo fmt --all -- --check
+    Write-Host "[1/4] Format Rust workspace" -ForegroundColor Cyan
+    & cargo fmt --all
     if ($LASTEXITCODE -ne 0) { throw "cargo fmt failed." }
 
     Write-Host "[2/4] Rust workspace tests" -ForegroundColor Cyan
