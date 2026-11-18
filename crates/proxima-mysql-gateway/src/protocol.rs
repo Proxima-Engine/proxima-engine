@@ -264,6 +264,108 @@ impl<'a> Cursor<'a> {
     }
 }
 
+
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum Command {
+    Quit = 0x01,
+    InitDb = 0x02,
+    Query = 0x03,
+    FieldList = 0x04,
+    Ping = 0x0e,
+    ChangeUser = 0x11,
+    StmtPrepare = 0x16,
+    StmtExecute = 0x17,
+    StmtSendLongData = 0x18,
+    StmtClose = 0x19,
+    StmtReset = 0x1a,
+    SetOption = 0x1b,
+    StmtFetch = 0x1c,
+    ResetConnection = 0x1f,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CommandError {
+    Empty,
+    Unsupported(u8),
+    ForbiddenTenantSwitch(Command),
+}
+impl fmt::Display for CommandError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Empty => write!(f, "empty MySQL command payload"),
+            Self::Unsupported(code) => write!(f, "unsupported MySQL command 0x{code:02x}"),
+            Self::ForbiddenTenantSwitch(command) => write!(f, "MySQL command {command:?} may change database or authentication context and is forbidden"),
+        }
+    }
+}
+impl std::error::Error for CommandError {}
+
+impl Command {
+    pub fn parse(payload: &[u8]) -> Result<Self, CommandError> {
+        let code = *payload.first().ok_or(CommandError::Empty)?;
+        let command = match code {
+            0x01 => Self::Quit,
+            0x02 => Self::InitDb,
+            0x03 => Self::Query,
+            0x04 => Self::FieldList,
+            0x0e => Self::Ping,
+            0x11 => Self::ChangeUser,
+            0x16 => Self::StmtPrepare,
+            0x17 => Self::StmtExecute,
+            0x18 => Self::StmtSendLongData,
+            0x19 => Self::StmtClose,
+            0x1a => Self::StmtReset,
+            0x1b => Self::SetOption,
+            0x1c => Self::StmtFetch,
+            0x1f => Self::ResetConnection,
+            other => return Err(CommandError::Unsupported(other)),
+        };
+        match command {
+            Self::InitDb | Self::ChangeUser | Self::ResetConnection => {
+                Err(CommandError::ForbiddenTenantSwitch(command))
+            }
+            other => Ok(other),
+        }
+    }
+}
+
+pub fn encode_server_handshake(
+    connection_id: u32,
+    challenge: &[u8; 20],
+    server_version: &str,
+    supports_tls: bool,
+) -> Result<Vec<u8>, ProtocolError> {
+    if server_version.is_empty() || server_version.len() > 128 || server_version.as_bytes().contains(&0) {
+        return Err(ProtocolError::InvalidHandshake);
+    }
+    let mut capabilities = CLIENT_PROTOCOL_41
+        | CLIENT_SECURE_CONNECTION
+        | CLIENT_PLUGIN_AUTH
+        | CLIENT_CONNECT_ATTRS
+        | CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA;
+    if supports_tls { capabilities |= CLIENT_SSL; }
+
+    let mut payload = Vec::with_capacity(96);
+    payload.push(10);
+    payload.extend_from_slice(server_version.as_bytes());
+    payload.push(0);
+    payload.extend_from_slice(&connection_id.to_le_bytes());
+    payload.extend_from_slice(&challenge[..8]);
+    payload.push(0);
+    payload.extend_from_slice(&(capabilities as u16).to_le_bytes());
+    payload.push(45); // utf8mb4_general_ci
+    payload.extend_from_slice(&2u16.to_le_bytes()); // SERVER_STATUS_AUTOCOMMIT
+    payload.extend_from_slice(&((capabilities >> 16) as u16).to_le_bytes());
+    payload.push(21); // 8-byte prefix + 12-byte suffix + NUL
+    payload.extend_from_slice(&[0u8; 10]);
+    payload.extend_from_slice(&challenge[8..]);
+    payload.push(0);
+    payload.extend_from_slice(b"caching_sha2_password\0");
+    Packet { sequence: 0, payload }.encode(MAX_PACKET_PAYLOAD)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
