@@ -184,9 +184,7 @@ async fn provision(tenant_value: String, gateway_username: String) -> Result<(),
     let rollback_store = Arc::clone(&store);
     let username_for_store = gateway_username.clone();
     let runtime_username = identity.runtime_username.clone();
-    let migration_username = identity.migration_username.clone();
     let runtime_password_for_store = Zeroizing::new(runtime_password.to_string());
-    let migration_password_for_store = Zeroizing::new(migration_password.to_string());
     let assertion_key_for_store = assertion_key.clone();
 
     let (created, gateway_password) = execute_provisioning_with_finalize(
@@ -200,8 +198,6 @@ async fn provision(tenant_value: String, gateway_username: String) -> Result<(),
                 gateway_credential,
                 &runtime_username,
                 &runtime_password_for_store,
-                &migration_username,
-                &migration_password_for_store,
                 &assertion_key_for_store,
             ).map(Zeroizing::new).map_err(|_| ())
         },
@@ -217,7 +213,10 @@ async fn provision(tenant_value: String, gateway_username: String) -> Result<(),
     println!("Gateway username: {gateway_username}");
     println!("Gateway password (shown once): {gateway_password}");
     println!("Gateway endpoint: {}", env::var("PROXIMA_MYSQL_LISTEN_ADDR").unwrap_or_else(|_| "127.0.0.1:13306".into()));
-    println!("The upstream runtime and migration passwords are encrypted in the local secret store and were not printed.");
+    println!("Runtime database password: encrypted in the gateway runtime registry; not printed.");
+    println!("Migration username: {}", identity.migration_username);
+    println!("Migration password (shown once; store in the customer secret manager): {migration_password}");
+    println!("The migration password is not stored in the gateway registry or loaded by the gateway process.");
 
     if env::var("PROXIMA_MYSQL_ISSUE_LOCAL_ASSERTION").ok().as_deref() == Some("true") {
         let now = SystemTime::now().duration_since(UNIX_EPOCH)
