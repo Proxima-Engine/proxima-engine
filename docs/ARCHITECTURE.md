@@ -125,6 +125,13 @@ flowchart TB
 
 The hosted control plane coordinates authorized organization and node workflows. It is outside the SQL query path. Proxima Engine can also run independently in local developer mode. The public repository documents the Engine-side enrollment and evidence contracts; the hosted management application is a separate product.
 
+
+## MySQL gateway boundary (development)
+
+MySQL support is being developed as a separate Rust crate, `crates/proxima-mysql-gateway`, not as a MySQL driver bolted into the PostgreSQL wire-protocol proxy. It has its own packet parser, authentication and tenant-routing modules. The PostgreSQL listener/session code remains PostgreSQL-only. The MySQL crate is currently a set of tested-by-design primitives, not a runnable gateway; see [MySQL tenant isolation](MYSQL_TENANT_ISOLATION.md) for the exact implementation status and release gates.
+
+The initial MySQL isolation model is one database per tenant with independent runtime and migration accounts. The Control Plane's own metadata database remains PostgreSQL. No SQLx MySQL feature is enabled.
+
 ## Deployment shapes
 
 - **Local development:** use [Quickstart](QUICKSTART.md) and the disposable Compose profile.
