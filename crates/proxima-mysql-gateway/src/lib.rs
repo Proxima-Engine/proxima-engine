@@ -11,3 +11,4 @@ pub mod protocol;
 pub mod provisioning;
 pub mod tenant;
 pub mod upstream;
+pub mod store;
