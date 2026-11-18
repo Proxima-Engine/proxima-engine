@@ -173,7 +173,10 @@ impl FileProvisioningJournal {
             for line in reader.lines() {
                 let line = line.map_err(|_| JournalError)?;
                 let event: JournalEvent = serde_json::from_str(&line).map_err(|_| JournalError)?;
-                apply_journal_state(&event, &mut active, &mut blocked);
+                if !valid_journal_event(&event) {
+                    return Err(JournalError);
+                }
+                apply_journal_state(&event, &mut active, &mut blocked)?;
             }
         }
         // A begin without a terminal event is ambiguous after a restart.
@@ -231,26 +234,45 @@ impl FileProvisioningJournal {
     }
 }
 
+fn valid_journal_event(event: &JournalEvent) -> bool {
+    if event.timestamp == 0 || event.note.as_ref().is_some_and(|note| note.len() > 1024) {
+        return false;
+    }
+    match event.event.as_str() {
+        "begin" | "complete" | "reconciled" => event.step.is_none(),
+        "step_started" | "step_applied" | "step_compensated" | "needs_reconciliation" => event.step.is_some(),
+        _ => false,
+    }
+}
+
 fn apply_journal_state(
     event: &JournalEvent,
     active: &mut HashSet<String>,
     blocked: &mut HashSet<String>,
-) {
+) -> Result<(), JournalError> {
     match event.event.as_str() {
         "begin" => {
+            if active.contains(&event.tenant_id) || blocked.contains(&event.tenant_id) {
+                return Err(JournalError);
+            }
             active.insert(event.tenant_id.clone());
-            blocked.remove(&event.tenant_id);
         }
-        "complete" | "reconciled" => {
-            active.remove(&event.tenant_id);
-            blocked.remove(&event.tenant_id);
+        "step_started" | "step_applied" | "step_compensated" => {
+            if !active.contains(&event.tenant_id) { return Err(JournalError); }
+        }
+        "complete" => {
+            if !active.remove(&event.tenant_id) { return Err(JournalError); }
         }
         "needs_reconciliation" => {
-            active.remove(&event.tenant_id);
+            if !active.remove(&event.tenant_id) { return Err(JournalError); }
             blocked.insert(event.tenant_id.clone());
         }
-        _ => {}
+        "reconciled" => {
+            if !blocked.remove(&event.tenant_id) { return Err(JournalError); }
+        }
+        _ => return Err(JournalError),
     }
+    Ok(())
 }
 
 impl ProvisioningJournal for FileProvisioningJournal {
