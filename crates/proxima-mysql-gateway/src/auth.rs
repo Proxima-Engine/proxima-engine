@@ -60,11 +60,11 @@ impl std::error::Error for AccountError {}
 /// Verify a caching_sha2_password response for a 20-byte server challenge.
 /// The caller must use a cryptographically secure random challenge for each
 /// connection and must not reuse it.
-pub fn authenticate(
+pub fn authenticate<D: TenantAccountDirectory + ?Sized>(
     handshake: &ClientHandshake,
     challenge: &[u8; 20],
     tls_active: bool,
-    directory: &impl TenantAccountDirectory,
+    directory: &D,
 ) -> Result<Uuid, AccountError> {
     if !tls_active { return Err(AccountError::TlsRequired); }
     if handshake.auth_plugin_name.as_deref() != Some(CACHING_SHA2_PASSWORD) {
@@ -135,14 +135,17 @@ impl fmt::Debug for AuthenticatedTenantSession {
 /// Complete the identity-to-upstream-credential binding. The caller must invoke
 /// this before opening a database connection and must keep the returned session
 /// immutable for the entire client connection lifetime.
-pub fn authenticate_and_resolve(
+pub fn authenticate_and_resolve<
+    D: TenantAccountDirectory + ?Sized,
+    C: TenantUpstreamCredentialStore + ?Sized,
+>(
     handshake: &ClientHandshake,
     challenge: &[u8; 20],
     client_tls_active: bool,
-    account_directory: &impl TenantAccountDirectory,
+    account_directory: &D,
     assertion_key: &[u8],
     now: u64,
-    credential_store: &impl TenantUpstreamCredentialStore,
+    credential_store: &C,
 ) -> Result<AuthenticatedTenantSession, AccountError> {
     let tenant_id = authenticate(handshake, challenge, client_tls_active, account_directory)?;
     let route = crate::tenant::authorize_handshake(handshake, tenant_id, assertion_key, now)
