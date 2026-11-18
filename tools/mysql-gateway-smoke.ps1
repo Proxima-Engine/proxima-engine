@@ -184,6 +184,7 @@ DROP USER IF EXISTS '$migrationUser'@'$accountHost';
     foreach ($name in $environmentNames) {
         [Environment]::SetEnvironmentVariable($name, $originalEnvironment[$name], "Process")
     }
+    [Array]::Clear($adminRandom, 0, $adminRandom.Length)
     $adminPassword = $null
     $gatewayPassword = $null
     $assertion = $null
