@@ -115,6 +115,7 @@ GRANT ALL PRIVILEGES ON *.* TO 'proxima_provisioner'@'%' WITH GRANT OPTION;
 
     Write-Host "--- Provision dedicated test tenant ---" -ForegroundColor Cyan
     $provisionOutput = Invoke-AdminCli -Arguments @("provision", $tenantId, $gatewayUsername)
+    $provisioned = $true
     $gatewayPasswordLine = ($provisionOutput -split '\r?\n' | Where-Object { $_ -like "Gateway password (shown once): *" } | Select-Object -Last 1)
     $assertionLine = ($provisionOutput -split '\r?\n' | Where-Object { $_ -like "LOCAL DEVELOPMENT ASSERTION (15 minutes): *" } | Select-Object -Last 1)
     if (-not $gatewayPasswordLine -or -not $assertionLine) {
@@ -122,7 +123,6 @@ GRANT ALL PRIVILEGES ON *.* TO 'proxima_provisioner'@'%' WITH GRANT OPTION;
     }
     $gatewayPassword = $gatewayPasswordLine.Substring("Gateway password (shown once): ".Length).Trim()
     $assertion = $assertionLine.Substring("LOCAL DEVELOPMENT ASSERTION (15 minutes): ".Length).Trim()
-    $provisioned = $true
 
     Write-Host "--- Prepare tenant and cross-tenant tables ---" -ForegroundColor Cyan
     $setupSql = @"
