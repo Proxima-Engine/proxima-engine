@@ -70,7 +70,7 @@ Agata Proxima is being developed with a protocol-specific approach to database s
 - **MongoDB — early development.** Protocol and tenant-isolation foundations are being explored separately. MongoDB is not currently a supported production integration.
 - **Other database systems — not currently supported.** Each integration requires its own protocol-aware implementation, security model, and independent verification.
 
-Search terms: database security, database tenant isolation, multi-tenant database security, PostgreSQL security proxy, PostgreSQL tenant isolation, Rust database gateway, signed tenant context, database access control, and Row-Level Security (RLS).
+These capabilities address database security, database tenant isolation, multi-tenant database security, PostgreSQL security proxy deployments, Rust database gateways, signed tenant context, database access control, and PostgreSQL Row-Level Security (RLS).
 
 ## How the request path works
 
