@@ -10,6 +10,7 @@ use std::fmt;
 use subtle::ConstantTimeEq;
 use ring::rand::{SecureRandom, SystemRandom};
 use uuid::Uuid;
+use zeroize::Zeroize;
 
 pub const CACHING_SHA2_PASSWORD: &str = "caching_sha2_password";
 
@@ -22,6 +23,11 @@ pub struct TenantAccount {
 impl TenantAccount {
     pub fn from_verifier(username: String, tenant_id: Uuid, password_verifier: [u8; 32]) -> Self {
         Self { username, tenant_id, password_verifier }
+    }
+}
+impl Drop for TenantAccount {
+    fn drop(&mut self) {
+        self.password_verifier.zeroize();
     }
 }
 impl fmt::Debug for TenantAccount {
@@ -121,6 +127,11 @@ impl fmt::Debug for TenantUpstreamCredentials {
             .finish()
     }
 }
+impl Drop for TenantUpstreamCredentials {
+    fn drop(&mut self) {
+        self.password.zeroize();
+    }
+}
 
 pub trait TenantUpstreamCredentialStore: Send + Sync {
     fn load_runtime_credentials(&self, tenant_id: Uuid) -> Result<Option<TenantUpstreamCredentials>, AccountError>;
@@ -139,6 +150,11 @@ impl fmt::Debug for TenantMigrationCredentials {
             .field("username", &self.username)
             .field("password", &"[REDACTED]")
             .finish()
+    }
+}
+impl Drop for TenantMigrationCredentials {
+    fn drop(&mut self) {
+        self.password.zeroize();
     }
 }
 
@@ -163,6 +179,11 @@ impl fmt::Debug for AuthenticatedTenantSession {
             .finish()
     }
 }
+impl Drop for AuthenticatedTenantSession {
+    fn drop(&mut self) {
+        self.upstream_password.zeroize();
+    }
+}
 
 /// Complete the identity-to-upstream-credential binding. The caller must invoke
 /// this before opening a database connection and must keep the returned session
@@ -182,7 +203,7 @@ pub fn authenticate_and_resolve<
     let tenant_id = authenticate(handshake, challenge, client_tls_active, account_directory)?;
     let route = crate::tenant::authorize_handshake(handshake, tenant_id, assertion_key, now)
         .map_err(|_| AccountError::InvalidAuthenticationResponse)?;
-    let credentials = credential_store
+    let mut credentials = credential_store
         .load_runtime_credentials(tenant_id)?
         .ok_or(AccountError::DirectoryUnavailable)?;
     if credentials.tenant_id != tenant_id
@@ -196,8 +217,8 @@ pub fn authenticate_and_resolve<
     Ok(AuthenticatedTenantSession {
         tenant_id,
         database_name: route.database_name,
-        upstream_username: credentials.username,
-        upstream_password: credentials.password,
+        upstream_username: std::mem::take(&mut credentials.username),
+        upstream_password: std::mem::take(&mut credentials.password),
     })
 }
 
@@ -219,8 +240,16 @@ impl GatewayCredentialMaterial {
     pub fn verifier(&self) -> [u8; 32] { self.verifier }
 
     /// Consume the one-time credential material. Persist only the verifier.
-    pub fn into_parts(self) -> (String, [u8; 32]) {
-        (self.password, self.verifier)
+    pub fn into_parts(mut self) -> (String, [u8; 32]) {
+        let password = std::mem::take(&mut self.password);
+        let verifier = std::mem::replace(&mut self.verifier, [0u8; 32]);
+        (password, verifier)
+    }
+}
+impl Drop for GatewayCredentialMaterial {
+    fn drop(&mut self) {
+        self.password.zeroize();
+        self.verifier.zeroize();
     }
 }
 impl fmt::Debug for GatewayCredentialMaterial {
