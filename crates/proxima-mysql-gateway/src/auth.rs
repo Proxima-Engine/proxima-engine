@@ -261,8 +261,8 @@ impl GatewayCredentialMaterial {
 }
 impl Drop for GatewayCredentialMaterial {
     fn drop(&mut self) {
-        self.password.zeroize();
         self.verifier.zeroize();
+        // Zeroizing<String> clears the password field when it is dropped.
     }
 }
 impl fmt::Debug for GatewayCredentialMaterial {
