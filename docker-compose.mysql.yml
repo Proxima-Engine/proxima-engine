@@ -27,6 +27,21 @@ services:
       timeout: 3s
       retries: 30
 
+  mysql-migration-client:
+    profiles: ["gateway"]
+    image: mysql:8.4
+    restart: unless-stopped
+    entrypoint: ["sh", "-c"]
+    command: "sleep infinity"
+    volumes:
+      - ./dev/mysql-certs/ca.pem:/run/mysql-certs/ca.pem:ro
+    networks:
+      mysql-isolation:
+        ipv4_address: 172.31.90.4
+    depends_on:
+      mysql-test:
+        condition: service_healthy
+
   mysql-gateway:
     profiles: ["gateway"]
     build:
