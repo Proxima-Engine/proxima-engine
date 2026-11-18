@@ -736,6 +736,20 @@ mod tests {
         assert!(store.find_account("gateway_c").unwrap().is_none());
         assert!(store.load_runtime_credentials(tenant).unwrap().is_none());
         assert!(store.load_migration_credentials(tenant).unwrap().is_none());
+
+        let replacement = generate_gateway_credential().unwrap();
+        let replacement_password = store.register_tenant(
+            tenant,
+            "gateway_c",
+            replacement,
+            &identity.runtime_username,
+            &"7".repeat(64),
+            &identity.migration_username,
+            &"8".repeat(64),
+        ).unwrap();
+        assert_eq!(replacement_password.len(), 64);
+        assert!(store.find_account("gateway_c").unwrap().is_some());
+        assert!(store.load_runtime_credentials(tenant).unwrap().is_some());
     }
 
     #[test]
