@@ -174,6 +174,9 @@ pub fn is_ssl_request(payload: &[u8]) -> Result<bool, ProtocolError> {
     let capabilities = c.u32_le()?;
     let _max_packet_size = c.u32_le()?;
     let _character_set = c.u8()?;
+    if payload[9..].iter().any(|byte| *byte != 0) {
+        return Err(ProtocolError::InvalidHandshake);
+    }
     c.skip(23)?;
     Ok(capabilities & CLIENT_SSL != 0 && capabilities & CLIENT_PROTOCOL_41 != 0)
 }
@@ -199,6 +202,9 @@ impl ClientHandshake {
         }
         let max_packet_size = c.u32_le()?;
         let character_set = c.u8()?;
+        if payload.len() < 32 || payload[9..32].iter().any(|byte| *byte != 0) {
+            return Err(ProtocolError::InvalidHandshake);
+        }
         c.skip(23)?;
         let username = c.nul_string()?;
         if username.is_empty() || username.len() > 128 {
