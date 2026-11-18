@@ -7,6 +7,7 @@ use crate::protocol::ClientHandshake;
 use sha2::{Digest, Sha256};
 use std::fmt;
 use subtle::ConstantTimeEq;
+use ring::rand::{SecureRandom, SystemRandom};
 use uuid::Uuid;
 
 pub const CACHING_SHA2_PASSWORD: &str = "caching_sha2_password";
@@ -43,6 +44,7 @@ pub enum AccountError {
     InvalidAuthenticationResponse,
     UnknownAccount,
     DirectoryUnavailable,
+    RandomSourceUnavailable,
 }
 impl fmt::Display for AccountError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -52,6 +54,7 @@ impl fmt::Display for AccountError {
             Self::InvalidAuthenticationResponse => write!(f, "invalid MySQL gateway credentials"),
             Self::UnknownAccount => write!(f, "invalid MySQL gateway credentials"),
             Self::DirectoryUnavailable => write!(f, "MySQL tenant account directory is unavailable"),
+            Self::RandomSourceUnavailable => write!(f, "operating-system random source is unavailable"),
         }
     }
 }
@@ -204,14 +207,15 @@ impl fmt::Debug for GatewayCredentialMaterial {
     }
 }
 
-pub fn generate_gateway_credential() -> GatewayCredentialMaterial {
+pub fn generate_gateway_credential() -> Result<GatewayCredentialMaterial, AccountError> {
     let mut random = [0u8; 32];
-    random[..16].copy_from_slice(Uuid::new_v4().as_bytes());
-    random[16..].copy_from_slice(Uuid::new_v4().as_bytes());
+    SystemRandom::new()
+        .fill(&mut random)
+        .map_err(|_| AccountError::RandomSourceUnavailable)?;
     let password = hex::encode(random);
     let first = Sha256::digest(password.as_bytes());
     let verifier = Sha256::digest(first).into();
-    GatewayCredentialMaterial { password, verifier }
+    Ok(GatewayCredentialMaterial { password, verifier })
 }
 
 #[cfg(test)]
@@ -256,8 +260,8 @@ mod tests {
 
     #[test]
     fn generated_gateway_credentials_are_high_entropy_and_debug_redacted() {
-        let first = generate_gateway_credential();
-        let second = generate_gateway_credential();
+        let first = generate_gateway_credential().unwrap();
+        let second = generate_gateway_credential().unwrap();
         assert_eq!(first.password().len(), 64);
         assert_ne!(first.password(), second.password());
         let debug = format!("{first:?}");
