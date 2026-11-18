@@ -171,6 +171,38 @@ fn expected_runtime_username(tenant_id: Uuid) -> String {
     format!("ap_r_{}", &hex::encode(digest)[..27])
 }
 
+
+
+/// One-time high-entropy gateway credential material. The cleartext password
+/// is returned to the trusted provisioning caller once; only the verifier
+/// should be persisted in the gateway account directory.
+pub struct GatewayCredentialMaterial {
+    password: String,
+    verifier: [u8; 32],
+}
+impl GatewayCredentialMaterial {
+    pub fn password(&self) -> &str { &self.password }
+    pub fn verifier(&self) -> [u8; 32] { self.verifier }
+}
+impl fmt::Debug for GatewayCredentialMaterial {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("GatewayCredentialMaterial")
+            .field("password", &"[REDACTED]")
+            .field("verifier", &"[REDACTED]")
+            .finish()
+    }
+}
+
+pub fn generate_gateway_credential() -> GatewayCredentialMaterial {
+    let mut random = [0u8; 32];
+    random[..16].copy_from_slice(Uuid::new_v4().as_bytes());
+    random[16..].copy_from_slice(Uuid::new_v4().as_bytes());
+    let password = hex::encode(random);
+    let first = Sha256::digest(password.as_bytes());
+    let verifier = Sha256::digest(first).into();
+    GatewayCredentialMaterial { password, verifier }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -208,6 +240,18 @@ mod tests {
             auth_plugin_name: Some(CACHING_SHA2_PASSWORD.into()),
             connection_attributes: vec![],
         }
+    }
+
+
+    #[test]
+    fn generated_gateway_credentials_are_high_entropy_and_debug_redacted() {
+        let first = generate_gateway_credential();
+        let second = generate_gateway_credential();
+        assert_eq!(first.password().len(), 64);
+        assert_ne!(first.password(), second.password());
+        let debug = format!("{first:?}");
+        assert!(!debug.contains(first.password()));
+        assert!(debug.contains("REDACTED"));
     }
 
     #[test]
