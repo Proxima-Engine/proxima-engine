@@ -191,6 +191,16 @@ async fn command(
     Ok(response)
 }
 
+async fn query(
+    stream: &mut TlsStream<TcpStream>,
+    sql: &str,
+) -> Result<Packet, String> {
+    let mut payload = Vec::with_capacity(sql.len() + 1);
+    payload.push(0x03); // COM_QUERY
+    payload.extend_from_slice(sql.as_bytes());
+    command(stream, payload).await
+}
+
 fn assert_ok(response: &Packet, label: &str) {
     assert_ne!(
         response.payload.first(),
@@ -225,45 +235,25 @@ async fn gateway_enforces_tenant_database_and_session_boundaries() {
 
     let mut tenant_a = connect_gateway(address, &connector, &user_a, &password_a, &assertion_a)
         .await.expect("Tenant A gateway authentication should succeed");
-    let own_query = command(
-        &mut tenant_a,
-        format!("SELECT secret FROM {database_a}.gateway_probe").into_bytes().into_iter()
-            .chain(std::iter::once(0))
-            .collect(),
-    ).await.unwrap();
+    let own_query = query(&mut tenant_a, &format!("SELECT secret FROM {database_a}.gateway_probe")).await.unwrap();
     assert_ok(&own_query, "Tenant A own-database SELECT");
     drop(tenant_a);
 
     let mut tenant_a_cross_read = connect_gateway(address, &connector, &user_a, &password_a, &assertion_a)
         .await.unwrap();
-    let cross_read = command(
-        &mut tenant_a_cross_read,
-        format!("SELECT secret FROM {database_b}.gateway_probe").into_bytes().into_iter()
-            .chain(std::iter::once(0))
-            .collect(),
-    ).await.unwrap();
+    let cross_read = query(&mut tenant_a_cross_read, &format!("SELECT secret FROM {database_b}.gateway_probe")).await.unwrap();
     assert_denied(&cross_read, "Tenant A cross-tenant SELECT");
     drop(tenant_a_cross_read);
 
     let mut tenant_a_cross_write = connect_gateway(address, &connector, &user_a, &password_a, &assertion_a)
         .await.unwrap();
-    let cross_write = command(
-        &mut tenant_a_cross_write,
-        format!("INSERT INTO {database_b}.gateway_probe VALUES (2, 'forbidden')").into_bytes().into_iter()
-            .chain(std::iter::once(0))
-            .collect(),
-    ).await.unwrap();
+    let cross_write = query(&mut tenant_a_cross_write, &format!("INSERT INTO {database_b}.gateway_probe VALUES (2, 'forbidden')")).await.unwrap();
     assert_denied(&cross_write, "Tenant A cross-tenant INSERT");
     drop(tenant_a_cross_write);
 
     let mut tenant_a_use = connect_gateway(address, &connector, &user_a, &password_a, &assertion_a)
         .await.unwrap();
-    let use_other = command(
-        &mut tenant_a_use,
-        format!("USE {database_b}").into_bytes().into_iter()
-            .chain(std::iter::once(0))
-            .collect(),
-    ).await.unwrap();
+    let use_other = query(&mut tenant_a_use, &format!("USE {database_b}")).await.unwrap();
     assert_denied(&use_other, "Tenant A SQL USE");
     drop(tenant_a_use);
 
@@ -283,23 +273,13 @@ async fn gateway_enforces_tenant_database_and_session_boundaries() {
 
     let mut tenant_b = connect_gateway(address, &connector, &user_b, &password_b, &assertion_b)
         .await.expect("Tenant B gateway authentication should succeed");
-    let own_b = command(
-        &mut tenant_b,
-        format!("SELECT secret FROM {database_b}.gateway_probe").into_bytes().into_iter()
-            .chain(std::iter::once(0))
-            .collect(),
-    ).await.unwrap();
+    let own_b = query(&mut tenant_b, &format!("SELECT secret FROM {database_b}.gateway_probe")).await.unwrap();
     assert_ok(&own_b, "Tenant B own-database SELECT");
     drop(tenant_b);
 
     let mut tenant_b_cross_read = connect_gateway(address, &connector, &user_b, &password_b, &assertion_b)
         .await.unwrap();
-    let cross_read_b = command(
-        &mut tenant_b_cross_read,
-        format!("SELECT secret FROM {database_a}.gateway_probe").into_bytes().into_iter()
-            .chain(std::iter::once(0))
-            .collect(),
-    ).await.unwrap();
+    let cross_read_b = query(&mut tenant_b_cross_read, &format!("SELECT secret FROM {database_a}.gateway_probe")).await.unwrap();
     assert_denied(&cross_read_b, "Tenant B cross-tenant SELECT");
 }
 
