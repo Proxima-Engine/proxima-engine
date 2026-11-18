@@ -14,7 +14,6 @@ use rustls::{ClientConfig, RootCertStore};
 use sha2::{Digest, Sha256};
 use std::fs::File;
 use std::io::BufReader;
-use std::net::ToSocketAddrs;
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -120,13 +119,10 @@ pub async fn connect_upstream(
 ) -> Result<TlsStream<TcpStream>, UpstreamError> {
     validate_session_identity(session)?;
 
-    let address = (config.host.as_str(), config.port)
-        .to_socket_addrs()
-        .map_err(|_| UpstreamError::InvalidConfiguration)?
-        .next()
-        .ok_or(UpstreamError::InvalidConfiguration)?;
-
-    let tcp = timeout(config.connect_timeout, TcpStream::connect(address))
+    let tcp = timeout(
+        config.connect_timeout,
+        TcpStream::connect((config.host.as_str(), config.port)),
+    )
         .await
         .map_err(|_| UpstreamError::ConnectTimeout)?
         .map_err(|_| UpstreamError::TransportFailed)?;
