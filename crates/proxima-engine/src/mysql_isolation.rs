@@ -109,7 +109,7 @@ pub fn build_provisioning_plan(
         format!("CREATE DATABASE {database} CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci"),
         format!("CREATE USER {runtime_user} IDENTIFIED BY '{runtime_password}' REQUIRE SSL"),
         format!("CREATE USER {migration_user} IDENTIFIED BY '{migration_password}' REQUIRE SSL"),
-        format!("GRANT SELECT, INSERT, UPDATE, DELETE, EXECUTE, SHOW VIEW ON {database}.* TO {runtime_user}"),
+        format!("GRANT SELECT, INSERT, UPDATE, DELETE ON {database}.* TO {runtime_user}"),
         format!("GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX, DROP, REFERENCES, CREATE VIEW, SHOW VIEW, TRIGGER, EVENT, CREATE ROUTINE, ALTER ROUTINE, EXECUTE ON {database}.* TO {migration_user}"),
     ];
     Ok(MySqlProvisioningPlan { identity, account_host: account_host.to_owned(), statements })
@@ -217,7 +217,9 @@ mod tests {
         let plan = build_provisioning_plan(tenant, "10.0.0.12", PASSWORD_A, PASSWORD_B).unwrap();
         assert_eq!(plan.statements().len(), 5);
         let sql = plan.statements().join("\n");
-        assert!(sql.contains("GRANT SELECT, INSERT, UPDATE, DELETE, EXECUTE, SHOW VIEW ON"));
+        assert!(sql.contains("GRANT SELECT, INSERT, UPDATE, DELETE ON"));
+        assert!(!sql.contains("GRANT EXECUTE"));
+        assert!(!sql.contains("GRANT SHOW VIEW"));
         assert!(sql.contains(" TO 'ap_r_"));
         assert!(sql.contains(" TO 'ap_m_"));
         assert!(!sql.contains("ON *.*"));
