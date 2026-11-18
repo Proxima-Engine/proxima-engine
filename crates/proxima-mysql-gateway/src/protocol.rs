@@ -141,6 +141,17 @@ impl ServerHandshake {
     }
 }
 
+
+pub fn is_ssl_request(payload: &[u8]) -> Result<bool, ProtocolError> {
+    if payload.len() != 32 { return Ok(false); }
+    let mut c = Cursor::new(payload);
+    let capabilities = c.u32_le()?;
+    let _max_packet_size = c.u32_le()?;
+    let _character_set = c.u8()?;
+    c.skip(23)?;
+    Ok(capabilities & CLIENT_SSL != 0 && capabilities & CLIENT_PROTOCOL_41 != 0)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClientHandshake {
     pub capability_flags: u32,
@@ -389,6 +400,19 @@ mod tests {
         assert_eq!(Command::parse(&[0x11]), Err(CommandError::ForbiddenTenantSwitch(Command::ChangeUser)));
         assert_eq!(Command::parse(&[0x1f]), Err(CommandError::ForbiddenTenantSwitch(Command::ResetConnection)));
         assert_eq!(Command::parse(&[0x03, b'S', b'E', b'L']), Ok(Command::Query));
+    }
+
+
+    #[test]
+    fn detects_tls_upgrade_request_without_treating_it_as_full_authentication() {
+        let flags = CLIENT_PROTOCOL_41 | CLIENT_SSL;
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&flags.to_le_bytes());
+        payload.extend_from_slice(&4096u32.to_le_bytes());
+        payload.push(45);
+        payload.extend_from_slice(&[0u8; 23]);
+        assert!(is_ssl_request(&payload).unwrap());
+        assert_eq!(ClientHandshake::parse(&payload, 1024, 1024), Err(ProtocolError::Truncated));
     }
 
     #[test]
