@@ -148,7 +148,8 @@ fn is_allowed_admin_statement(statement: &str) -> bool {
         || upper.starts_with("DROP USER IF EXISTS 'AP_R_")
         || upper.starts_with("DROP USER IF EXISTS 'AP_M_");
     let database_prefix = upper.starts_with("CREATE DATABASE `AP_T_")
-        || upper.starts_with("DROP DATABASE `AP_T_");
+        || upper.starts_with("DROP DATABASE `AP_T_")
+        || upper.starts_with("DROP DATABASE AP_T_");
     let scoped_grant = upper.starts_with("GRANT ")
         && upper.contains(" ON `AP_T_")
         && (upper.contains(".* TO 'AP_R_") || upper.contains(".* TO 'AP_M_"))
@@ -622,6 +623,7 @@ mod tests {
         assert!(is_allowed_admin_statement("REVOKE ALL PRIVILEGES, GRANT OPTION FROM 'ap_r_123'@'127.0.0.1'"));
         assert!(is_allowed_admin_statement("DROP USER IF EXISTS 'ap_r_123'@'127.0.0.1'"));
         assert!(is_allowed_admin_statement("DROP DATABASE `ap_t_123`"));
+        assert!(is_allowed_admin_statement("DROP DATABASE ap_t_123"));
         assert!(!is_allowed_admin_statement("SELECT 1"));
         assert!(!is_allowed_admin_statement("GRANT ALL PRIVILEGES ON *.* TO 'attacker'@'%'"));
         assert!(!is_allowed_admin_statement("CREATE USER 'root'@'%' IDENTIFIED BY 'secret'"));
