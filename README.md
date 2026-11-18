@@ -48,6 +48,10 @@ On Windows, from the repository root, run the single local verification entry po
 
 It runs Rust formatting, workspace tests, Clippy, and the disposable MySQL 8.4 privilege-boundary smoke test. The smoke test only creates and removes databases and accounts with the `ap_test_` prefix inside the dedicated local Docker service. Do not point it at a production MySQL server.
 
+## Database protocol boundaries
+
+The current production Engine is a PostgreSQL wire-protocol gateway. MySQL support is being developed in a separate crate and is not production-ready. The PostgreSQL listener is not being converted into a multi-protocol listener. See [MySQL tenant isolation development status](docs/MYSQL_TENANT_ISOLATION.md).
+
 ## What is Agata Proxima?
 
 Agata Proxima provides security infrastructure for applications that serve multiple customers from a shared PostgreSQL environment. Its core job is to make tenant identity part of the database connection boundary and route each verified tenant session to a dedicated PostgreSQL role.
