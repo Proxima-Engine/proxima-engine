@@ -341,6 +341,43 @@ impl EncryptedTenantStore {
         Ok(std::mem::take(&mut *gateway_password))
     }
 
+    /// Replace the per-tenant Control Plane signing key. Existing sessions
+    /// revalidate the assertion on each command and therefore fail closed at
+    /// their next command boundary after this update.
+    pub fn rotate_assertion_key(
+        &self,
+        tenant_id: Uuid,
+        assertion_key: &[u8],
+    ) -> Result<(), StoreError> {
+        if assertion_key.len() != 64
+            || !assertion_key.iter().all(|byte| byte.is_ascii_hexdigit())
+        {
+            return Err(StoreError::InvalidAccount);
+        }
+        self.reload_from_disk()?;
+        let mut document = self.document.write().map_err(|_| StoreError::StoreUnavailable)?;
+        if !document.accounts.iter().any(|account| {
+            account.tenant_id == tenant_id.to_string() && account.enabled
+        }) {
+            return Err(StoreError::InvalidAccount);
+        }
+        let mut next = document.clone();
+        let key_hex = Zeroizing::new(hex::encode(assertion_key));
+        if let Some(existing) = next.assertion_keys.iter_mut()
+            .find(|entry| entry.tenant_id == tenant_id.to_string())
+        {
+            existing.key_hex = key_hex.to_string();
+        } else {
+            next.assertion_keys.push(StoredAssertionKey {
+                tenant_id: tenant_id.to_string(),
+                key_hex: key_hex.to_string(),
+            });
+        }
+        self.persist(&next)?;
+        *document = next;
+        Ok(())
+    }
+
     /// Disable every gateway account for a tenant and remove its upstream
     /// runtime credential. Existing sessions are not force-closed by this
     /// operation; callers must drain/terminate them separately.
