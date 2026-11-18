@@ -1,0 +1,18 @@
+services:
+  mysql-test:
+    image: mysql:8.4
+    container_name: proxima-mysql-test
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: proxima-mysql-dev-only
+      MYSQL_DATABASE: proxima_test
+    ports:
+      - "127.0.0.1:3307:3306"
+    command:
+      - --default-authentication-plugin=caching_sha2_password
+      - --require_secure_transport=OFF
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
