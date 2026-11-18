@@ -236,7 +236,7 @@ impl EncryptedTenantStore {
         {
             return Err(StoreError::InvalidAccount);
         }
-        let (gateway_password, verifier) = gateway_credential.into_parts();
+        let (mut gateway_password, verifier) = gateway_credential.into_parts();
         let verifier = Zeroizing::new(verifier);
         let verifier_hex = hex::encode(*verifier);
         let mut assertion_key_hex = Zeroizing::new(hex::encode(assertion_key));
@@ -369,7 +369,7 @@ impl EncryptedTenantStore {
     ) -> Result<String, StoreError> {
         self.reload_from_disk()?;
         validate_gateway_username(username)?;
-        let (password, verifier) = credential.into_parts();
+        let (mut password, verifier) = credential.into_parts();
         let verifier = Zeroizing::new(verifier);
         let mut document = self.document.write().map_err(|_| StoreError::StoreUnavailable)?;
         let mut next = document.clone();
