@@ -3,7 +3,7 @@
 //! MySQL DDL implicitly commits. This module requires a durable journal and
 //! compensates only operations whose success was recorded. It never assumes
 //! that a failed network call means the server did not apply the statement.
-use proxima_engine::mysql_isolation::{MySqlProvisioningPlan, MySqlTenantIdentity};
+use crate::isolation::{MySqlProvisioningPlan, MySqlTenantIdentity};
 use std::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -146,7 +146,7 @@ fn compensation_statements(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use proxima_engine::mysql_isolation::build_provisioning_plan;
+    use crate::isolation::build_provisioning_plan;
     use uuid::Uuid;
 
     #[derive(Default)]
