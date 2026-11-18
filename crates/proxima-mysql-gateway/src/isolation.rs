@@ -110,8 +110,8 @@ pub fn build_provisioning_plan(
     }
     let identity = MySqlTenantIdentity::for_tenant(tenant_id);
     let database = quote_identifier(&identity.database_name);
-    let runtime_user = quote_account(&identity.runtime_username, account_host);
-    let migration_user = quote_account(&identity.migration_username, account_host);
+    let runtime_user = quote_account(&identity.runtime_username, runtime_account_host);
+    let migration_user = quote_account(&identity.migration_username, migration_account_host);
     let statements = vec![
         Zeroizing::new(format!("CREATE DATABASE {database} CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci")),
         Zeroizing::new(format!("CREATE USER {runtime_user} IDENTIFIED BY '{runtime_password}' REQUIRE SSL WITH MAX_USER_CONNECTIONS 64")),
@@ -124,28 +124,28 @@ pub fn build_provisioning_plan(
 
 pub fn build_runtime_password_rotation(
     identity: &MySqlTenantIdentity,
-    account_host: &str,
+    runtime_account_host: &str,
     runtime_password: &str,
 ) -> Result<Vec<Zeroizing<String>>, IsolationError> {
-    validate_host(account_host)?;
+    validate_host(runtime_account_host)?;
     validate_password(runtime_password)?;
     Ok(vec![Zeroizing::new(format!(
         "ALTER USER {} IDENTIFIED BY '{}' REQUIRE SSL",
-        quote_account(&identity.runtime_username, account_host),
+        quote_account(&identity.runtime_username, runtime_account_host),
         runtime_password
     ))])
 }
 
 pub fn build_migration_password_rotation(
     identity: &MySqlTenantIdentity,
-    account_host: &str,
+    migration_account_host: &str,
     migration_password: &str,
 ) -> Result<Vec<Zeroizing<String>>, IsolationError> {
-    validate_host(account_host)?;
+    validate_host(migration_account_host)?;
     validate_password(migration_password)?;
     Ok(vec![Zeroizing::new(format!(
         "ALTER USER {} IDENTIFIED BY '{}' REQUIRE SSL",
-        quote_account(&identity.migration_username, account_host),
+        quote_account(&identity.migration_username, migration_account_host),
         migration_password
     ))])
 }
@@ -163,8 +163,8 @@ pub fn build_password_rotation(
         return Err(MySqlIsolationError::InvalidPassword);
     }
     Ok(vec![
-        Zeroizing::new(format!("ALTER USER {} IDENTIFIED BY '{}' REQUIRE SSL", quote_account(&identity.runtime_username, account_host), runtime_password)),
-        Zeroizing::new(format!("ALTER USER {} IDENTIFIED BY '{}' REQUIRE SSL", quote_account(&identity.migration_username, account_host), migration_password)),
+        Zeroizing::new(format!("ALTER USER {} IDENTIFIED BY '{}' REQUIRE SSL", quote_account(&identity.runtime_username, runtime_account_host), runtime_password)),
+        Zeroizing::new(format!("ALTER USER {} IDENTIFIED BY '{}' REQUIRE SSL", quote_account(&identity.migration_username, migration_account_host), migration_password)),
     ])
 }
 
