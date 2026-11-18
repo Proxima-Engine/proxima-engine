@@ -21,6 +21,7 @@ use std::{
 };
 use tokio::{net::TcpStream, time::timeout};
 use tokio_rustls::client::TlsStream;
+use zeroize::Zeroize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DdlExecutionError;
@@ -82,11 +83,13 @@ impl MySqlDdlExecutor for MySqlAdminExecutor {
             let mut payload = Vec::with_capacity(statement.len() + 1);
             payload.push(0x03); // COM_QUERY
             payload.extend_from_slice(statement.as_bytes());
-            let request = Packet { sequence: 0, payload };
-            match timeout(
+            let mut request = Packet { sequence: 0, payload };
+            let write_result = timeout(
                 self.statement_timeout,
                 write_packet(&mut self.stream, &request, self.max_packet_size),
-            ).await {
+            ).await;
+            request.payload.zeroize();
+            match write_result {
                 Ok(Ok(())) => {}
                 _ => {
                     self.usable = false;
