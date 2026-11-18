@@ -147,7 +147,8 @@ async fn provision(tenant_value: String, gateway_username: String) -> Result<(),
         return Err("gateway username must contain 1-32 ASCII letters, digits or underscores".into());
     }
 
-    let account_host = required("PROXIMA_MYSQL_ACCOUNT_HOST")?;
+    let runtime_account_host = required("PROXIMA_MYSQL_RUNTIME_ACCOUNT_HOST")?;
+    let migration_account_host = required("PROXIMA_MYSQL_MIGRATION_ACCOUNT_HOST")?;
     let admin_username = required("PROXIMA_MYSQL_PROVISIONING_USER")?;
     let admin_password = Zeroizing::new(required("PROXIMA_MYSQL_PROVISIONING_PASSWORD")?);
     let runtime_password = Zeroizing::new(generate_mysql_password()
@@ -172,7 +173,8 @@ async fn provision(tenant_value: String, gateway_username: String) -> Result<(),
     let identity = MySqlTenantIdentity::for_tenant(tenant_id);
     let plan = build_provisioning_plan(
         tenant_id,
-        &account_host,
+        &runtime_account_host,
+        &migration_account_host,
         &runtime_password,
         &migration_password,
     ).map_err(|error| error.to_string())?;
@@ -253,7 +255,8 @@ async fn revoke(tenant_value: String) -> Result<(), String> {
     store.revoke_tenant(tenant_id)
         .map_err(|_| "could not revoke the tenant in the encrypted gateway registry".to_owned())?;
 
-    let account_host = required("PROXIMA_MYSQL_ACCOUNT_HOST")?;
+    let runtime_account_host = required("PROXIMA_MYSQL_RUNTIME_ACCOUNT_HOST")?;
+    let migration_account_host = required("PROXIMA_MYSQL_MIGRATION_ACCOUNT_HOST")?;
     let admin_password = Zeroizing::new(required("PROXIMA_MYSQL_PROVISIONING_PASSWORD")?);
     let upstream = upstream_config()?;
     let mut executor = MySqlAdminExecutor::connect(
@@ -264,7 +267,7 @@ async fn revoke(tenant_value: String) -> Result<(), String> {
     ).await.map_err(|_| "tenant secrets are revoked locally, but MySQL administrator connection failed; upstream account cleanup needs reconciliation".to_owned())?;
 
     let identity = MySqlTenantIdentity::for_tenant(tenant_id);
-    let statements = build_revocation(&identity, &account_host)
+    let statements = build_revocation(&identity, &runtime_account_host, &migration_account_host)
         .map_err(|_| "invalid MySQL tenant account host".to_owned())?;
     for statement in statements {
         executor.execute(&statement).await
@@ -288,10 +291,10 @@ async fn rotate(tenant_value: String, gateway_username: String) -> Result<(), St
     let new_gateway_credential = generate_gateway_credential()
         .map_err(|_| "operating-system random source unavailable".to_owned())?;
 
-    let account_host = required("PROXIMA_MYSQL_ACCOUNT_HOST")?;
+    let runtime_account_host = required("PROXIMA_MYSQL_RUNTIME_ACCOUNT_HOST")?;
     let statements = build_runtime_password_rotation(
         &identity,
-        &account_host,
+        &runtime_account_host,
         &new_runtime_password,
     ).map_err(|_| "invalid MySQL runtime credential rotation plan".to_owned())?;
 
@@ -308,7 +311,7 @@ async fn rotate(tenant_value: String, gateway_username: String) -> Result<(), St
         if executor.execute(statement).await.is_err() {
             let rollback = build_runtime_password_rotation(
                 &identity,
-                &account_host,
+                &runtime_account_host,
                 &old_runtime.password,
             ).map_err(|_| "runtime credential rotation failed and rollback plan could not be built".to_owned())?;
             let mut rollback_failed = false;
@@ -363,12 +366,12 @@ async fn rotate_migration(tenant_value: String) -> Result<(), String> {
     let tenant_id = uuid::Uuid::parse_str(&tenant_value)
         .map_err(|_| "tenant ID must be a UUID".to_owned())?;
     let identity = MySqlTenantIdentity::for_tenant(tenant_id);
-    let account_host = required("PROXIMA_MYSQL_ACCOUNT_HOST")?;
+    let migration_account_host = required("PROXIMA_MYSQL_MIGRATION_ACCOUNT_HOST")?;
     let new_password = Zeroizing::new(generate_mysql_password()
         .map_err(|_| "operating-system random source unavailable".to_owned())?);
     let statement = build_migration_password_rotation(
         &identity,
-        &account_host,
+        &migration_account_host,
         &new_password,
     ).map_err(|_| "invalid migration credential rotation plan".to_owned())?
         .into_iter().next()
