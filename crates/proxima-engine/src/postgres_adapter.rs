@@ -129,7 +129,7 @@ impl DatabaseAdapter for PostgresCatalogAdapter {
             tokio::time::timeout(Duration::from_secs(90), async {
             self.validate_target(&request.target)?;
             if request.namespace.as_ref().is_some_and(|namespace| {
-                namespace.trim().is_empty() || namespace.len() > 63 || namespace.contains('\\0')
+                namespace.trim().is_empty() || namespace.len() > 63 || namespace.contains('\0')
             }) {
                 return Err(error("invalid_discovery_namespace", "The discovery namespace must be a valid bounded PostgreSQL schema name."));
             }

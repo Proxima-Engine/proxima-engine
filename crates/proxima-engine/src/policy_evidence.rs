@@ -283,13 +283,13 @@ fn valid_protected_resource(resource: &ProtectedResource) -> bool {
     let mut operations = std::collections::HashSet::new();
     !reference.name.trim().is_empty()
         && reference.name.len() <= 256
-        && !reference.name.contains('\\0')
+        && !reference.name.contains('\0')
         && reference.namespace.as_ref().map_or(true, |namespace| {
-            !namespace.trim().is_empty() && namespace.len() <= 128 && !namespace.contains('\\0')
+            !namespace.trim().is_empty() && namespace.len() <= 128 && !namespace.contains('\0')
         })
         && !resource.tenant_key.trim().is_empty()
         && resource.tenant_key.len() <= 128
-        && !resource.tenant_key.contains('\\0')
+        && !resource.tenant_key.contains('\0')
         && !resource.operations.is_empty()
         && resource.operations.len() <= 5
         && resource.operations.iter().all(|operation| operations.insert(*operation))
@@ -300,7 +300,7 @@ fn validate_evidence_payload(payload: &PolicyEvidencePayload) -> Result<(), Evid
         || payload.policy_revision == 0 || payload.target_id.trim().is_empty()
         || payload.tenant_id.trim().is_empty()
         || payload.policy_id.len() > 128 || payload.target_id.len() > 256 || payload.tenant_id.len() > 128
-        || payload.policy_id.contains('\\0') || payload.target_id.contains('\\0') || payload.tenant_id.contains('\\0')
+        || payload.policy_id.contains('\0') || payload.target_id.contains('\0') || payload.tenant_id.contains('\0')
         || payload.fingerprint.len() != 64
         || hex::decode(&payload.fingerprint).map_or(true, |bytes| bytes.len() != 32)
         || payload.observed_at_unix < 0
@@ -309,13 +309,13 @@ fn validate_evidence_payload(payload: &PolicyEvidencePayload) -> Result<(), Evid
         || payload.protected_resources.len() > 256
         || payload.protected_resources.iter().any(|resource| !valid_protected_resource(resource))
         || payload.findings.iter().any(|finding| finding.code.trim().is_empty()
-            || finding.code.len() > 128 || finding.code.contains('\\0')
-            || finding.detail.len() > 2048 || finding.detail.contains('\\0')
+            || finding.code.len() > 128 || finding.code.contains('\0')
+            || finding.detail.len() > 2048 || finding.detail.contains('\0')
             || finding.resource.as_ref().is_some_and(|resource| resource.name.len() > 256
-                || resource.name.contains('\\0')
-                || resource.namespace.as_ref().is_some_and(|namespace| namespace.len() > 128 || namespace.contains('\\0'))))
+                || resource.name.contains('\0')
+                || resource.namespace.as_ref().is_some_and(|namespace| namespace.len() > 128 || namespace.contains('\0'))))
         || payload.checks.len() > 3840
-        || payload.checks.iter().any(|check| check.detail.len() > 2048 || check.detail.contains('\\0'))
+        || payload.checks.iter().any(|check| check.detail.len() > 2048 || check.detail.contains('\0'))
     {
         return Err(error("invalid_evidence_payload", "The policy evidence is missing a required identity, revision, resource, fingerprint or timestamp, or contains malformed/bounded-check data."));
     }

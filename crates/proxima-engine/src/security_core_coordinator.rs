@@ -183,11 +183,7 @@ impl SecurityCoreCoordinator {
             .flat_map(|resource| resource.operations.iter().copied())
             .collect();
         let evidenced_operations: HashSet<_> = payload.verified_operations.iter().copied().collect();
-        let declared_operation_count: usize = request.policy.resources.iter()
-            .map(|resource| resource.operations.len())
-            .sum();
-        if required_operations.len() != declared_operation_count
-            || evidenced_operations.len() != payload.verified_operations.len()
+        if evidenced_operations.len() != payload.verified_operations.len()
             || evidenced_operations != required_operations
         {
             return Err(SecurityCoreError::EvidenceCoverageIncomplete);

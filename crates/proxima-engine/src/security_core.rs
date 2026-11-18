@@ -109,14 +109,14 @@ pub fn adapter_catalog() -> Vec<AdapterDescriptor> {
             name: "MySQL",
             maturity: AdapterMaturity::InDevelopment,
             capabilities: AdapterCapabilities { schema_inspection: true, policy_generation: true, drift_detection: true, ..AdapterCapabilities::default() },
-            status_note: "TLS-verified native discovery covers tables/views, columns, grants, constraints, indexes, partitions, triggers, routines, views and account privileges; fingerprint drift comparison is implemented. Database-per-tenant grant plans remain review-only; runtime principal binding, semantic verification and controlled deployment are not implemented.",
+            status_note: "TLS-verified native discovery and drift comparison are implemented. A library tenant-session connector requires verified identity and one-use signed admission, checks the selected database, and rejects grants beyond exact table/operation policy scope. The application protocol gateway, trusted tenant-to-database/principal registry, controlled deployment/rollback, independent semantic probes and end-to-end runtime admission are not complete.",
         },
         AdapterDescriptor {
             kind: DatabaseKind::MariaDb,
             name: "MariaDB",
             maturity: AdapterMaturity::InDevelopment,
             capabilities: AdapterCapabilities { schema_inspection: true, policy_generation: true, drift_detection: true, ..AdapterCapabilities::default() },
-            status_note: "TLS-verified native discovery uses the shared MySQL/MariaDB catalog adapter for tables/views, columns, grants, constraints, indexes, partitions, triggers, routines and account privileges; fingerprint drift comparison is implemented. Database-per-tenant grant plans remain review-only; runtime principal binding, semantic verification and controlled deployment are not implemented.",
+            status_note: "TLS-verified native discovery and drift comparison are implemented. A library tenant-session connector requires verified identity and one-use signed admission, checks the selected database, and rejects grants beyond exact table/operation policy scope. The application protocol gateway, trusted tenant-to-database/principal registry, controlled deployment/rollback, independent semantic probes and end-to-end runtime admission are not complete.",
         },
         AdapterDescriptor {
             kind: DatabaseKind::SqlServer,

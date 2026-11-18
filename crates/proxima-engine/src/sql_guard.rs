@@ -13,9 +13,10 @@ pub fn blocks_tenant_session_mutation(sql: &str) -> bool {
         // A tenant-bound session must not forward SQL the guard cannot tokenize.
         return true;
     };
-    let tokens: Vec<String> = tokens.iter().map(|token| {
-        token.to_string().to_ascii_lowercase().replace('"', "")
-    }).collect();
+    let tokens: Vec<String> = tokens.iter()
+        .filter(|token| !matches!(token, sqlparser::tokenizer::Token::Whitespace(_)))
+        .map(|token| token.to_string().to_ascii_lowercase().replace('"', ""))
+        .collect();
     let at = |index: usize, expected: &str| tokens.get(index).is_some_and(|value| value == expected);
 
     if tokens.iter().any(|token| token.trim_matches('"').ends_with("set_config")) {

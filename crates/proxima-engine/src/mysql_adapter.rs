@@ -16,7 +16,7 @@ use crate::connection_admission::ConnectionAdmissionGate;
 use crate::policy_evidence::{PolicyEvidenceAuthority, SignedPolicyAdmission, SignedPolicyEvidence};
 use crate::security_core::{
     AdapterCapabilities, AdapterDescriptor, AdapterMaturity, DatabaseKind,
-    InspectionCompleteness, Operation, ResourceKind, ResourceRef, SecurityFinding,
+    InspectionCompleteness, Operation, ProtectedResource, ResourceKind, ResourceRef, SecurityFinding,
     SecurityPosture, TenantSecurityPolicy, VerificationReport, SECURITY_MODEL_VERSION,
 };
 use serde_json::{json, Value};
@@ -25,24 +25,66 @@ use sqlx::{
     mysql::{MySqlConnectOptions, MySqlConnection, MySqlSslMode},
     Connection, Row,
 };
-use std::str::FromStr;
+use std::{collections::{HashMap, HashSet}, str::FromStr};
 
-fn grants_are_scoped_to_database(grants: &[String], database_name: &str) -> bool {
+fn parse_mysql_options(connection_url: &str) -> Result<MySqlConnectOptions, AdapterError> {
+    let scheme = connection_url.split_once("://").map(|(scheme, _)| scheme);
+    if !scheme.is_some_and(|value| {
+        value.eq_ignore_ascii_case("mysql") || value.eq_ignore_ascii_case("mariadb")
+    }) {
+        return Err(error(
+            "invalid_mysql_connection_config",
+            "The connection URL must use the mysql:// or mariadb:// scheme.",
+        ));
+    }
+    MySqlConnectOptions::from_str(connection_url)
+        .map_err(|_| error("invalid_mysql_connection_config", "The MySQL connection URL could not be parsed."))
+}
+
+fn grants_match_policy(
+    grants: &[String],
+    database_name: &str,
+    protected_resources: &[ProtectedResource],
+) -> bool {
     if grants.is_empty() || database_name.trim().is_empty()
         || database_name.chars().any(|character| character == char::from(0))
+        || protected_resources.is_empty()
     { return false; }
     let escaped_database = database_name.replace(char::from(96), "``");
-    let expected_prefix = format!("{}{}{}.", char::from(96), escaped_database, char::from(96));
     grants.iter().all(|grant| {
         let upper = grant.to_ascii_uppercase();
         let Some(on_index) = upper.find(" ON ") else { return false; };
         if !upper.starts_with("GRANT ") || upper.contains(" WITH GRANT OPTION") { return false; }
-        let privilege_clause = upper[..on_index].trim();
+        let privilege_clause = upper[6..on_index].trim();
         let scope_start = on_index + 4;
         let Some(to_offset) = upper[scope_start..].find(" TO ") else { return false; };
         let scope = grant[scope_start..scope_start + to_offset].trim();
-        if scope == "*.*" { return privilege_clause == "GRANT USAGE"; }
-        scope.starts_with(&expected_prefix)
+        if scope == "*.*" { return privilege_clause == "USAGE"; }
+
+        // MySQL has no row-level security. Permit only table-specific grants
+        // named by this signed policy; database-wide grants also expose any
+        // unlisted table and therefore fail closed.
+        let Some(resource) = protected_resources.iter().find(|resource| {
+            resource.resource.kind == ResourceKind::Table
+                && resource.resource.namespace.as_deref() == Some(database_name)
+                && {
+                    let table = resource.resource.name.replace(char::from(96), "``");
+                    scope == format!("{}{}{}.{}{}{}", char::from(96), escaped_database, char::from(96), char::from(96), table, char::from(96))
+                }
+        }) else { return false; };
+
+        privilege_clause.split(',').all(|privilege| {
+            let privilege = privilege.trim();
+            match privilege {
+                "SELECT" => resource.operations.contains(&Operation::Read),
+                "INSERT" => resource.operations.contains(&Operation::Create),
+                "UPDATE" => resource.operations.contains(&Operation::Update),
+                "DELETE" => resource.operations.contains(&Operation::Delete),
+                // DDL, grant-option, routine and administrative privileges are
+                // intentionally not expressible through the tenant policy.
+                _ => false,
+            }
+        })
     })
 }
 
@@ -82,8 +124,7 @@ pub async fn connect_tenant_session(
         connection_id,
         now,
     ).map_err(|_| error("mysql_policy_admission_denied", "A valid, fresh, one-use signed tenant policy admission is required before opening a MySQL/MariaDB session."))?;
-    let mut options = MySqlConnectOptions::from_str(connection_url)
-        .map_err(|_| error("invalid_mysql_connection_config", "The MySQL connection URL could not be parsed."))?;
+    let mut options = parse_mysql_options(connection_url)?;
     options = options.ssl_mode(MySqlSslMode::VerifyIdentity);
     let mut connection = tokio::time::timeout(
         std::time::Duration::from_secs(10),
@@ -113,12 +154,129 @@ pub async fn connect_tenant_session(
         let grant: String = row.try_get(0).map_err(db_error)?;
         grants.push(grant);
     }
-    if !grants_are_scoped_to_database(&grants, &target.database_name) {
-        return Err(error("mysql_tenant_grants_too_broad", "The authenticated MySQL account has grants outside the selected tenant database, an inherited role, or unrecognized grant syntax."));
+    if !grants_match_policy(&grants, &target.database_name, &evidence.payload.protected_resources) {
+        return Err(error("mysql_tenant_grants_too_broad", "The authenticated MySQL account has grants outside the exact policy resources or operations, an inherited role, or unrecognized grant syntax."));
     }
     Ok(connection)
 }
 
+
+// Trusted routes must be loaded from protected server configuration or the
+// authenticated control plane, never from request-supplied database names.
+pub struct MySqlTenantRoute {
+    tenant_id: String,
+    target: AdapterTarget,
+    kind: DatabaseKind,
+    connection_url: String,
+}
+
+impl MySqlTenantRoute {
+    pub fn new(
+        tenant_id: impl Into<String>,
+        target: AdapterTarget,
+        kind: DatabaseKind,
+        connection_url: impl Into<String>,
+    ) -> Result<Self, AdapterError> {
+        let tenant_id = tenant_id.into();
+        let connection_url = connection_url.into();
+
+        if tenant_id.trim().is_empty()
+            || tenant_id.len() > 128
+            || tenant_id.chars().any(|c| c == char::from(0))
+            || target.target_id.trim().is_empty()
+            || target.database_name.trim().is_empty()
+            || target.database_name.len() > 64
+            || target.database_name.chars().any(|c| c == char::from(0))
+            || !matches!(kind, DatabaseKind::MySql | DatabaseKind::MariaDb)
+            || connection_url.len() > 4096
+        {
+            return Err(error(
+                "invalid_mysql_tenant_route",
+                "The MySQL/MariaDB route is empty, unbounded, or has an unsupported database kind.",
+            ));
+        }
+
+        parse_mysql_options(&connection_url)?;
+
+        Ok(Self {
+            tenant_id,
+            target,
+            kind,
+            connection_url,
+        })
+    }
+}
+
+pub struct MySqlTenantRouteRegistry {
+    routes: HashMap<String, MySqlTenantRoute>,
+}
+
+impl MySqlTenantRouteRegistry {
+    pub fn new(routes: Vec<MySqlTenantRoute>) -> Result<Self, AdapterError> {
+        if routes.is_empty() || routes.len() > 10_000 {
+            return Err(error(
+                "invalid_mysql_tenant_route_count",
+                "The trusted route registry must contain between 1 and 10,000 routes.",
+            ));
+        }
+
+        let mut by_tenant = HashMap::with_capacity(routes.len());
+        let mut target_ids = HashSet::with_capacity(routes.len());
+
+        for route in routes {
+            if by_tenant.contains_key(&route.tenant_id)
+                || !target_ids.insert(route.target.target_id.clone())
+            {
+                return Err(error(
+                    "duplicate_mysql_tenant_route",
+                    "Each tenant and registered database target must appear in exactly one route.",
+                ));
+            }
+            by_tenant.insert(route.tenant_id.clone(), route);
+        }
+
+        Ok(Self { routes: by_tenant })
+    }
+
+    pub async fn connect_for_identity(
+        &self,
+        identity: &VerifiedTenantIdentity,
+        evidence_authority: &PolicyEvidenceAuthority,
+        admission_gate: &ConnectionAdmissionGate,
+        evidence: &SignedPolicyEvidence,
+        admission: &SignedPolicyAdmission,
+        connection_id: &str,
+    ) -> Result<MySqlConnection, AdapterError> {
+        let route = self.routes.get(identity.tenant_id()).ok_or_else(|| {
+            error(
+                "mysql_tenant_route_missing",
+                "No trusted database route exists for this verified tenant.",
+            )
+        })?;
+
+        if identity.database_kind() != route.kind
+            || identity.target_id() != route.target.target_id
+        {
+            return Err(error(
+                "mysql_tenant_route_scope_mismatch",
+                "The verified tenant identity does not match its registered route.",
+            ));
+        }
+
+        connect_tenant_session(
+            &route.connection_url,
+            &route.target,
+            route.kind,
+            identity,
+            evidence_authority,
+            admission_gate,
+            evidence,
+            admission,
+            connection_id,
+        )
+        .await
+    }
+}
 pub struct MySqlCatalogAdapter {
     target_id: String,
     database_name: String,
@@ -145,8 +303,7 @@ impl MySqlCatalogAdapter {
         if !matches!(kind, DatabaseKind::MySql | DatabaseKind::MariaDb) {
             return Err(error("invalid_mysql_adapter_kind", "The MySQL wire adapter only accepts MySQL or MariaDB targets."));
         }
-        MySqlConnectOptions::from_str(&connection_url)
-            .map_err(|_| error("invalid_mysql_connection_config", "The MySQL connection URL could not be parsed."))?;
+        parse_mysql_options(&connection_url)?;
         Ok(Self { target_id, database_name, connection_url, kind })
     }
 
@@ -158,8 +315,7 @@ impl MySqlCatalogAdapter {
     }
 
     async fn connect_checked(&self) -> Result<MySqlConnection, AdapterError> {
-        let mut options = MySqlConnectOptions::from_str(&self.connection_url)
-            .map_err(|_| error("invalid_mysql_connection_config", "The MySQL connection URL could not be parsed."))?;
+        let mut options = parse_mysql_options(&self.connection_url)?;
         options = options.ssl_mode(MySqlSslMode::VerifyIdentity);
         let mut connection = tokio::time::timeout(
             std::time::Duration::from_secs(10),
@@ -481,7 +637,7 @@ impl DatabaseAdapter for MySqlCatalogAdapter {
                 drift_detection: true,
                 ..AdapterCapabilities::default()
             },
-            status_note: "TLS-verified native catalog discovery and privilege inspection are implemented. Database-per-tenant grant plans are review-only; runtime tenant binding, independent probes, controlled deployment and signed native admission remain unavailable.",
+            status_note: "TLS-verified native catalog discovery, drift comparison, and a library tenant-session connector with verified identity, one-use signed admission, and exact table/operation grant checks are implemented. The MySQL application protocol gateway, trusted tenant-to-database/principal registry, controlled policy deployment/rollback, independent semantic probes, and data-plane evidence production remain unavailable; the connector is not yet an end-to-end enforcement path.",
         }
     }
 
@@ -759,43 +915,130 @@ mod tests {
 }
 
 #[cfg(test)]
-mod tenant_database_grant_tests {
-    use super::grants_are_scoped_to_database;
+#[cfg(test)]
+mod mysql_route_registry_tests {
+    use super::*;
+
+    fn route(tenant: &str, target_id: &str) -> MySqlTenantRoute {
+        MySqlTenantRoute::new(
+            tenant,
+            AdapterTarget {
+                target_id: target_id.into(),
+                database_name: tenant.replace('-', "_"),
+                namespace: None,
+            },
+            DatabaseKind::MySql,
+            format!("mysql://tenant:secret@localhost/{}", tenant.replace('-', "_")),
+        )
+        .unwrap()
+    }
 
     #[test]
-    fn grant_scope_must_be_limited_to_the_selected_database() {
+    fn registry_maps_each_tenant_to_its_registered_target() {
+        let registry = MySqlTenantRouteRegistry::new(vec![
+            route("tenant-a", "target-a"),
+            route("tenant-b", "target-b"),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            registry.routes.get("tenant-a").unwrap().target.target_id,
+            "target-a"
+        );
+        assert_eq!(
+            registry.routes.get("tenant-b").unwrap().target.database_name,
+            "tenant_b"
+        );
+    }
+
+    #[test]
+    fn registry_rejects_duplicate_tenants_and_targets() {
+        assert!(MySqlTenantRouteRegistry::new(vec![
+            route("tenant-a", "target-a"),
+            route("tenant-a", "target-b"),
+        ])
+        .is_err());
+
+        assert!(MySqlTenantRouteRegistry::new(vec![
+            route("tenant-a", "shared-target"),
+            route("tenant-b", "shared-target"),
+        ])
+        .is_err());
+    }
+
+    #[test]
+    fn registry_rejects_empty_configuration() {
+        assert!(MySqlTenantRouteRegistry::new(Vec::new()).is_err());
+    }
+}
+mod tenant_database_grant_tests {
+    use super::grants_match_policy;
+    use crate::security_core::{Operation, ProtectedResource, ResourceKind, ResourceRef};
+
+    fn policy_resource() -> ProtectedResource {
+        ProtectedResource {
+            resource: ResourceRef {
+                namespace: Some("tenant_a".into()),
+                name: "records".into(),
+                kind: ResourceKind::Table,
+            },
+            tenant_key: "tenant_id".into(),
+            operations: vec![Operation::Read, Operation::Create],
+        }
+    }
+
+    #[test]
+    fn grants_must_match_exact_policy_resources_and_operations() {
+        let resource = policy_resource();
         let scoped = vec![
             "GRANT USAGE ON *.* TO 'tenant_a'@'%'".to_owned(),
-            "GRANT SELECT, INSERT, UPDATE, DELETE ON `tenant_a`.* TO 'tenant_a'@'%'".to_owned(),
+            "GRANT SELECT, INSERT ON `tenant_a`.`records` TO 'tenant_a'@'%'".to_owned(),
         ];
-        assert!(grants_are_scoped_to_database(&scoped, "tenant_a"));
-        assert!(!grants_are_scoped_to_database(
-            &["GRANT SELECT ON `tenant_b`.* TO 'tenant_a'@'%'".to_owned()],
+        assert!(grants_match_policy(&scoped, "tenant_a", std::slice::from_ref(&resource)));
+        assert!(!grants_match_policy(
+            &["GRANT SELECT ON `tenant_b`.`records` TO 'tenant_a'@'%'".to_owned()],
             "tenant_a",
+            std::slice::from_ref(&resource),
         ));
-        assert!(!grants_are_scoped_to_database(
+        assert!(!grants_match_policy(
             &["GRANT SELECT ON *.* TO 'tenant_a'@'%'".to_owned()],
             "tenant_a",
+            std::slice::from_ref(&resource),
         ));
-        assert!(!grants_are_scoped_to_database(
+        assert!(!grants_match_policy(
             &["GRANT 'tenant_role'@'%' TO 'tenant_a'@'%'".to_owned()],
             "tenant_a",
+            std::slice::from_ref(&resource),
         ));
-        assert!(!grants_are_scoped_to_database(
-            &["GRANT SELECT ON `tenant_a_extra`.* TO 'tenant_a'@'%'".to_owned()],
+        assert!(!grants_match_policy(
+            &["GRANT UPDATE ON `tenant_a`.`records` TO 'tenant_a'@'%'".to_owned()],
             "tenant_a",
+            std::slice::from_ref(&resource),
         ));
-        assert!(!grants_are_scoped_to_database(
-            &["GRANT SELECT ON `tenant_a`.* TO 'tenant_a'@'%' WITH GRANT OPTION".to_owned()],
+        assert!(!grants_match_policy(
+            &["GRANT CREATE ON `tenant_a`.`records` TO 'tenant_a'@'%'".to_owned()],
             "tenant_a",
+            std::slice::from_ref(&resource),
         ));
-        assert!(!grants_are_scoped_to_database(
+        assert!(!grants_match_policy(
+            &["GRANT SELECT ON `tenant_a`.* TO 'tenant_a'@'%'".to_owned()],
+            "tenant_a",
+            std::slice::from_ref(&resource),
+        ));
+        assert!(!grants_match_policy(
+            &["GRANT SELECT ON `tenant_a`.`records` TO 'tenant_a'@'%' WITH GRANT OPTION".to_owned()],
+            "tenant_a",
+            std::slice::from_ref(&resource),
+        ));
+        assert!(!grants_match_policy(
             &["unrecognized grant output".to_owned()],
             "tenant_a",
+            std::slice::from_ref(&resource),
         ));
-        assert!(!grants_are_scoped_to_database(
+        assert!(!grants_match_policy(
             &["GRANT USAGE ON *.* TO 'tenant_a'@'%'".to_owned()],
             &format!("tenant{}a", char::from(0)),
+            std::slice::from_ref(&resource),
         ));
     }
 }
