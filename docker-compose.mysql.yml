@@ -5,6 +5,7 @@ services:
     restart: unless-stopped
     environment:
       MYSQL_ROOT_PASSWORD: proxima-mysql-dev-only
+      MYSQL_ROOT_HOST: "%"
       MYSQL_DATABASE: proxima_test
     ports:
       - "127.0.0.1:3307:3306"
@@ -62,7 +63,7 @@ services:
     volumes:
       - ./dev/mysql-certs:/run/mysql-certs:ro
       - ./dev/mysql-secrets/mysql-store-key:/run/secrets/mysql-store-key:ro
-      - ./dev/mysql-data:/var/lib/proxima-mysql
+      - ./dev/mysql-data:/var/lib/proxima-mysql:ro
     networks:
       mysql-isolation:
         ipv4_address: 172.31.90.3
