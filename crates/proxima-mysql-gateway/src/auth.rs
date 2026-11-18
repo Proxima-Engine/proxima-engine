@@ -254,7 +254,7 @@ impl GatewayCredentialMaterial {
 
     /// Consume the one-time credential material. Persist only the verifier.
     pub fn into_parts(mut self) -> (String, [u8; 32]) {
-        let password = std::mem::take(&mut self.password);
+        let password = std::mem::take(&mut *self.password);
         let verifier = std::mem::replace(&mut self.verifier, [0u8; 32]);
         (password, verifier)
     }
@@ -280,6 +280,7 @@ pub fn generate_gateway_credential() -> Result<GatewayCredentialMaterial, Accoun
         .fill(&mut random)
         .map_err(|_| AccountError::RandomSourceUnavailable)?;
     let password = hex::encode(random);
+    random.zeroize();
     let first = Sha256::digest(password.as_bytes());
     let verifier = Sha256::digest(first).into();
     Ok(GatewayCredentialMaterial { password: Zeroizing::new(password), verifier })
