@@ -9,6 +9,7 @@ use std::fmt;
 use std::net::IpAddr;
 use ring::rand::{SecureRandom, SystemRandom};
 use uuid::Uuid;
+use zeroize::Zeroize;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MySqlIsolationError {
@@ -78,6 +79,13 @@ impl fmt::Debug for MySqlProvisioningPlan {
             .field("statement_count", &self.statements.len())
             .field("credentials", &"[REDACTED]")
             .finish()
+    }
+}
+impl Drop for MySqlProvisioningPlan {
+    fn drop(&mut self) {
+        for statement in &mut self.statements {
+            statement.zeroize();
+        }
     }
 }
 
