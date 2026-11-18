@@ -307,8 +307,8 @@ finally {
             $cleanupSql = @"
 DROP DATABASE IF EXISTS $tenantDatabase;
 DROP DATABASE IF EXISTS $otherDatabase;
-DROP USER IF EXISTS '$runtimeUser'@'$accountHost';
-DROP USER IF EXISTS '$migrationUser'@'$accountHost';
+DROP USER IF EXISTS '$runtimeUser'@'$runtimeAccountHost';
+DROP USER IF EXISTS '$migrationUser'@'$migrationAccountHost';
 "@
             Invoke-RootSql -Sql $cleanupSql | Out-Null
         } catch {
