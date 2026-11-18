@@ -7,12 +7,14 @@
 use sha2::{Digest, Sha256};
 use std::fmt;
 use std::net::IpAddr;
+use ring::rand::{SecureRandom, SystemRandom};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MySqlIsolationError {
     InvalidHost,
     InvalidPassword,
+    RandomSourceUnavailable,
 }
 
 impl fmt::Display for MySqlIsolationError {
@@ -20,6 +22,7 @@ impl fmt::Display for MySqlIsolationError {
         match self {
             Self::InvalidHost => write!(f, "MySQL account host must be a literal hostname or IP; wildcards are not allowed"),
             Self::InvalidPassword => write!(f, "MySQL provisioning passwords must be 64 hexadecimal characters"),
+            Self::RandomSourceUnavailable => write!(f, "operating-system random source is unavailable"),
         }
     }
 }
@@ -82,11 +85,12 @@ impl fmt::Debug for MySqlProvisioningPlan {
 /// Generate a 256-bit random MySQL account password using the operating
 /// system random source used by UUID v4. The returned value is 64 hex chars,
 /// matching the provisioning-plan validation contract.
-pub fn generate_mysql_password() -> String {
+pub fn generate_mysql_password() -> Result<String, MySqlIsolationError> {
     let mut bytes = [0u8; 32];
-    bytes[..16].copy_from_slice(Uuid::new_v4().as_bytes());
-    bytes[16..].copy_from_slice(Uuid::new_v4().as_bytes());
-    hex::encode(bytes)
+    SystemRandom::new()
+        .fill(&mut bytes)
+        .map_err(|_| MySqlIsolationError::RandomSourceUnavailable)?;
+    Ok(hex::encode(bytes))
 }
 
 pub fn build_provisioning_plan(
@@ -191,8 +195,8 @@ mod tests {
 
     #[test]
     fn generated_passwords_are_distinct_and_meet_entropy_format() {
-        let first = generate_mysql_password();
-        let second = generate_mysql_password();
+        let first = generate_mysql_password().unwrap();
+        let second = generate_mysql_password().unwrap();
         assert_eq!(first.len(), 64);
         assert!(first.bytes().all(|byte| byte.is_ascii_hexdigit()));
         assert_ne!(first, second);
