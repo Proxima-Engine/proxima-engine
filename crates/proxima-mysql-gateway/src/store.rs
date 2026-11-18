@@ -83,9 +83,6 @@ impl Drop for StoreDocument {
         for key in &mut self.assertion_keys {
             key.key_hex.zeroize();
         }
-        for assertion_key in &mut self.assertion_keys {
-            assertion_key.key_hex.zeroize();
-        }
     }
 }
 
@@ -368,7 +365,7 @@ impl EncryptedTenantStore {
         {
             existing.key_hex = key_hex.to_string();
         } else {
-            next.assertion_keys.push(StoredAssertionKey {
+            next.assertion_keys.push(StoredTenantAssertionKey {
                 tenant_id: tenant_id.to_string(),
                 key_hex: key_hex.to_string(),
             });
