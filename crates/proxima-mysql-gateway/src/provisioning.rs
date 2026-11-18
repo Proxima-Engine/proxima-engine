@@ -6,12 +6,18 @@
 use proxima_engine::mysql_isolation::{MySqlProvisioningPlan, MySqlTenantIdentity};
 use std::fmt;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DdlExecutionError;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct JournalError;
+
 pub trait MySqlDdlExecutor {
-    fn execute(&mut self, statement: &str) -> Result<(), ()>;
+    fn execute(&mut self, statement: &str) -> Result<(), DdlExecutionError>;
 }
 
 pub trait ProvisioningJournal {
-    fn begin(&mut self, tenant_id: &str) -> Result<(), ()>;
+    fn begin(&mut self, tenant_id: &str) -> Result<(), JournalError>;
     fn step_started(&mut self, tenant_id: &str, step: usize) -> Result<(), ()>;
     fn step_applied(&mut self, tenant_id: &str, step: usize) -> Result<(), ()>;
     fn step_compensated(&mut self, tenant_id: &str, step: usize) -> Result<(), ()>;
@@ -152,7 +158,7 @@ mod tests {
         fn execute(&mut self, statement: &str) -> Result<(), ()> {
             let index = self.calls.len();
             self.calls.push(statement.to_owned());
-            if self.fail_at == Some(index) { Err(()) } else { Ok(()) }
+            if self.fail_at == Some(index) { Err(DdlExecutionError) } else { Ok(()) }
         }
     }
 
