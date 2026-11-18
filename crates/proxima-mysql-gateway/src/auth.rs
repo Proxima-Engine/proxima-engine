@@ -253,8 +253,8 @@ impl GatewayCredentialMaterial {
     pub fn verifier(&self) -> [u8; 32] { self.verifier }
 
     /// Consume the one-time credential material. Persist only the verifier.
-    pub fn into_parts(mut self) -> (String, [u8; 32]) {
-        let password = std::mem::take(&mut *self.password);
+    pub fn into_parts(mut self) -> (Zeroizing<String>, [u8; 32]) {
+        let password = Zeroizing::new(std::mem::take(&mut *self.password));
         let verifier = std::mem::replace(&mut self.verifier, [0u8; 32]);
         (password, verifier)
     }
