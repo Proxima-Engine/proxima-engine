@@ -73,6 +73,10 @@ try {
     Assert-MySqlDenied -Name "Tenant A cannot read Tenant B" -User "ap_test_a_runtime" -Password ("a" * 64) -Sql "SELECT secret FROM ap_test_tenant_b.records"
     Assert-MySqlDenied -Name "Tenant A cannot write Tenant B" -User "ap_test_a_runtime" -Password ("a" * 64) -Sql "INSERT INTO ap_test_tenant_b.records VALUES (2, 'forbidden')"
     Assert-MySqlDenied -Name "Runtime account cannot perform DDL" -User "ap_test_a_runtime" -Password ("a" * 64) -Sql "CREATE TABLE ap_test_tenant_a.forbidden (id INT)"
+    $ownB = Assert-MySqlSuccess -Name "Tenant B reads its own data over TLS" -User "ap_test_b_runtime" -Password ("b" * 64) -Sql "SELECT secret FROM ap_test_tenant_b.records" -RequireTls
+    if ($ownB.Trim() -ne "tenant-b-secret") { throw "Tenant B returned unexpected own-tenant data." }
+    Assert-MySqlDenied -Name "Tenant B cannot read Tenant A" -User "ap_test_b_runtime" -Password ("b" * 64) -Sql "SELECT secret FROM ap_test_tenant_a.records"
+    Assert-MySqlDenied -Name "Tenant B cannot write Tenant A" -User "ap_test_b_runtime" -Password ("b" * 64) -Sql "UPDATE ap_test_tenant_a.records SET secret='forbidden' WHERE id=1"
 
     Write-Host "--- Migration account checks ---" -ForegroundColor Cyan
     Assert-MySqlSuccess -Name "Tenant A migrator can create objects in Tenant A" -User "ap_test_a_migrator" -Password ("c" * 64) -Sql "CREATE TABLE ap_test_tenant_a.migration_probe (id INT)" -RequireTls | Out-Null
