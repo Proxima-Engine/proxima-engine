@@ -18,9 +18,13 @@ try {
     & cargo clippy -p proxima-mysql-gateway --all-targets -- -D warnings
     if ($LASTEXITCODE -ne 0) { throw "cargo clippy failed." }
 
-    Write-Host "[4/4] Real MySQL 8.4 privilege-boundary checks" -ForegroundColor Cyan
+    Write-Host "[4/5] Real MySQL 8.4 privilege-boundary checks" -ForegroundColor Cyan
     & (Join-Path $PSScriptRoot "mysql-isolation-smoke.ps1")
     if ($LASTEXITCODE -ne 0) { throw "MySQL isolation smoke test failed." }
+
+    Write-Host "[5/5] MySQL gateway TLS, authentication and tenant-isolation end-to-end checks" -ForegroundColor Cyan
+    & (Join-Path $PSScriptRoot "mysql-gateway-smoke.ps1")
+    if ($LASTEXITCODE -ne 0) { throw "MySQL gateway end-to-end smoke test failed." }
 
     Write-Host "All available local verification stages passed." -ForegroundColor Green
 }
