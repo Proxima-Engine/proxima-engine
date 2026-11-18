@@ -214,6 +214,53 @@ impl EncryptedTenantStore {
         Ok(gateway_password)
     }
 
+    /// Rotate all three credentials atomically in the encrypted local registry.
+    /// The gateway password is returned once; only its verifier is persisted.
+    pub fn rotate_tenant_credentials(
+        &self,
+        tenant_id: Uuid,
+        gateway_username: &str,
+        gateway_credential: GatewayCredentialMaterial,
+        runtime_username: &str,
+        runtime_password: &str,
+        migration_username: &str,
+        migration_password: &str,
+    ) -> Result<String, StoreError> {
+        self.reload_from_disk()?;
+        validate_gateway_username(gateway_username)?;
+        let identity = MySqlTenantIdentity::for_tenant(tenant_id);
+        if runtime_username != identity.runtime_username
+            || migration_username != identity.migration_username
+            || !valid_password(runtime_password)
+            || !valid_password(migration_password)
+            || runtime_password == migration_password
+        {
+            return Err(StoreError::InvalidAccount);
+        }
+        let (gateway_password, verifier) = gateway_credential.into_parts();
+        let mut document = self.document.write().map_err(|_| StoreError::StoreUnavailable)?;
+        let mut next = document.clone();
+        let account = next.accounts.iter_mut()
+            .find(|account| account.username == gateway_username
+                && account.tenant_id == tenant_id.to_string()
+                && account.enabled)
+            .ok_or(StoreError::InvalidAccount)?;
+        account.verifier_hex = hex::encode(verifier);
+        let runtime = next.upstream.iter_mut()
+            .find(|entry| entry.tenant_id == tenant_id.to_string())
+            .ok_or(StoreError::InvalidAccount)?;
+        runtime.username = runtime_username.to_owned();
+        runtime.password = runtime_password.to_owned();
+        let migration = next.migration.iter_mut()
+            .find(|entry| entry.tenant_id == tenant_id.to_string())
+            .ok_or(StoreError::InvalidAccount)?;
+        migration.username = migration_username.to_owned();
+        migration.password = migration_password.to_owned();
+        self.persist(&next)?;
+        *document = next;
+        Ok(gateway_password)
+    }
+
     /// Disable every gateway account for a tenant and remove its upstream
     /// runtime credential. Existing sessions are not force-closed by this
     /// operation; callers must drain/terminate them separately.
