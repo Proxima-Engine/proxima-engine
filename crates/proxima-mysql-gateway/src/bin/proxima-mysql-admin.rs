@@ -280,29 +280,28 @@ async fn rotate(tenant_value: String, gateway_username: String) -> Result<(), St
     ).await.map_err(|_| "could not authenticate to MySQL with the provisioning account over verified TLS".to_owned())?;
     admin_password.zeroize();
 
-    let mut applied = 0usize;
     for statement in &statements {
         if executor.execute(statement).await.is_err() {
-            if applied > 0 {
-                let rollback = build_password_rotation(
-                    &identity,
-                    &required("PROXIMA_MYSQL_ACCOUNT_HOST")?,
-                    &old_runtime.password,
-                    &old_migration.password,
-                ).map_err(|_| "credential rotation failed and rollback plan could not be built".to_owned())?;
-                let mut rollback_failed = false;
-                for rollback_statement in rollback {
-                    if executor.execute(&rollback_statement).await.is_err() {
-                        rollback_failed = true;
-                    }
-                }
-                if rollback_failed {
-                    return Err("credential rotation failed and MySQL rollback was unsuccessful; manual reconciliation is required".into());
+            // A lost response is ambiguous: MySQL may have applied the ALTER
+            // USER before the connection failed. Restore both old passwords,
+            // even when the first command appears to have failed.
+            let rollback = build_password_rotation(
+                &identity,
+                &required("PROXIMA_MYSQL_ACCOUNT_HOST")?,
+                &old_runtime.password,
+                &old_migration.password,
+            ).map_err(|_| "credential rotation failed and rollback plan could not be built".to_owned())?;
+            let mut rollback_failed = false;
+            for rollback_statement in rollback {
+                if executor.execute(&rollback_statement).await.is_err() {
+                    rollback_failed = true;
                 }
             }
-            return Err("MySQL rejected the credential rotation; the previous credentials remain active".into());
+            if rollback_failed {
+                return Err("credential rotation outcome is ambiguous and MySQL rollback was unsuccessful; manual reconciliation is required".into());
+            }
+            return Err("MySQL credential rotation failed; previous database credentials were restored".into());
         }
-        applied += 1;
     }
 
     let gateway_password = match store.rotate_tenant_credentials(
