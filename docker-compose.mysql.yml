@@ -5,14 +5,70 @@ services:
     restart: unless-stopped
     environment:
       MYSQL_ROOT_PASSWORD: proxima-mysql-dev-only
-      MYSQL_ROOT_HOST: 127.0.0.1
+      MYSQL_ROOT_HOST: "%"
       MYSQL_DATABASE: proxima_test
     ports:
       - "127.0.0.1:3307:3306"
+    volumes:
+      - ./dev/mysql-certs/ca.pem:/run/mysql-certs/ca.pem:ro
+      - ./dev/mysql-certs/mysql-server-cert.pem:/run/mysql-certs/server-cert.pem:ro
+      - ./dev/mysql-certs/mysql-server-key.pem:/run/mysql-certs/server-key.pem:ro
+    networks:
+      mysql-isolation:
+        ipv4_address: 172.31.90.2
     command:
+      - --ssl-ca=/run/mysql-certs/ca.pem
+      - --ssl-cert=/run/mysql-certs/server-cert.pem
+      - --ssl-key=/run/mysql-certs/server-key.pem
       - --require_secure_transport=OFF
     healthcheck:
       test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
       interval: 3s
       timeout: 3s
       retries: 30
+
+  mysql-gateway:
+    profiles: ["gateway"]
+    build:
+      context: .
+      dockerfile: Dockerfile.mysql-gateway
+    container_name: proxima-mysql-gateway
+    restart: unless-stopped
+    user: "0:0"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp
+    environment:
+      PROXIMA_MYSQL_LISTEN_ADDR: 0.0.0.0:13306
+      PROXIMA_MYSQL_UPSTREAM_HOST: mysql-test
+      PROXIMA_MYSQL_UPSTREAM_PORT: "3306"
+      PROXIMA_MYSQL_UPSTREAM_SERVER_NAME: mysql-test
+      PROXIMA_MYSQL_UPSTREAM_CA_FILE: /run/mysql-certs/ca.pem
+      PROXIMA_MYSQL_TLS_CERT_FILE: /run/mysql-certs/gateway-cert.pem
+      PROXIMA_MYSQL_TLS_KEY_FILE: /run/mysql-certs/gateway-key.pem
+      PROXIMA_MYSQL_SECRET_STORE_FILE: /var/lib/proxima-mysql/tenants.enc
+      PROXIMA_MYSQL_SECRET_STORE_KEY_FILE: /run/secrets/mysql-store-key
+      PROXIMA_MYSQL_TENANT_ASSERTION_KEY: \${PROXIMA_MYSQL_TENANT_ASSERTION_KEY:-}
+      PROXIMA_MYSQL_MAX_CONNECTIONS: "128"
+    ports:
+      - "127.0.0.1:13306:13306"
+    volumes:
+      - ./dev/mysql-certs:/run/mysql-certs:ro
+      - ./dev/mysql-secrets/mysql-store-key:/run/secrets/mysql-store-key:ro
+      - ./dev/mysql-data:/var/lib/proxima-mysql:ro
+    networks:
+      mysql-isolation:
+        ipv4_address: 172.31.90.3
+    depends_on:
+      mysql-test:
+        condition: service_healthy
+
+networks:
+  mysql-isolation:
+    ipam:
+      config:
+        - subnet: 172.31.90.0/24
