@@ -5,6 +5,11 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 Push-Location $repoRoot
 $composeFile = Join-Path $repoRoot "docker-compose.mysql.yml"
 $rootPassword = "proxima-mysql-dev-only"
+$adminRandom = New-Object byte[] 32
+$adminRng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+$adminRng.GetBytes($adminRandom)
+$adminRng.Dispose()
+$adminPassword = [BitConverter]::ToString($adminRandom).Replace("-", "").ToLowerInvariant()
 $tenantId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 $gatewayUsername = "gateway_smoke_test"
 $tenantDatabase = "ap_t_aaaaaaaaaaaa4aaa8aaaaaaaaaaaaaaa"
@@ -69,8 +74,8 @@ try {
     $env:PROXIMA_MYSQL_UPSTREAM_PORT = "3307"
     $env:PROXIMA_MYSQL_UPSTREAM_SERVER_NAME = "mysql-test"
     $env:PROXIMA_MYSQL_UPSTREAM_CA_FILE = $caFile
-    $env:PROXIMA_MYSQL_PROVISIONING_USER = "root"
-    $env:PROXIMA_MYSQL_PROVISIONING_PASSWORD = $rootPassword
+    $env:PROXIMA_MYSQL_PROVISIONING_USER = "proxima_provisioner"
+    $env:PROXIMA_MYSQL_PROVISIONING_PASSWORD = $adminPassword
     $env:PROXIMA_MYSQL_ACCOUNT_HOST = $accountHost
     $env:PROXIMA_MYSQL_SECRET_STORE_FILE = $storeFile
     $env:PROXIMA_MYSQL_SECRET_STORE_KEY_FILE = $storeKeyFile
@@ -81,6 +86,13 @@ try {
     Write-Host "--- Start disposable MySQL 8.4 ---" -ForegroundColor Cyan
     & docker compose -f $composeFile up -d --wait mysql-test
     if ($LASTEXITCODE -ne 0) { throw "MySQL 8.4 did not become healthy." }
+
+    $provisionerSql = @"
+DROP USER IF EXISTS 'proxima_provisioner'@'%';
+CREATE USER 'proxima_provisioner'@'%' IDENTIFIED BY '$adminPassword' REQUIRE SSL;
+GRANT ALL PRIVILEGES ON *.* TO 'proxima_provisioner'@'%' WITH GRANT OPTION;
+"@
+    Invoke-RootSql -Sql $provisionerSql | Out-Null
 
     Write-Host "--- Provision dedicated test tenant ---" -ForegroundColor Cyan
     $provisionOutput = Invoke-AdminCli -Arguments @("provision", $tenantId, $gatewayUsername)
@@ -144,6 +156,11 @@ DROP USER IF EXISTS '$migrationUser'@'$accountHost';
     }
     if ($gatewayStarted) {
         & docker compose -f $composeFile --profile gateway stop mysql-gateway | Out-Null
+    }
+    try {
+        Invoke-RootSql -Sql "DROP USER IF EXISTS 'proxima_provisioner'@'%';" | Out-Null
+    } catch {
+        Write-Warning "Could not remove the disposable MySQL provisioning account: $_"
     }
     Pop-Location
 }
