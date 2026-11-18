@@ -111,4 +111,5 @@ DROP DATABASE IF EXISTS ap_test_tenant_a;
 DROP DATABASE IF EXISTS ap_test_tenant_b;
 "@
     $null = Invoke-MySql -User "root" -Password $rootPassword -Sql $cleanup
+    & docker compose -f $composeFile down -v --remove-orphans | Out-Null
 }
