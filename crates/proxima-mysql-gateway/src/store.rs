@@ -126,6 +126,25 @@ impl EncryptedTenantStore {
         Ok(Self { path, key, document: RwLock::new(document) })
     }
 
+    /// Refresh the in-memory snapshot from the atomically replaced encrypted
+    /// file. Called at connection authorization boundaries so a gateway process
+    /// observes provisioning and revocation performed by the admin CLI.
+    pub fn reload_from_disk(&self) -> Result<(), StoreError> {
+        reject_symlink_if_present(&self.path)?;
+        let document = if self.path.exists() {
+            let encrypted = read_bounded(&self.path)?;
+            decrypt_document(&self.key, &encrypted)?
+        } else {
+            StoreDocument { version: 1, ..StoreDocument::default() }
+        };
+        if document.version != 1 {
+            return Err(StoreError::CorruptStore);
+        }
+        let mut current = self.document.write().map_err(|_| StoreError::StoreUnavailable)?;
+        *current = document;
+        Ok(())
+    }
+
     /// Register a new gateway account and its matching upstream runtime
     /// credential. The cleartext gateway password is returned exactly once;
     /// only its MySQL-compatible double-SHA256 verifier is persisted.
@@ -139,6 +158,7 @@ impl EncryptedTenantStore {
         migration_username: &str,
         migration_password: &str,
     ) -> Result<String, StoreError> {
+        self.reload_from_disk()?;
         validate_gateway_username(gateway_username)?;
         let identity = MySqlTenantIdentity::for_tenant(tenant_id);
         if upstream_username != identity.runtime_username
@@ -198,6 +218,7 @@ impl EncryptedTenantStore {
     /// runtime credential. Existing sessions are not force-closed by this
     /// operation; callers must drain/terminate them separately.
     pub fn revoke_tenant(&self, tenant_id: Uuid) -> Result<(), StoreError> {
+        self.reload_from_disk()?;
         let mut document = self.document.write().map_err(|_| StoreError::StoreUnavailable)?;
         let mut next = document.clone();
         for account in &mut next.accounts {
@@ -218,6 +239,7 @@ impl EncryptedTenantStore {
         username: &str,
         credential: GatewayCredentialMaterial,
     ) -> Result<String, StoreError> {
+        self.reload_from_disk()?;
         validate_gateway_username(username)?;
         let (password, verifier) = credential.into_parts();
         let mut document = self.document.write().map_err(|_| StoreError::StoreUnavailable)?;
@@ -238,6 +260,7 @@ impl EncryptedTenantStore {
         tenant_id: Uuid,
         password: &str,
     ) -> Result<(), StoreError> {
+        self.reload_from_disk()?;
         if !valid_password(password) {
             return Err(StoreError::InvalidAccount);
         }
@@ -257,6 +280,7 @@ impl EncryptedTenantStore {
         tenant_id: Uuid,
         password: &str,
     ) -> Result<(), StoreError> {
+        self.reload_from_disk()?;
         if !valid_password(password) {
             return Err(StoreError::InvalidAccount);
         }
@@ -312,6 +336,7 @@ impl Drop for EncryptedTenantStore {
 
 impl TenantAccountDirectory for EncryptedTenantStore {
     fn find_account(&self, username: &str) -> Result<Option<TenantAccount>, AccountError> {
+        self.reload_from_disk().map_err(|_| AccountError::DirectoryUnavailable)?;
         let document = self.document.read().map_err(|_| AccountError::DirectoryUnavailable)?;
         let Some(account) = document.accounts.iter()
             .find(|account| account.username == username && account.enabled)
@@ -332,6 +357,7 @@ impl TenantAccountDirectory for EncryptedTenantStore {
 
 impl TenantUpstreamCredentialStore for EncryptedTenantStore {
     fn load_runtime_credentials(&self, tenant_id: Uuid) -> Result<Option<TenantUpstreamCredentials>, AccountError> {
+        self.reload_from_disk().map_err(|_| AccountError::DirectoryUnavailable)?;
         let document = self.document.read().map_err(|_| AccountError::DirectoryUnavailable)?;
         let Some(entry) = document.upstream.iter()
             .find(|entry| entry.tenant_id == tenant_id.to_string())
@@ -348,6 +374,7 @@ impl TenantUpstreamCredentialStore for EncryptedTenantStore {
 
 impl TenantMigrationCredentialStore for EncryptedTenantStore {
     fn load_migration_credentials(&self, tenant_id: Uuid) -> Result<Option<TenantMigrationCredentials>, AccountError> {
+        self.reload_from_disk().map_err(|_| AccountError::DirectoryUnavailable)?;
         let document = self.document.read().map_err(|_| AccountError::DirectoryUnavailable)?;
         let Some(entry) = document.migration.iter()
             .find(|entry| entry.tenant_id == tenant_id.to_string())
