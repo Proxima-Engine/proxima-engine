@@ -661,23 +661,23 @@ mod tests {
 
     #[test]
     fn admin_executor_accepts_only_tenant_scoped_ddl() {
-        assert!(is_allowed_admin_statement("CREATE DATABASE `ap_t_123` CHARACTER SET utf8mb4"));
-        assert!(is_allowed_admin_statement("CREATE USER 'ap_r_123'@'127.0.0.1' IDENTIFIED BY 'secret' REQUIRE SSL"));
-        assert!(is_allowed_admin_statement("GRANT SELECT ON `ap_t_123`.* TO 'ap_r_123'@'127.0.0.1'"));
-        assert!(is_allowed_admin_statement("ALTER USER 'ap_m_123'@'127.0.0.1' ACCOUNT LOCK"));
-        assert!(is_allowed_admin_statement("REVOKE ALL PRIVILEGES, GRANT OPTION FROM 'ap_r_123'@'127.0.0.1'"));
-        assert!(is_allowed_admin_statement("DROP USER IF EXISTS 'ap_r_123'@'127.0.0.1'"));
-        assert!(is_allowed_admin_statement("DROP DATABASE `ap_t_123`"));
-        assert!(is_allowed_admin_statement("DROP DATABASE ap_t_123"));
+        assert!(is_allowed_admin_statement("CREATE DATABASE `ap_t_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa` CHARACTER SET utf8mb4"));
+        assert!(is_allowed_admin_statement("CREATE USER 'ap_r_bbbbbbbbbbbbbbbbbbbbbbbbbbb'@'127.0.0.1' IDENTIFIED BY 'secret' REQUIRE SSL"));
+        assert!(is_allowed_admin_statement("GRANT SELECT ON `ap_t_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`.* TO 'ap_r_bbbbbbbbbbbbbbbbbbbbbbbbbbb'@'127.0.0.1'"));
+        assert!(is_allowed_admin_statement("ALTER USER 'ap_m_ccccccccccccccccccccccccccc'@'127.0.0.1' ACCOUNT LOCK"));
+        assert!(is_allowed_admin_statement("REVOKE ALL PRIVILEGES, GRANT OPTION FROM 'ap_r_bbbbbbbbbbbbbbbbbbbbbbbbbbb'@'127.0.0.1'"));
+        assert!(is_allowed_admin_statement("DROP USER IF EXISTS 'ap_r_bbbbbbbbbbbbbbbbbbbbbbbbbbb'@'127.0.0.1'"));
+        assert!(is_allowed_admin_statement("DROP DATABASE `ap_t_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`"));
+        assert!(is_allowed_admin_statement("DROP DATABASE ap_t_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
         assert!(!is_allowed_admin_statement("SELECT 1"));
         assert!(!is_allowed_admin_statement("GRANT ALL PRIVILEGES ON *.* TO 'attacker'@'%'"));
         assert!(!is_allowed_admin_statement("CREATE USER 'root'@'%' IDENTIFIED BY 'secret'"));
-        assert!(!is_allowed_admin_statement("CREATE USER 'ap_r_123'@'%' IDENTIFIED BY 'secret'"));
-        assert!(!is_allowed_admin_statement("GRANT SELECT ON `ap_t_123`.* TO 'ap_r_123'@'%'"));
+        assert!(!is_allowed_admin_statement("CREATE USER 'ap_r_bbbbbbbbbbbbbbbbbbbbbbbbbbb'@'%' IDENTIFIED BY 'secret'"));
+        assert!(!is_allowed_admin_statement("GRANT SELECT ON `ap_t_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`.* TO 'ap_r_bbbbbbbbbbbbbbbbbbbbbbbbbbb'@'%'"));
         assert!(!is_allowed_admin_statement("DROP DATABASE mysql"));
         assert!(!is_allowed_admin_statement("CREATE DATABASE `ap_t_short`"));
         assert!(!is_allowed_admin_statement("CREATE USER 'ap_r_short'@'127.0.0.1' IDENTIFIED BY 'secret'"));
-        assert!(!is_allowed_admin_statement("CREATE DATABASE `ap_t_123`; DROP DATABASE mysql"));
+        assert!(!is_allowed_admin_statement("CREATE DATABASE `ap_t_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`; DROP DATABASE mysql"));
     }
 
     #[tokio::test]
