@@ -1,0 +1,11 @@
+[package]
+name = "proxima-mysql-gateway"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Isolated MySQL protocol and tenant-boundary gateway primitives for Agata Proxima"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
