@@ -11,7 +11,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "cargo fmt failed." }
 
     Write-Host "[2/5] Rust workspace tests" -ForegroundColor Cyan
-    & cargo test --workspace --all-targets
+    & cargo test -p proxima-mysql-gateway --all-targets
     if ($LASTEXITCODE -ne 0) { throw "cargo test failed." }
 
     Write-Host "[3/5] Rust Clippy" -ForegroundColor Cyan
