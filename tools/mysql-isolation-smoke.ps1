@@ -18,7 +18,7 @@ function Invoke-MySql {
         "mysql-test", "mysql", "--protocol=TCP", "--host=127.0.0.1",
         "--user=$User", "--batch", "--skip-column-names", "--execute=$Sql"
     )
-    if ($RequireTls) { $args += "--ssl-mode=REQUIRED" }
+    if ($RequireTls) { $dockerArgs += "--ssl-mode=REQUIRED" }
     $output = & docker @dockerArgs 2>&1
     $exitCode = $LASTEXITCODE
     return [pscustomobject]@{ ExitCode = $exitCode; Output = ($output -join [Environment]::NewLine) }
