@@ -882,16 +882,16 @@ mod tests {
             &identity_b.migration_username, &"4".repeat(64), key_b,
         ).unwrap();
 
-        assert_eq!(store.load_assertion_key(tenant_a).unwrap().unwrap(), key_a);
-        assert_eq!(store.load_assertion_key(tenant_b).unwrap().unwrap(), key_b);
+        assert_eq!(store.load_assertion_key(tenant_a).unwrap().unwrap().as_slice(), key_a.as_slice());
+        assert_eq!(store.load_assertion_key(tenant_b).unwrap().unwrap().as_slice(), key_b.as_slice());
 
         store.rotate_assertion_key(tenant_a, key_a_next).unwrap();
-        assert_eq!(store.load_assertion_key(tenant_a).unwrap().unwrap(), key_a_next);
-        assert_eq!(store.load_assertion_key(tenant_b).unwrap().unwrap(), key_b);
+        assert_eq!(store.load_assertion_key(tenant_a).unwrap().unwrap().as_slice(), key_a.as_slice()_next);
+        assert_eq!(store.load_assertion_key(tenant_b).unwrap().unwrap().as_slice(), key_b.as_slice());
 
         store.revoke_tenant(tenant_a).unwrap();
         assert!(store.load_assertion_key(tenant_a).unwrap().is_none());
-        assert_eq!(store.load_assertion_key(tenant_b).unwrap().unwrap(), key_b);
+        assert_eq!(store.load_assertion_key(tenant_b).unwrap().unwrap().as_slice(), key_b.as_slice());
     }
 
     #[test]
