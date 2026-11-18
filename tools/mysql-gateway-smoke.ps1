@@ -231,6 +231,13 @@ GRANT ALL PRIVILEGES ON *.* TO 'proxima_provisioner'@'%' WITH GRANT OPTION;
     }
     $gatewayPassword = $gatewayPasswordLine.Substring("Gateway password (shown once): ".Length).Trim()
     $assertion = $assertionLine.Substring("LOCAL DEVELOPMENT ASSERTION (60 minutes): ".Length).Trim()
+    $migrationUsernameLine = ($provisionOutput -split '\r?\n' | Where-Object { $_ -like "Migration username: *" } | Select-Object -Last 1)
+    $migrationPasswordLine = ($provisionOutput -split '\r?\n' | Where-Object { $_ -like "Migration password (shown once; store in the customer secret manager): *" } | Select-Object -Last 1)
+    if (-not $migrationUsernameLine -or -not $migrationPasswordLine) {
+        throw "Provisioning did not return the one-time migration credentials."
+    }
+    $migrationUsername = $migrationUsernameLine.Substring("Migration username: ".Length).Trim()
+    $migrationPassword = $migrationPasswordLine.Substring("Migration password (shown once; store in the customer secret manager): ".Length).Trim()
 
     Write-Host "--- Prepare tenant and cross-tenant tables ---" -ForegroundColor Cyan
     $setupSql = @"
@@ -241,6 +248,19 @@ CREATE TABLE IF NOT EXISTS $otherDatabase.records (id INT PRIMARY KEY, secret VA
 INSERT INTO $otherDatabase.records VALUES (1, 'tenant-b-secret') ON DUPLICATE KEY UPDATE secret=VALUES(secret);
 "@
     Invoke-RootSql -Sql $setupSql | Out-Null
+
+    Write-Host "--- Verify the separate migration account from its dedicated source IP ---" -ForegroundColor Cyan
+    & docker compose -f $composeFile --profile gateway up -d --wait mysql-migration-client
+    if ($LASTEXITCODE -ne 0) { throw "Migration-runner test container did not become healthy." }
+    $migrationOwn = Invoke-MigrationSql -User $migrationUsername -Password $migrationPassword -Sql "CREATE TABLE $tenantDatabase.migration_probe (id INT PRIMARY KEY)"
+    if ($migrationOwn.ExitCode -ne 0) { throw "Migration account could not create objects in its own tenant database: $($migrationOwn.Output)" }
+    Write-Host "[PASS] Migration account can perform schema changes in its tenant database" -ForegroundColor Green
+    $migrationCross = Invoke-MigrationSql -User $migrationUsername -Password $migrationPassword -Sql "SELECT secret FROM $otherDatabase.records"
+    if ($migrationCross.ExitCode -eq 0) { throw "Migration account unexpectedly read another tenant database." }
+    Write-Host "[PASS] Migration account cannot read another tenant database" -ForegroundColor Green
+    $migrationGlobal = Invoke-MigrationSql -User $migrationUsername -Password $migrationPassword -Sql "CREATE DATABASE ap_migration_global_forbidden"
+    if ($migrationGlobal.ExitCode -eq 0) { throw "Migration account unexpectedly created a global database." }
+    Write-Host "[PASS] Migration account cannot create databases globally" -ForegroundColor Green
 
     Write-Host "--- Start standalone MySQL gateway container ---" -ForegroundColor Cyan
     & docker compose -f $composeFile --profile gateway up -d --wait mysql-gateway
