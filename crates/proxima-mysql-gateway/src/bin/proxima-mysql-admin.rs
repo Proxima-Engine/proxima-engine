@@ -146,11 +146,11 @@ async fn provision(tenant_value: String, gateway_username: String) -> Result<(),
         assertion_key_hex.zeroize();
         return Err("PROXIMA_MYSQL_TENANT_ASSERTION_KEY must be a tenant-scoped 32-byte key encoded as 64 hexadecimal characters".into());
     }
-    let decoded_assertion_key = hex::decode(&assertion_key_hex);
+    // The existing Control Plane signs with the 64 ASCII hexadecimal
+    // characters returned by organization_tenant_signing_key. Preserve those
+    // exact bytes; decoding them would produce a different HMAC key.
+    let assertion_key = Zeroizing::new(assertion_key_hex.as_bytes().to_vec());
     assertion_key_hex.zeroize();
-    let assertion_key = Zeroizing::new(
-        decoded_assertion_key.map_err(|_| "invalid tenant assertion key".to_owned())?
-    );
 
     let identity = MySqlTenantIdentity::for_tenant(tenant_id);
     let plan = build_provisioning_plan(
