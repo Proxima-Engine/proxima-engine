@@ -18,7 +18,7 @@ The branch currently contains:
 - An AES-256-GCM encrypted local tenant registry for gateway verifiers, tenant-scoped assertion keys and upstream runtime/migration credentials.
 - A provisioning CLI that writes the tenant record before marking the DDL journal complete and compensates the DDL if local registration fails.
 
-**It is still experimental and is not a production-supported database integration.** No real MySQL end-to-end gateway test or customer deployment has passed yet. The private Control Plane API, dashboard, tenant lifecycle, fleet configuration and production packaging are not integrated. Do not route customer traffic through this branch.
+**It is still experimental and is not a production-supported database integration.** No real MySQL end-to-end gateway test or customer deployment has passed yet. The private Control Plane now has provider-aware tenant metadata, bootstrap, registration, token issuance, assertion-key rotation and revocation-state APIs, plus a dashboard provider selector. Live gateway-to-Control-Plane synchronization, automated fleet distribution, production packaging and verified customer deployment remain incomplete. Do not route production customer traffic through this branch.
 
 ## Why a separate gateway
 
@@ -61,7 +61,7 @@ Shared-table multi-tenant schemas are explicitly unsupported by this model. If a
 6. The gateway loads that tenant's runtime password from the encrypted local registry.
 7. The gateway connects to the upstream MySQL server over verified TLS using that tenant's runtime account.
 8. MySQL independently enforces the tenant database grants.
-9. The client connection remains bound to that tenant until it closes. Assertions are checked when a physical client connection is established; expiry does not retroactively terminate an already authenticated session. Missing, malformed, expired, revoked or mismatched context fails closed.
+9. The client connection remains bound to that tenant until it closes. Assertions and account state are checked at command boundaries, and active sessions are polled once per second for expiry or revocation. Expired or revoked sessions are closed. A query already executing when revocation occurs can be interrupted when the upstream connection is closed. Missing, malformed, expired, revoked or mismatched context fails closed.
 
 The MySQL upstream endpoint must not be reachable directly by untrusted application networks. If clients can bypass the gateway and connect with some other privileged credential, the gateway cannot enforce the intended boundary.
 
@@ -106,7 +106,7 @@ Required environment variables:
 - PROXIMA_MYSQL_SECRET_STORE_FILE
 - PROXIMA_MYSQL_SECRET_STORE_KEY_FILE
 - PROXIMA_MYSQL_PROVISIONING_JOURNAL_FILE
-- PROXIMA_MYSQL_TENANT_ASSERTION_KEY — the tenant/organization-scoped signing key supplied by the authenticated Control Plane as 64 ASCII hexadecimal characters. Preserve this exact string representation when deriving the HMAC key; do not hex-decode it
+- PROXIMA_MYSQL_TENANT_ASSERTION_KEY — the versioned, tenant-specific signing key returned by the authenticated Control Plane bootstrap endpoint as 64 ASCII hexadecimal characters. Preserve this exact string representation as HMAC key bytes; do not hex-decode it
 
 Optional timeout/size variables:
 
@@ -137,7 +137,7 @@ If provisioning is interrupted by a process crash or an ambiguous MySQL response
 
 The acknowledgement records an operator note; it does not change MySQL state or perform cleanup.
 
-For local-only testing, setting PROXIMA_MYSQL_ISSUE_LOCAL_ASSERTION=true allows the CLI to print a 60-minute assertion signed with PROXIMA_MYSQL_TENANT_ASSERTION_KEY. **Do not enable this in production.** Production assertions must be issued by the authenticated Control Plane; that API integration is not implemented yet.
+For local-only testing, setting PROXIMA_MYSQL_ISSUE_LOCAL_ASSERTION=true allows the CLI to print a 60-minute assertion signed with PROXIMA_MYSQL_TENANT_ASSERTION_KEY. **Do not enable this in production.** Production assertions are issued by the authenticated Control Plane using the current versioned tenant-specific key. The customer operator retrieves that key through the no-store bootstrap endpoint and places it in the encrypted local registry; the gateway does not fetch or synchronize keys automatically.
 
 MySQL DDL implicitly commits. The append-only journal records each operation and fsyncs every event. If the process crashes during provisioning, the tenant is blocked from automatic reprovisioning until an operator inspects the MySQL state and explicitly acknowledges reconciliation. Never delete or edit the journal to bypass this block.
 
@@ -167,7 +167,7 @@ Run the separate gateway:
 
     cargo run -p proxima-mysql-gateway
 
-The gateway loads each tenant's assertion verification key from the encrypted registry after authenticating that tenant's gateway account. The shared assertion key is not present in gateway process configuration. The provisioning process stores the Control Plane-derived tenant/organization key with that tenant's encrypted credentials. The current Control Plane signer uses the 64 ASCII hexadecimal characters returned by its organization key derivation directly as HMAC key bytes; the gateway intentionally matches that representation. Rotate a tenant key with `cargo run -p proxima-mysql-gateway --bin proxima-mysql-admin -- rotate-assertion-key <tenant-uuid>` after coordinating the same key change with the Control Plane. New connections using old assertions will fail after the registry key changes; existing authenticated sessions are not automatically terminated. The gateway uses its own TLS certificate for client connections and a separately verified CA/server name for the upstream MySQL connection. The Docker Compose profile runs as UID 65532 with a read-only root filesystem, read-only encrypted-registry mount, and only the CA certificate plus gateway certificate/key mounted into the container. It does not mount the CA private key or MySQL server private key into the gateway. Do not disable upstream certificate verification in production.
+The gateway loads each tenant's assertion verification key from the encrypted registry after authenticating that tenant's gateway account. The key is tenant-specific and versioned; it is derived by the Control Plane from the organization signing key, tenant UUID and key version. The 64 ASCII hexadecimal characters are used directly as HMAC key bytes; do not hex-decode them. Retrieve a new key from the Control Plane assertion-key rotation endpoint, set it as `PROXIMA_MYSQL_TENANT_ASSERTION_KEY`, then run `cargo run -p proxima-mysql-gateway --bin proxima-mysql-admin -- rotate-assertion-key <tenant-uuid>` to update the encrypted registry. Coordinate the update before issuing new tokens. The gateway closes active sessions after the registry reports key rotation or revocation. The gateway uses its own TLS certificate for client connections and a separately verified CA/server name for the upstream MySQL connection. The Docker Compose profile runs as UID 65532 with a read-only root filesystem, read-only encrypted-registry mount, and only the CA certificate plus gateway certificate/key mounted into the container. It does not mount the CA private key or MySQL server private key into the gateway. Do not disable upstream certificate verification in production.
 
 ## Verification
 
@@ -194,7 +194,8 @@ Before production support, real MySQL 8.4 tests must cover:
 - Provisioning crash recovery, ambiguous DDL outcomes and journal reconciliation.
 - Definer-security views, routines and triggers.
 - MySQL restart, gateway restart and encrypted-store recovery.
-- Control Plane tenant lifecycle, audit, node enrollment and multi-node secret distribution.
+- Prepared statements, transactions, multi-result responses and full driver compatibility.
+- Automatic gateway-to-Control-Plane key synchronization, node enrollment integration and multi-node secret distribution.
 
 ## Application connection contract
 
