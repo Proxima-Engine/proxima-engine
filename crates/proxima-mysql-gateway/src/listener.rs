@@ -144,9 +144,13 @@ impl MySqlGateway {
         )?;
         tcp.write_all(&greeting).await.map_err(|_| GatewayError::TransportFailed)?;
 
-        let ssl_request = read_packet(&mut tcp, self.config.max_packet_size)
-            .await
-            .map_err(|_| GatewayError::ClientHandshakeRejected)?;
+        let ssl_request = timeout(
+            self.config.handshake_timeout,
+            read_packet(&mut tcp, self.config.max_packet_size),
+        )
+        .await
+        .map_err(|_| GatewayError::ClientHandshakeRejected)?
+        .map_err(|_| GatewayError::ClientHandshakeRejected)?;
         verify_sequence(&ssl_request, 1)?;
         if !is_ssl_request(&ssl_request.payload)? {
             send_error(
@@ -175,9 +179,13 @@ impl MySqlGateway {
         .map_err(|_| GatewayError::ClientTlsFailed)?
         .map_err(|_| GatewayError::ClientTlsFailed)?;
 
-        let handshake_packet = read_packet(&mut client, self.config.max_packet_size)
-            .await
-            .map_err(|_| GatewayError::ClientHandshakeRejected)?;
+        let handshake_packet = timeout(
+            self.config.handshake_timeout,
+            read_packet(&mut client, self.config.max_packet_size),
+        )
+        .await
+        .map_err(|_| GatewayError::ClientHandshakeRejected)?
+        .map_err(|_| GatewayError::ClientHandshakeRejected)?;
         verify_sequence(&handshake_packet, 2)?;
         if handshake_packet.payload.len() < 4 {
             send_error(
