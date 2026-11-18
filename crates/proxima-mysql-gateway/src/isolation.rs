@@ -98,11 +98,13 @@ pub fn generate_mysql_password() -> Result<String, MySqlIsolationError> {
 
 pub fn build_provisioning_plan(
     tenant_id: Uuid,
-    account_host: &str,
+    runtime_account_host: &str,
+    migration_account_host: &str,
     runtime_password: &str,
     migration_password: &str,
 ) -> Result<MySqlProvisioningPlan, MySqlIsolationError> {
-    validate_host(account_host)?;
+    validate_host(runtime_account_host)?;
+    validate_host(migration_account_host)?;
     validate_password(runtime_password)?;
     validate_password(migration_password)?;
     if runtime_password == migration_password {
@@ -119,7 +121,7 @@ pub fn build_provisioning_plan(
         Zeroizing::new(format!("GRANT SELECT, INSERT, UPDATE, DELETE ON {database}.* TO {runtime_user}")),
         Zeroizing::new(format!("GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX, DROP, REFERENCES, CREATE VIEW, SHOW VIEW, TRIGGER, EVENT, CREATE ROUTINE, ALTER ROUTINE, EXECUTE ON {database}.* TO {migration_user}")),
     ];
-    Ok(MySqlProvisioningPlan { identity, account_host: account_host.to_owned(), statements })
+    Ok(MySqlProvisioningPlan { identity, statements })
 }
 
 pub fn build_runtime_password_rotation(
@@ -152,30 +154,25 @@ pub fn build_migration_password_rotation(
 
 pub fn build_password_rotation(
     identity: &MySqlTenantIdentity,
-    account_host: &str,
+    runtime_account_host: &str,
+    migration_account_host: &str,
     runtime_password: &str,
     migration_password: &str,
 ) -> Result<Vec<Zeroizing<String>>, MySqlIsolationError> {
-    validate_host(account_host)?;
-    validate_password(runtime_password)?;
-    validate_password(migration_password)?;
-    if runtime_password == migration_password {
-        return Err(MySqlIsolationError::InvalidPassword);
-    }
-    Ok(vec![
-        Zeroizing::new(format!("ALTER USER {} IDENTIFIED BY '{}' REQUIRE SSL", quote_account(&identity.runtime_username, runtime_account_host), runtime_password)),
-        Zeroizing::new(format!("ALTER USER {} IDENTIFIED BY '{}' REQUIRE SSL", quote_account(&identity.migration_username, migration_account_host), migration_password)),
-    ])
+    let mut statements = build_runtime_password_rotation(identity, runtime_account_host, runtime_password)?;
+    statements.extend(build_migration_password_rotation(identity, migration_account_host, migration_password)?);
+    Ok(statements)
 }
 
-/// Locks both tenant accounts and removes grants. It never drops customer data.
 pub fn build_revocation(
     identity: &MySqlTenantIdentity,
-    account_host: &str,
+    runtime_account_host: &str,
+    migration_account_host: &str,
 ) -> Result<Vec<String>, MySqlIsolationError> {
-    validate_host(account_host)?;
-    let runtime_user = quote_account(&identity.runtime_username, account_host);
-    let migration_user = quote_account(&identity.migration_username, account_host);
+    validate_host(runtime_account_host)?;
+    validate_host(migration_account_host)?;
+    let runtime_user = quote_account(&identity.runtime_username, runtime_account_host);
+    let migration_user = quote_account(&identity.migration_username, migration_account_host);
     Ok(vec![
         format!("ALTER USER {runtime_user} ACCOUNT LOCK"),
         format!("ALTER USER {migration_user} ACCOUNT LOCK"),
