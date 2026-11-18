@@ -22,6 +22,7 @@ use tokio::{
     time::timeout,
 };
 use tokio_rustls::{client::TlsStream, TlsConnector};
+use zeroize::Zeroizing;
 
 type ProbeResult<T> = Result<T, Box<dyn Error + Send + Sync>>;
 
@@ -43,8 +44,8 @@ async fn run() -> ProbeResult<()> {
     let tls_name = args.next().ok_or("missing TLS server name")?;
     let ca_file = args.next().ok_or("missing CA file")?;
     let username = args.next().ok_or("missing gateway username")?;
-    let password = args.next().ok_or("missing gateway password")?;
-    let assertion = args.next().ok_or("missing tenant assertion")?;
+    let password = Zeroizing::new(args.next().ok_or("missing gateway password")?);
+    let assertion = Zeroizing::new(args.next().ok_or("missing tenant assertion")?);
     let tenant_database = args.next().ok_or("missing tenant database name")?;
     let other_database = args.next().ok_or("missing cross-tenant database name")?;
     let expect_denied = match args.next() {
