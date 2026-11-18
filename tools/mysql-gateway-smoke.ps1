@@ -83,6 +83,28 @@ function Invoke-Probe {
     Write-Host ($output -join [Environment]::NewLine)
 }
 
+function New-LocalTenantAssertion {
+    param(
+        [Parameter(Mandatory)][string]$TenantId,
+        [Parameter(Mandatory)][string]$SigningKey,
+        [int]$TtlSeconds = 3600
+    )
+    $expiresAt = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + $TtlSeconds
+    $message = "proxima-tenant-token:$TenantId:$expiresAt"
+    $keyBytes = [System.Text.Encoding]::UTF8.GetBytes($SigningKey)
+    $messageBytes = [System.Text.Encoding]::UTF8.GetBytes($message)
+    $hmac = [System.Security.Cryptography.HMACSHA256]::new($keyBytes)
+    try {
+        $signature = [BitConverter]::ToString($hmac.ComputeHash($messageBytes)).Replace("-", "").ToLowerInvariant()
+    }
+    finally {
+        $hmac.Dispose()
+        [Array]::Clear($keyBytes, 0, $keyBytes.Length)
+        [Array]::Clear($messageBytes, 0, $messageBytes.Length)
+    }
+    return "v1.$TenantId.$expiresAt.$signature"
+}
+
 try {
     Write-Host "--- Prepare local TLS and secret material ---" -ForegroundColor Cyan
     & (Join-Path $PSScriptRoot "prepare-mysql-dev-certs.ps1")
@@ -145,6 +167,20 @@ INSERT INTO $otherDatabase.records VALUES (1, 'tenant-b-secret') ON DUPLICATE KE
 
     Write-Host "--- Verify real MySQL protocol and tenant boundaries ---" -ForegroundColor Cyan
     Invoke-Probe -GatewayPassword $gatewayPassword -Assertion $assertion
+
+    Write-Host "--- Rotate tenant assertion key and invalidate old tokens ---" -ForegroundColor Cyan
+    $rotatedKeyBytes = New-Object byte[] 32
+    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    $rng.GetBytes($rotatedKeyBytes)
+    $rng.Dispose()
+    $rotatedAssertionKey = [BitConverter]::ToString($rotatedKeyBytes).Replace("-", "").ToLowerInvariant()
+    [Array]::Clear($rotatedKeyBytes, 0, $rotatedKeyBytes.Length)
+    $env:PROXIMA_MYSQL_TENANT_ASSERTION_KEY = $rotatedAssertionKey
+    Invoke-AdminCli -Arguments @("rotate-assertion-key", $tenantId) | Out-Null
+    Invoke-Probe -GatewayPassword $gatewayPassword -Assertion $assertion -ExpectDenied
+    $rotatedAssertion = New-LocalTenantAssertion -TenantId $tenantId -SigningKey $rotatedAssertionKey
+    Invoke-Probe -GatewayPassword $gatewayPassword -Assertion $rotatedAssertion
+    $assertion = $rotatedAssertion
 
     Write-Host "--- Revoke tenant and verify new connections are rejected ---" -ForegroundColor Cyan
     Invoke-AdminCli -Arguments @("revoke", $tenantId) | Out-Null
