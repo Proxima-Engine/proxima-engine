@@ -129,6 +129,12 @@ impl fmt::Debug for TenantUpstreamCredentials {
 }
 impl Drop for TenantUpstreamCredentials {
     fn drop(&mut self) {
+        use zeroize::Zeroize;
+        self.password.zeroize();
+    }
+}
+impl Drop for TenantUpstreamCredentials {
+    fn drop(&mut self) {
         self.password.zeroize();
     }
 }
@@ -150,6 +156,12 @@ impl fmt::Debug for TenantMigrationCredentials {
             .field("username", &self.username)
             .field("password", &"[REDACTED]")
             .finish()
+    }
+}
+impl Drop for TenantMigrationCredentials {
+    fn drop(&mut self) {
+        use zeroize::Zeroize;
+        self.password.zeroize();
     }
 }
 impl Drop for TenantMigrationCredentials {
