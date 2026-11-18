@@ -271,24 +271,19 @@ async fn rotate(tenant_value: String, gateway_username: String) -> Result<(), St
     let old_runtime = store.load_runtime_credentials(tenant_id)
         .map_err(|_| "could not read tenant runtime credentials".to_owned())?
         .ok_or_else(|| "tenant runtime credentials are not registered".to_owned())?;
-    let old_migration = store.load_migration_credentials(tenant_id)
-        .map_err(|_| "could not read tenant migration credentials".to_owned())?
-        .ok_or_else(|| "tenant migration credentials are not registered".to_owned())?;
 
     let identity = MySqlTenantIdentity::for_tenant(tenant_id);
     let new_runtime_password = Zeroizing::new(generate_mysql_password()
         .map_err(|_| "operating-system random source unavailable".to_owned())?);
-    let new_migration_password = Zeroizing::new(generate_mysql_password()
-        .map_err(|_| "operating-system random source unavailable".to_owned())?);
     let new_gateway_credential = generate_gateway_credential()
         .map_err(|_| "operating-system random source unavailable".to_owned())?;
 
-    let statements = build_password_rotation(
+    let account_host = required("PROXIMA_MYSQL_ACCOUNT_HOST")?;
+    let statements = build_runtime_password_rotation(
         &identity,
-        &required("PROXIMA_MYSQL_ACCOUNT_HOST")?,
+        &account_host,
         &new_runtime_password,
-        &new_migration_password,
-    ).map_err(|_| "invalid MySQL tenant credential rotation plan".to_owned())?;
+    ).map_err(|_| "invalid MySQL runtime credential rotation plan".to_owned())?;
 
     let admin_password = Zeroizing::new(required("PROXIMA_MYSQL_PROVISIONING_PASSWORD")?);
     let upstream = upstream_config()?;
@@ -301,15 +296,11 @@ async fn rotate(tenant_value: String, gateway_username: String) -> Result<(), St
 
     for statement in &statements {
         if executor.execute(statement).await.is_err() {
-            // A lost response is ambiguous: MySQL may have applied the ALTER
-            // USER before the connection failed. Restore both old passwords,
-            // even when the first command appears to have failed.
-            let rollback = build_password_rotation(
+            let rollback = build_runtime_password_rotation(
                 &identity,
-                &required("PROXIMA_MYSQL_ACCOUNT_HOST")?,
+                &account_host,
                 &old_runtime.password,
-                &old_migration.password,
-            ).map_err(|_| "credential rotation failed and rollback plan could not be built".to_owned())?;
+            ).map_err(|_| "runtime credential rotation failed and rollback plan could not be built".to_owned())?;
             let mut rollback_failed = false;
             for rollback_statement in rollback {
                 if executor.execute(&rollback_statement).await.is_err() {
@@ -317,9 +308,9 @@ async fn rotate(tenant_value: String, gateway_username: String) -> Result<(), St
                 }
             }
             if rollback_failed {
-                return Err("credential rotation outcome is ambiguous and MySQL rollback was unsuccessful; manual reconciliation is required".into());
+                return Err("runtime credential rotation outcome is ambiguous and MySQL rollback was unsuccessful; manual reconciliation is required".into());
             }
-            return Err("MySQL credential rotation failed; previous database credentials were restored".into());
+            return Err("MySQL runtime credential rotation failed; the previous runtime password was restored".into());
         }
     }
 
@@ -329,17 +320,14 @@ async fn rotate(tenant_value: String, gateway_username: String) -> Result<(), St
         new_gateway_credential,
         &identity.runtime_username,
         &new_runtime_password,
-        &identity.migration_username,
-        &new_migration_password,
     ) {
         Ok(password) => password,
         Err(_) => {
-            let rollback = build_password_rotation(
+            let rollback = build_runtime_password_rotation(
                 &identity,
-                &required("PROXIMA_MYSQL_ACCOUNT_HOST")?,
+                &account_host,
                 &old_runtime.password,
-                &old_migration.password,
-            ).map_err(|_| "credential store update failed and rollback plan could not be built".to_owned())?;
+            ).map_err(|_| "credential store update failed and runtime rollback plan could not be built".to_owned())?;
             let mut rollback_failed = false;
             for statement in rollback {
                 if executor.execute(&statement).await.is_err() {
@@ -347,16 +335,17 @@ async fn rotate(tenant_value: String, gateway_username: String) -> Result<(), St
                 }
             }
             if rollback_failed {
-                return Err("credential store update failed and MySQL rollback was unsuccessful; manual reconciliation is required".into());
+                return Err("credential store update failed and MySQL runtime rollback was unsuccessful; manual reconciliation is required".into());
             }
-            return Err("credential store update failed; previous MySQL credentials were restored".into());
+            return Err("credential store update failed; previous MySQL runtime credentials were restored".into());
         }
     });
 
-    println!("Tenant credentials rotated.");
+    println!("Gateway and runtime credentials rotated.");
     println!("Gateway username: {gateway_username}");
     println!("Gateway password (shown once): {gateway_password}");
-    println!("Runtime and migration credentials were rotated and stored encrypted; their values were not printed.");
+    println!("Runtime database password remains encrypted in the gateway registry.");
+    println!("The separate migration account and its secret-manager password were not changed.");
     Ok(())
 }
 
