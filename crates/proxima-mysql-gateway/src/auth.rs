@@ -145,31 +145,6 @@ pub trait TenantUpstreamCredentialStore: TenantAssertionKeyStore + Send + Sync {
 }
 
 #[derive(Clone, PartialEq, Eq)]
-pub struct TenantMigrationCredentials {
-    pub tenant_id: Uuid,
-    pub username: String,
-    pub password: String,
-}
-impl fmt::Debug for TenantMigrationCredentials {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("TenantMigrationCredentials")
-            .field("tenant_id", &self.tenant_id)
-            .field("username", &self.username)
-            .field("password", &"[REDACTED]")
-            .finish()
-    }
-}
-impl Drop for TenantMigrationCredentials {
-    fn drop(&mut self) {
-        self.password.zeroize();
-    }
-}
-
-pub trait TenantMigrationCredentialStore: Send + Sync {
-    fn load_migration_credentials(&self, tenant_id: Uuid) -> Result<Option<TenantMigrationCredentials>, AccountError>;
-}
-
-#[derive(Clone, PartialEq, Eq)]
 pub struct AuthenticatedTenantSession {
     pub tenant_id: Uuid,
     pub database_name: String,
