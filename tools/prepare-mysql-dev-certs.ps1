@@ -4,13 +4,14 @@ Set-StrictMode -Version Latest
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $certDir = Join-Path $repoRoot "dev\mysql-certs"
 $secretDir = Join-Path $repoRoot "dev\mysql-secrets"
+$dataDir = Join-Path $repoRoot "dev\mysql-data"
 
 $openssl = Get-Command openssl -ErrorAction SilentlyContinue
 if (-not $openssl) {
     throw "OpenSSL is required. Install Git for Windows (Git Bash includes openssl) or OpenSSL, then reopen PowerShell."
 }
 
-New-Item -ItemType Directory -Force -Path $certDir, $secretDir | Out-Null
+New-Item -ItemType Directory -Force -Path $certDir, $secretDir, $dataDir | Out-Null
 
 $caKey = Join-Path $certDir "ca-key.pem"
 $caCert = Join-Path $certDir "ca.pem"
@@ -102,6 +103,6 @@ $assertionValue = (Get-Content $assertionKey -Raw).Trim()
 "PROXIMA_MYSQL_TENANT_ASSERTION_KEY=$assertionValue" | Set-Content -Encoding ascii (Join-Path $secretDir "mysql-gateway.env")
 
 Write-Host "Local MySQL CA, server/gateway certificates and secret keys are ready." -ForegroundColor Green
-Write-Host "Keep dev\mysql-certs and dev\mysql-secrets private; they are excluded from Git."
+Write-Host "Keep dev\mysql-certs, dev\mysql-secrets and dev\mysql-data private; they are excluded from Git."
 Write-Host "For the gateway Compose profile, set this in the current PowerShell session:"
 Write-Host '$env:PROXIMA_MYSQL_TENANT_ASSERTION_KEY = (Get-Content .\dev\mysql-secrets\tenant-assertion-key.txt -Raw).Trim()'
