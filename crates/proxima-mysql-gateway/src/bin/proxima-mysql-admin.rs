@@ -1,8 +1,15 @@
 use proxima_mysql_gateway::{
-    auth::generate_gateway_credential,
-    isolation::{build_provisioning_plan, generate_mysql_password, MySqlTenantIdentity},
+    auth::{
+        generate_gateway_credential, TenantMigrationCredentialStore,
+        TenantUpstreamCredentialStore,
+    },
+    isolation::{
+        build_password_rotation, build_provisioning_plan, build_revocation,
+        generate_mysql_password, MySqlTenantIdentity,
+    },
     provisioning::{
-        execute_provisioning_with_finalize, FileProvisioningJournal, MySqlAdminExecutor,
+        execute_provisioning_with_finalize, FileProvisioningJournal,
+        MySqlAdminExecutor, MySqlDdlExecutor,
     },
     store::EncryptedTenantStore,
     tenant::TenantAssertion,
@@ -76,7 +83,28 @@ fn main() {
                 _ => Err("usage: proxima-mysql-admin provision <tenant-uuid> <gateway-username>".into()),
             }
         }
-        _ => Err("usage: proxima-mysql-admin provision <tenant-uuid> <gateway-username>".into()),
+        Some("revoke") => {
+            let tenant = args.next();
+            match (tenant, args.next()) {
+                (Some(tenant), None) => match Runtime::new() {
+                    Ok(runtime) => runtime.block_on(revoke(tenant)),
+                    Err(error) => Err(error.to_string()),
+                },
+                _ => Err("usage: proxima-mysql-admin revoke <tenant-uuid>".into()),
+            }
+        }
+        Some("rotate") => {
+            let tenant = args.next();
+            let gateway_username = args.next();
+            match (tenant, gateway_username, args.next()) {
+                (Some(tenant), Some(username), None) => match Runtime::new() {
+                    Ok(runtime) => runtime.block_on(rotate(tenant, username)),
+                    Err(error) => Err(error.to_string()),
+                },
+                _ => Err("usage: proxima-mysql-admin rotate <tenant-uuid> <gateway-username>".into()),
+            }
+        }
+        _ => Err("usage: proxima-mysql-admin <provision|rotate|revoke> ...".into()),
     };
     if let Err(error) = result {
         eprintln!("MySQL provisioning failed: {error}");
@@ -183,3 +211,134 @@ async fn provision(tenant_value: String, gateway_username: String) -> Result<(),
 
     Ok(())
 }
+
+async fn revoke(tenant_value: String) -> Result<(), String> {
+    let tenant_id = uuid::Uuid::parse_str(&tenant_value)
+        .map_err(|_| "tenant ID must be a UUID".to_owned())?;
+    let store = open_store()?;
+
+    // Remove the tenant's gateway and upstream secrets first. The running
+    // gateway reloads this file at each command boundary and denies new work.
+    store.revoke_tenant(tenant_id)
+        .map_err(|_| "could not revoke the tenant in the encrypted gateway registry".to_owned())?;
+
+    let account_host = required("PROXIMA_MYSQL_ACCOUNT_HOST")?;
+    let mut admin_password = required("PROXIMA_MYSQL_PROVISIONING_PASSWORD")?;
+    let upstream = upstream_config()?;
+    let mut executor = MySqlAdminExecutor::connect(
+        &upstream,
+        &required("PROXIMA_MYSQL_PROVISIONING_USER")?,
+        &admin_password,
+        Duration::from_millis(number("PROXIMA_MYSQL_STATEMENT_TIMEOUT_MS", 30_000)?),
+    ).await.map_err(|_| "tenant secrets are revoked locally, but MySQL administrator connection failed; upstream account cleanup needs reconciliation".to_owned())?;
+    admin_password.zeroize();
+
+    let identity = MySqlTenantIdentity::for_tenant(tenant_id);
+    let statements = build_revocation(&identity, &account_host)
+        .map_err(|_| "invalid MySQL tenant account host".to_owned())?;
+    for statement in statements {
+        executor.execute(&statement).await
+            .map_err(|_| "tenant secrets are revoked locally, but MySQL account locking/grant revocation failed; inspect the upstream accounts".to_owned())?;
+    }
+    println!("Tenant revoked. New gateway commands are denied; existing in-flight queries may finish.");
+    Ok(())
+}
+
+async fn rotate(tenant_value: String, gateway_username: String) -> Result<(), String> {
+    let tenant_id = uuid::Uuid::parse_str(&tenant_value)
+        .map_err(|_| "tenant ID must be a UUID".to_owned())?;
+    let store = open_store()?;
+    let old_runtime = store.load_runtime_credentials(tenant_id)
+        .map_err(|_| "could not read tenant runtime credentials".to_owned())?
+        .ok_or_else(|| "tenant runtime credentials are not registered".to_owned())?;
+    let old_migration = store.load_migration_credentials(tenant_id)
+        .map_err(|_| "could not read tenant migration credentials".to_owned())?
+        .ok_or_else(|| "tenant migration credentials are not registered".to_owned())?;
+
+    let identity = MySqlTenantIdentity::for_tenant(tenant_id);
+    let new_runtime_password = generate_mysql_password()
+        .map_err(|_| "operating-system random source unavailable".to_owned())?;
+    let new_migration_password = generate_mysql_password()
+        .map_err(|_| "operating-system random source unavailable".to_owned())?;
+    let new_gateway_credential = generate_gateway_credential()
+        .map_err(|_| "operating-system random source unavailable".to_owned())?;
+
+    let statements = build_password_rotation(
+        &identity,
+        &required("PROXIMA_MYSQL_ACCOUNT_HOST")?,
+        &new_runtime_password,
+        &new_migration_password,
+    ).map_err(|_| "invalid MySQL tenant credential rotation plan".to_owned())?;
+
+    let mut admin_password = required("PROXIMA_MYSQL_PROVISIONING_PASSWORD")?;
+    let upstream = upstream_config()?;
+    let mut executor = MySqlAdminExecutor::connect(
+        &upstream,
+        &required("PROXIMA_MYSQL_PROVISIONING_USER")?,
+        &admin_password,
+        Duration::from_millis(number("PROXIMA_MYSQL_STATEMENT_TIMEOUT_MS", 30_000)?),
+    ).await.map_err(|_| "could not authenticate to MySQL with the provisioning account over verified TLS".to_owned())?;
+    admin_password.zeroize();
+
+    let mut applied = 0usize;
+    for statement in &statements {
+        if executor.execute(statement).await.is_err() {
+            if applied > 0 {
+                let rollback = build_password_rotation(
+                    &identity,
+                    &required("PROXIMA_MYSQL_ACCOUNT_HOST")?,
+                    &old_runtime.password,
+                    &old_migration.password,
+                ).map_err(|_| "credential rotation failed and rollback plan could not be built".to_owned())?;
+                let mut rollback_failed = false;
+                for rollback_statement in rollback {
+                    if executor.execute(&rollback_statement).await.is_err() {
+                        rollback_failed = true;
+                    }
+                }
+                if rollback_failed {
+                    return Err("credential rotation failed and MySQL rollback was unsuccessful; manual reconciliation is required".into());
+                }
+            }
+            return Err("MySQL rejected the credential rotation; the previous credentials remain active".into());
+        }
+        applied += 1;
+    }
+
+    let gateway_password = match store.rotate_tenant_credentials(
+        tenant_id,
+        &gateway_username,
+        new_gateway_credential,
+        &identity.runtime_username,
+        &new_runtime_password,
+        &identity.migration_username,
+        &new_migration_password,
+    ) {
+        Ok(password) => password,
+        Err(_) => {
+            let rollback = build_password_rotation(
+                &identity,
+                &required("PROXIMA_MYSQL_ACCOUNT_HOST")?,
+                &old_runtime.password,
+                &old_migration.password,
+            ).map_err(|_| "credential store update failed and rollback plan could not be built".to_owned())?;
+            let mut rollback_failed = false;
+            for statement in rollback {
+                if executor.execute(&statement).await.is_err() {
+                    rollback_failed = true;
+                }
+            }
+            if rollback_failed {
+                return Err("credential store update failed and MySQL rollback was unsuccessful; manual reconciliation is required".into());
+            }
+            return Err("credential store update failed; previous MySQL credentials were restored".into());
+        }
+    };
+
+    println!("Tenant credentials rotated.");
+    println!("Gateway username: {gateway_username}");
+    println!("Gateway password (shown once): {gateway_password}");
+    println!("Runtime and migration credentials were rotated and stored encrypted; their values were not printed.");
+    Ok(())
+}
+
