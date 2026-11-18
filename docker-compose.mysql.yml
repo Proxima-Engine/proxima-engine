@@ -42,6 +42,8 @@ services:
       - ALL
     tmpfs:
       - /tmp
+    env_file:
+      - ./dev/mysql-secrets/mysql-gateway.env
     environment:
       PROXIMA_MYSQL_LISTEN_ADDR: 0.0.0.0:13306
       PROXIMA_MYSQL_UPSTREAM_HOST: mysql-test
