@@ -16,6 +16,7 @@ use crate::protocol::{
 use crate::upstream::{
     connect_upstream, read_packet, write_packet, UpstreamError, UpstreamTlsConfig,
 };
+use crate::tenant::TenantAssertion;
 use ring::rand::{SecureRandom, SystemRandom};
 use rustls::{ServerConfig, pki_types::PrivateKeyDer};
 use std::fs::File;
@@ -29,6 +30,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, Semaphore};
 use tokio::time::timeout;
 use tokio_rustls::{client::TlsStream as ClientTlsStream, server::TlsStream as ServerTlsStream, TlsAcceptor};
+use zeroize::Zeroizing;
 
 static NEXT_CONNECTION_ID: AtomicU32 = AtomicU32::new(1);
 
@@ -326,14 +328,19 @@ impl MySqlGateway {
 
         let gateway_username = handshake.username.clone();
         let tenant_id = session.tenant_id;
+        let tenant_assertion = Zeroizing::new(session.tenant_assertion.clone());
+        let assertion_expires_at = session.assertion_expires_at;
         relay_session(
             client,
             upstream,
             self.config.max_packet_size,
             self.config.idle_timeout,
             Arc::clone(&self.account_directory),
+            Arc::clone(&self.credential_store),
             gateway_username,
             tenant_id,
+            tenant_assertion,
+            assertion_expires_at,
         ).await
     }
 }
@@ -391,8 +398,11 @@ async fn relay_session(
     max_packet_size: usize,
     idle_timeout: Duration,
     account_directory: Arc<dyn TenantAccountDirectory>,
+    credential_store: Arc<dyn TenantUpstreamCredentialStore>,
     gateway_username: String,
     tenant_id: uuid::Uuid,
+    tenant_assertion: Zeroizing<String>,
+    assertion_expires_at: u64,
 ) -> Result<(), GatewayError> {
     let (mut client_reader, mut client_writer) = tokio::io::split(client);
     let (mut upstream_reader, mut upstream_writer) = tokio::io::split(upstream);
@@ -440,6 +450,34 @@ async fn relay_session(
                         let error = command_error_packet(
                             packet.sequence.wrapping_add(1),
                             "Tenant assertion has expired",
+                        );
+                        let _ = local_tx.send(error).await;
+                        break;
+                    }
+                    let assertion_key = match credential_store.load_assertion_key(tenant_id) {
+                        Ok(Some(key)) => Zeroizing::new(key),
+                        _ => {
+                            let error = command_error_packet(
+                                packet.sequence.wrapping_add(1),
+                                "Tenant assertion key is no longer available",
+                            );
+                            let _ = local_tx.send(error).await;
+                            break;
+                        }
+                    };
+                    let assertion_valid = TenantAssertion::verify(
+                        &tenant_assertion,
+                        &assertion_key,
+                        now,
+                    )
+                    .is_ok_and(|assertion| {
+                        assertion.tenant_id == tenant_id
+                            && assertion.expires_at == assertion_expires_at
+                    });
+                    if !assertion_valid {
+                        let error = command_error_packet(
+                            packet.sequence.wrapping_add(1),
+                            "Tenant assertion is expired or no longer trusted",
                         );
                         let _ = local_tx.send(error).await;
                         break;
