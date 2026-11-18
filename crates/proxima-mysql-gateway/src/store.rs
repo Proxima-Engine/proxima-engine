@@ -825,7 +825,7 @@ mod tests {
             fs::set_permissions(&key_path, fs::Permissions::from_mode(0o600)).unwrap();
         }
         let store_path = dir.path().join("tenants.enc");
-        let gateway_view = EncryptedTenantStore::open(&store_path, &key_path).unwrap();
+        let gateway_view = EncryptedTenantStore::open_gateway(&store_path, &key_path).unwrap();
         let admin_view = EncryptedTenantStore::open(&store_path, &key_path).unwrap();
 
         let tenant = Uuid::new_v4();
@@ -949,6 +949,35 @@ mod tests {
             ).err(),
             Some(StoreError::InvalidAccount)
         );
+    }
+
+    #[test]
+    fn admin_open_sanitizes_legacy_registry_before_gateway_can_mount_it() {
+        let directory = tempdir().unwrap();
+        let key_path = directory.path().join("key.hex");
+        let store_path = directory.path().join("tenants.enc");
+        fs::write(&key_path, "ab".repeat(32)).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&key_path, fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        let key = load_key(&key_path).unwrap();
+        let legacy = StoreDocument {
+            version: 1,
+            ..StoreDocument::default()
+        };
+        fs::write(&store_path, encrypt_document(&key, &legacy).unwrap()).unwrap();
+
+        assert!(matches!(
+            EncryptedTenantStore::open_gateway(&store_path, &key_path),
+            Err(StoreError::CorruptStore)
+        ));
+        let admin = EncryptedTenantStore::open(&store_path, &key_path).unwrap();
+        assert_eq!(admin.document.read().unwrap().version, 2);
+        drop(admin);
+        let gateway = EncryptedTenantStore::open_gateway(&store_path, &key_path).unwrap();
+        assert_eq!(gateway.document.read().unwrap().version, 2);
     }
 
     #[test]
