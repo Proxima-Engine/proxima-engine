@@ -176,6 +176,7 @@ DROP USER IF EXISTS '$migrationUser'@'$accountHost';
     if ($gatewayStarted) {
         & docker compose -f $composeFile --profile gateway stop mysql-gateway | Out-Null
     }
+    & docker compose -f $composeFile --profile gateway down -v --remove-orphans | Out-Null
     try {
         Invoke-RootSql -Sql "DROP USER IF EXISTS 'proxima_provisioner'@'%';" | Out-Null
     } catch {
