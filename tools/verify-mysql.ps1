@@ -7,7 +7,7 @@ try {
     Write-Host "=== Proxima MySQL local verification ===" -ForegroundColor Cyan
 
     Write-Host "[1/4] Format Rust workspace" -ForegroundColor Cyan
-    & cargo fmt --all
+    & cargo fmt -p proxima-mysql-gateway
     if ($LASTEXITCODE -ne 0) { throw "cargo fmt failed." }
 
     Write-Host "[2/4] Rust workspace tests" -ForegroundColor Cyan
