@@ -367,7 +367,7 @@ mod tests {
             password: "a".repeat(64),
         });
         let assertion = crate::tenant::TenantAssertion::issue(
-            tenant, 500, b"0123456789abcdef0123456789abcdef"
+            tenant, 500, b"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
         ).unwrap();
         let mut handshake = test_handshake("gateway_a", response(gateway_password, &challenge));
         handshake.connection_attributes.push((
@@ -397,7 +397,7 @@ mod tests {
             password: "a".repeat(64),
         });
         let assertion = crate::tenant::TenantAssertion::issue(
-            tenant, 500, b"0123456789abcdef0123456789abcdef"
+            tenant, 500, b"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
         ).unwrap();
         let mut handshake = test_handshake("gateway_a", response(gateway_password, &challenge));
         handshake.connection_attributes.push((
