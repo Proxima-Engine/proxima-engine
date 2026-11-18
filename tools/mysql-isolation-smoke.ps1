@@ -61,8 +61,8 @@ CREATE USER 'ap_test_a_runtime'@'127.0.0.1' IDENTIFIED BY 'aaaaaaaaaaaaaaaaaaaaa
 CREATE USER 'ap_test_b_runtime'@'127.0.0.1' IDENTIFIED BY 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' REQUIRE SSL WITH MAX_USER_CONNECTIONS 64;
 CREATE USER 'ap_test_a_migrator'@'127.0.0.1' IDENTIFIED BY 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc' REQUIRE SSL WITH MAX_USER_CONNECTIONS 4;
 CREATE USER 'ap_test_b_migrator'@'127.0.0.1' IDENTIFIED BY 'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd' REQUIRE SSL WITH MAX_USER_CONNECTIONS 4;
-GRANT SELECT, INSERT, UPDATE, DELETE ON ap_test_tenant_a.* TO 'ap_test_a_runtime'@'127.0.0.1';
-GRANT SELECT, INSERT, UPDATE, DELETE ON ap_test_tenant_b.* TO 'ap_test_b_runtime'@'127.0.0.1';
+GRANT SELECT, INSERT, UPDATE, DELETE, EXECUTE ON ap_test_tenant_a.* TO 'ap_test_a_runtime'@'127.0.0.1';
+GRANT SELECT, INSERT, UPDATE, DELETE, EXECUTE ON ap_test_tenant_b.* TO 'ap_test_b_runtime'@'127.0.0.1';
 GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX, DROP, REFERENCES, CREATE VIEW, SHOW VIEW, TRIGGER, EVENT, CREATE ROUTINE, ALTER ROUTINE, EXECUTE ON ap_test_tenant_a.* TO 'ap_test_a_migrator'@'127.0.0.1';
 GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX, DROP, REFERENCES, CREATE VIEW, SHOW VIEW, TRIGGER, EVENT, CREATE ROUTINE, ALTER ROUTINE, EXECUTE ON ap_test_tenant_b.* TO 'ap_test_b_migrator'@'127.0.0.1';
 CREATE TABLE ap_test_tenant_a.records (id INT PRIMARY KEY, secret VARCHAR(100) NOT NULL);
@@ -81,6 +81,8 @@ try {
     Assert-MySqlDenied -Name "Tenant A cannot read Tenant B" -User "ap_test_a_runtime" -Password ("a" * 64) -Sql "SELECT secret FROM ap_test_tenant_b.records"
     Assert-MySqlDenied -Name "Tenant A cannot write Tenant B" -User "ap_test_a_runtime" -Password ("a" * 64) -Sql "INSERT INTO ap_test_tenant_b.records VALUES (2, 'forbidden')"
     Assert-MySqlDenied -Name "Runtime account cannot perform DDL" -User "ap_test_a_runtime" -Password ("a" * 64) -Sql "CREATE TABLE ap_test_tenant_a.forbidden (id INT)"
+    Assert-MySqlSuccess -Name "Tenant A runtime can execute its own stored routine" -User "ap_test_a_runtime" -Password ("a" * 64) -Sql "CALL ap_test_tenant_a.tenant_count()" -RequireTls | Out-Null
+    Assert-MySqlDenied -Name "Tenant A runtime cannot execute Tenant B stored routine" -User "ap_test_a_runtime" -Password ("a" * 64) -Sql "CALL ap_test_tenant_b.tenant_count()"
     $ownB = Assert-MySqlSuccess -Name "Tenant B reads its own data over TLS" -User "ap_test_b_runtime" -Password ("b" * 64) -Sql "SELECT secret FROM ap_test_tenant_b.records" -RequireTls
     if ($ownB.Trim() -ne "tenant-b-secret") { throw "Tenant B returned unexpected own-tenant data." }
     Assert-MySqlDenied -Name "Tenant B cannot read Tenant A" -User "ap_test_b_runtime" -Password ("b" * 64) -Sql "SELECT secret FROM ap_test_tenant_a.records"
