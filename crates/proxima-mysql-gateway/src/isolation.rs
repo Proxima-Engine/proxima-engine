@@ -9,6 +9,7 @@ use std::fmt;
 use std::net::IpAddr;
 use ring::rand::{SecureRandom, SystemRandom};
 use uuid::Uuid;
+use zeroize::Zeroizing;
 use zeroize::Zeroize;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,14 +58,14 @@ impl MySqlTenantIdentity {
 pub struct MySqlProvisioningPlan {
     identity: MySqlTenantIdentity,
     account_host: String,
-    statements: Vec<String>,
+    statements: Vec<Zeroizing<String>>,
 }
 
 impl MySqlProvisioningPlan {
     pub fn identity(&self) -> &MySqlTenantIdentity {
         &self.identity
     }
-    pub fn statements(&self) -> &[String] {
+    pub fn statements(&self) -> &[Zeroizing<String>] {
         &self.statements
     }
     pub fn account_host(&self) -> &str {
@@ -118,11 +119,11 @@ pub fn build_provisioning_plan(
     let runtime_user = quote_account(&identity.runtime_username, account_host);
     let migration_user = quote_account(&identity.migration_username, account_host);
     let statements = vec![
-        format!("CREATE DATABASE {database} CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci"),
-        format!("CREATE USER {runtime_user} IDENTIFIED BY '{runtime_password}' REQUIRE SSL WITH MAX_USER_CONNECTIONS 64"),
-        format!("CREATE USER {migration_user} IDENTIFIED BY '{migration_password}' REQUIRE SSL WITH MAX_USER_CONNECTIONS 4"),
-        format!("GRANT SELECT, INSERT, UPDATE, DELETE ON {database}.* TO {runtime_user}"),
-        format!("GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX, DROP, REFERENCES, CREATE VIEW, SHOW VIEW, TRIGGER, EVENT, CREATE ROUTINE, ALTER ROUTINE, EXECUTE ON {database}.* TO {migration_user}"),
+        Zeroizing::new(format!("CREATE DATABASE {database} CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci")),
+        Zeroizing::new(format!("CREATE USER {runtime_user} IDENTIFIED BY '{runtime_password}' REQUIRE SSL WITH MAX_USER_CONNECTIONS 64")),
+        Zeroizing::new(format!("CREATE USER {migration_user} IDENTIFIED BY '{migration_password}' REQUIRE SSL WITH MAX_USER_CONNECTIONS 4")),
+        Zeroizing::new(format!("GRANT SELECT, INSERT, UPDATE, DELETE ON {database}.* TO {runtime_user}")),
+        Zeroizing::new(format!("GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX, DROP, REFERENCES, CREATE VIEW, SHOW VIEW, TRIGGER, EVENT, CREATE ROUTINE, ALTER ROUTINE, EXECUTE ON {database}.* TO {migration_user}")),
     ];
     Ok(MySqlProvisioningPlan { identity, account_host: account_host.to_owned(), statements })
 }
@@ -132,7 +133,7 @@ pub fn build_password_rotation(
     account_host: &str,
     runtime_password: &str,
     migration_password: &str,
-) -> Result<Vec<String>, MySqlIsolationError> {
+) -> Result<Vec<Zeroizing<String>>, MySqlIsolationError> {
     validate_host(account_host)?;
     validate_password(runtime_password)?;
     validate_password(migration_password)?;
@@ -228,7 +229,7 @@ mod tests {
         let tenant = Uuid::parse_str("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa").unwrap();
         let plan = build_provisioning_plan(tenant, "10.0.0.12", PASSWORD_A, PASSWORD_B).unwrap();
         assert_eq!(plan.statements().len(), 5);
-        let sql = plan.statements().join("\n");
+        let sql = plan.statements().iter().map(|statement| statement.as_str()).collect::<Vec<_>>().join("\n");
         assert!(sql.contains("GRANT SELECT, INSERT, UPDATE, DELETE ON"));
         assert!(!sql.contains("GRANT EXECUTE"));
         assert!(!sql.contains("GRANT SHOW VIEW"));
