@@ -25,7 +25,7 @@ A database-per-tenant privilege boundary is stronger and easier to reason about 
 - `crates/proxima-mysql-gateway/src/tenant.rs`: HMAC-SHA256 tenant assertion verification, one-hour maximum lifetime, tenant/account match, and deterministic database routing. Client-selected database names are rejected.
 - `crates/proxima-mysql-gateway/src/upstream.rs`: verified-CA TLS connection to MySQL 8.4, server capability validation, and tenant-specific `caching_sha2_password` upstream authentication.
 - `crates/proxima-mysql-gateway/src/listener.rs`: separate TLS listener API, client authentication/authorization, upstream connection establishment, and packet relay. It blocks COM_INIT_DB, COM_CHANGE_USER and COM_RESET_CONNECTION.
-- `crates/proxima-engine/src/mysql_isolation.rs`: deterministic database/account naming and scoped provisioning, rotation and revocation SQL plans.
+- `crates/proxima-mysql-gateway/src/isolation.rs`: deterministic database/account naming and scoped provisioning, rotation and revocation SQL plans.
 
 These functions are deliberately separate from the PostgreSQL proxy session code. They still require a real TLS/network state machine and integration tests before they can enforce traffic.
 
