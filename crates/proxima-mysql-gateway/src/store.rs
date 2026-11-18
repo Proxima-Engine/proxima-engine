@@ -124,6 +124,7 @@ pub struct EncryptedTenantStore {
     document: RwLock<StoreDocument>,
     loaded_metadata: RwLock<Option<[u8; 32]>>,
     last_reload_check: Mutex<Instant>,
+    read_only: bool,
 }
 
 impl fmt::Debug for EncryptedTenantStore {
@@ -139,30 +140,53 @@ impl fmt::Debug for EncryptedTenantStore {
 }
 
 impl EncryptedTenantStore {
-    /// Open or initialize the encrypted runtime registry. Migration credentials
-    /// are not stored in this file and are never available to the gateway process.
+    /// Open the encrypted registry for the administrative CLI. Legacy v1
+    /// registries are sanitized and rewritten as v2 without migration secrets.
     pub fn open(path: impl Into<PathBuf>, key_file: impl AsRef<Path>) -> Result<Self, StoreError> {
-        let mut key = Zeroizing::new(load_key(key_file.as_ref())?);
-        let path = path.into();
+        Self::open_with_mode(path.into(), key_file.as_ref(), false, true)
+    }
+
+    /// Open the runtime registry read-only. The gateway refuses legacy v1 files
+    /// so an old encrypted migration password cannot remain in its mounted store.
+    pub fn open_gateway(path: impl Into<PathBuf>, key_file: impl AsRef<Path>) -> Result<Self, StoreError> {
+        Self::open_with_mode(path.into(), key_file.as_ref(), true, false)
+    }
+
+    fn open_with_mode(
+        path: PathBuf,
+        key_file: &Path,
+        read_only: bool,
+        upgrade_legacy: bool,
+    ) -> Result<Self, StoreError> {
+        let mut key = Zeroizing::new(load_key(key_file)?);
         reject_symlink_if_present(&path)?;
         let encrypted = read_bounded_optional(&path)?;
-        let loaded_metadata = encrypted.as_ref().map(|bytes| content_fingerprint(bytes));
-        let document = if let Some(encrypted) = encrypted.as_deref() {
+        let mut loaded_metadata = encrypted.as_ref().map(|bytes| content_fingerprint(bytes));
+        let mut document = if let Some(encrypted) = encrypted.as_deref() {
             decrypt_document(&key, encrypted)?
         } else {
-            StoreDocument { version: 1, ..StoreDocument::default() }
+            StoreDocument { version: 2, ..StoreDocument::default() }
         };
-        if document.version != 1 {
+        let legacy = document.version == 1;
+        if legacy && upgrade_legacy && !read_only {
+            document.version = 2;
+        } else if document.version != 2 {
             return Err(StoreError::CorruptStore);
         }
         let key = std::mem::take(&mut *key);
-        Ok(Self {
+        let store = Self {
             path,
             key,
             document: RwLock::new(document),
-            loaded_metadata: RwLock::new(loaded_metadata),
+            loaded_metadata: RwLock::new(loaded_metadata.take()),
             last_reload_check: Mutex::new(Instant::now() - Duration::from_secs(1)),
-        })
+            read_only,
+        };
+        if legacy {
+            let snapshot = store.document.read().map_err(|_| StoreError::StoreUnavailable)?.clone();
+            store.persist(&snapshot)?;
+        }
+        Ok(store)
     }
 
     /// Refresh the in-memory snapshot from the atomically replaced encrypted
@@ -186,9 +210,9 @@ impl EncryptedTenantStore {
         let document = if let Some(encrypted) = encrypted.as_deref() {
             decrypt_document(&self.key, encrypted)?
         } else {
-            StoreDocument { version: 1, ..StoreDocument::default() }
+            StoreDocument { version: 2, ..StoreDocument::default() }
         };
-        if document.version != 1 {
+        if document.version != 2 {
             return Err(StoreError::CorruptStore);
         }
         let mut current = self.document.write().map_err(|_| StoreError::StoreUnavailable)?;
@@ -408,6 +432,9 @@ impl EncryptedTenantStore {
     }
 
     fn persist(&self, document: &StoreDocument) -> Result<(), StoreError> {
+        if self.read_only {
+            return Err(StoreError::StoreUnavailable);
+        }
         let encrypted = encrypt_document(&self.key, document)?;
         let parent = self.path.parent()
             .filter(|path| !path.as_os_str().is_empty())
