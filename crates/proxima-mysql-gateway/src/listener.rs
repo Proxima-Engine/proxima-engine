@@ -511,10 +511,41 @@ async fn relay_session(
     let mut server_closed = false;
     let mut local_closed = false;
     let mut activity_closed = false;
+    let mut revocation_check = tokio::time::interval_at(
+        tokio::time::Instant::now() + Duration::from_secs(1),
+        Duration::from_secs(1),
+    );
+    revocation_check.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let idle_sleep = tokio::time::sleep(idle_timeout);
     tokio::pin!(idle_sleep);
     while !(server_closed && local_closed) {
         tokio::select! {
+            _ = revocation_check.tick() => {
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map(|duration| duration.as_secs())
+                    .unwrap_or(u64::MAX);
+                let assertion_valid = now < assertion_expires_at
+                    && session_assertion_is_current(
+                        credential_store.as_ref(),
+                        &tenant_assertion,
+                        tenant_id,
+                        assertion_expires_at,
+                        now,
+                    );
+                let account_valid = matches!(
+                    account_directory.find_account(&gateway_username),
+                    Ok(Some(account)) if account.tenant_id == tenant_id
+                );
+                if !assertion_valid || !account_valid {
+                    tracing::warn!(
+                        %tenant_id,
+                        gateway_username = %log_gateway_username,
+                        "closing active MySQL session after tenant authorization expiry or revocation"
+                    );
+                    break;
+                }
+            }
             _ = &mut idle_sleep => {
                 tracing::debug!(%tenant_id, gateway_username = %log_gateway_username, "closing idle MySQL tenant session");
                 break;
