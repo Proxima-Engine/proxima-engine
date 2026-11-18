@@ -207,18 +207,13 @@ impl EncryptedTenantStore {
         gateway_credential: GatewayCredentialMaterial,
         upstream_username: &str,
         upstream_password: &str,
-        migration_username: &str,
-        migration_password: &str,
         assertion_key: &[u8],
     ) -> Result<String, StoreError> {
         self.reload_from_disk()?;
         validate_gateway_username(gateway_username)?;
         let identity = MySqlTenantIdentity::for_tenant(tenant_id);
         if upstream_username != identity.runtime_username
-            || migration_username != identity.migration_username
             || !valid_password(upstream_password)
-            || !valid_password(migration_password)
-            || upstream_password == migration_password
             || assertion_key.len() != 64
             || !assertion_key.iter().all(|byte| byte.is_ascii_hexdigit())
         {
@@ -236,7 +231,6 @@ impl EncryptedTenantStore {
             return Err(StoreError::DuplicateAccount);
         }
         if document.upstream.iter().any(|entry| entry.tenant_id == tenant_id.to_string())
-            || document.migration.iter().any(|entry| entry.tenant_id == tenant_id.to_string())
             || document.assertion_keys.iter().any(|entry| entry.tenant_id == tenant_id.to_string())
         {
             return Err(StoreError::TenantAlreadyRegistered);
@@ -267,11 +261,6 @@ impl EncryptedTenantStore {
             username: upstream_username.to_owned(),
             password: upstream_password.to_owned(),
         });
-        next.migration.push(StoredMigrationCredential {
-            tenant_id: tenant_id.to_string(),
-            username: migration_username.to_owned(),
-            password: migration_password.to_owned(),
-        });
         next.assertion_keys.push(StoredTenantAssertionKey {
             tenant_id: tenant_id.to_string(),
             key_hex: std::mem::take(&mut *assertion_key_hex),
@@ -281,8 +270,8 @@ impl EncryptedTenantStore {
         Ok(std::mem::take(&mut *gateway_password))
     }
 
-    /// Rotate all three credentials atomically in the encrypted local registry.
-    /// The gateway password is returned once; only its verifier is persisted.
+    /// Rotate the gateway and upstream runtime credentials atomically. Migration
+    /// credentials are deliberately kept outside the gateway registry.
     pub fn rotate_tenant_credentials(
         &self,
         tenant_id: Uuid,
@@ -290,17 +279,12 @@ impl EncryptedTenantStore {
         gateway_credential: GatewayCredentialMaterial,
         runtime_username: &str,
         runtime_password: &str,
-        migration_username: &str,
-        migration_password: &str,
     ) -> Result<String, StoreError> {
         self.reload_from_disk()?;
         validate_gateway_username(gateway_username)?;
         let identity = MySqlTenantIdentity::for_tenant(tenant_id);
         if runtime_username != identity.runtime_username
-            || migration_username != identity.migration_username
             || !valid_password(runtime_password)
-            || !valid_password(migration_password)
-            || runtime_password == migration_password
         {
             return Err(StoreError::InvalidAccount);
         }
@@ -319,11 +303,6 @@ impl EncryptedTenantStore {
             .ok_or(StoreError::InvalidAccount)?;
         runtime.username = runtime_username.to_owned();
         runtime.password = runtime_password.to_owned();
-        let migration = next.migration.iter_mut()
-            .find(|entry| entry.tenant_id == tenant_id.to_string())
-            .ok_or(StoreError::InvalidAccount)?;
-        migration.username = migration_username.to_owned();
-        migration.password = migration_password.to_owned();
         self.persist(&next)?;
         *document = next;
         Ok(std::mem::take(&mut *gateway_password))
@@ -379,7 +358,6 @@ impl EncryptedTenantStore {
             }
         }
         next.upstream.retain(|entry| entry.tenant_id != tenant_id.to_string());
-        next.migration.retain(|entry| entry.tenant_id != tenant_id.to_string());
         next.assertion_keys.retain(|entry| entry.tenant_id != tenant_id.to_string());
         self.persist(&next)?;
         *document = next;
@@ -421,26 +399,6 @@ impl EncryptedTenantStore {
         let mut document = self.document.write().map_err(|_| StoreError::StoreUnavailable)?;
         let mut next = document.clone();
         let entry = next.upstream.iter_mut()
-            .find(|entry| entry.tenant_id == tenant_id.to_string())
-            .ok_or(StoreError::InvalidAccount)?;
-        entry.password = password.to_owned();
-        self.persist(&next)?;
-        *document = next;
-        Ok(())
-    }
-
-    pub fn rotate_migration_password(
-        &self,
-        tenant_id: Uuid,
-        password: &str,
-    ) -> Result<(), StoreError> {
-        self.reload_from_disk()?;
-        if !valid_password(password) {
-            return Err(StoreError::InvalidAccount);
-        }
-        let mut document = self.document.write().map_err(|_| StoreError::StoreUnavailable)?;
-        let mut next = document.clone();
-        let entry = next.migration.iter_mut()
             .find(|entry| entry.tenant_id == tenant_id.to_string())
             .ok_or(StoreError::InvalidAccount)?;
         entry.password = password.to_owned();
@@ -549,23 +507,6 @@ impl TenantUpstreamCredentialStore for EncryptedTenantStore {
             return Ok(None);
         };
         Ok(Some(TenantUpstreamCredentials {
-            tenant_id,
-            username: entry.username.clone(),
-            password: entry.password.clone(),
-        }))
-    }
-}
-
-impl TenantMigrationCredentialStore for EncryptedTenantStore {
-    fn load_migration_credentials(&self, tenant_id: Uuid) -> Result<Option<TenantMigrationCredentials>, AccountError> {
-        self.reload_from_disk().map_err(|_| AccountError::DirectoryUnavailable)?;
-        let document = self.document.read().map_err(|_| AccountError::DirectoryUnavailable)?;
-        let Some(entry) = document.migration.iter()
-            .find(|entry| entry.tenant_id == tenant_id.to_string())
-        else {
-            return Ok(None);
-        };
-        Ok(Some(TenantMigrationCredentials {
             tenant_id,
             username: entry.username.clone(),
             password: entry.password.clone(),
