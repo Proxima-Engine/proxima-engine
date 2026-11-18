@@ -92,6 +92,85 @@ pub fn authenticate(
     Ok(account.tenant_id)
 }
 
+
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct TenantUpstreamCredentials {
+    pub tenant_id: Uuid,
+    pub username: String,
+    pub password: String,
+}
+impl fmt::Debug for TenantUpstreamCredentials {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TenantUpstreamCredentials")
+            .field("tenant_id", &self.tenant_id)
+            .field("username", &self.username)
+            .field("password", &"[REDACTED]")
+            .finish()
+    }
+}
+
+pub trait TenantUpstreamCredentialStore {
+    fn load_runtime_credentials(&self, tenant_id: Uuid) -> Result<Option<TenantUpstreamCredentials>, AccountError>;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthenticatedTenantSession {
+    pub tenant_id: Uuid,
+    pub database_name: String,
+    pub upstream_username: String,
+    pub upstream_password: String,
+}
+impl fmt::Debug for AuthenticatedTenantSession {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AuthenticatedTenantSession")
+            .field("tenant_id", &self.tenant_id)
+            .field("database_name", &self.database_name)
+            .field("upstream_username", &self.upstream_username)
+            .field("upstream_password", &"[REDACTED]")
+            .finish()
+    }
+}
+
+/// Complete the identity-to-upstream-credential binding. The caller must invoke
+/// this before opening a database connection and must keep the returned session
+/// immutable for the entire client connection lifetime.
+pub fn authenticate_and_resolve(
+    handshake: &ClientHandshake,
+    challenge: &[u8; 20],
+    client_tls_active: bool,
+    account_directory: &impl TenantAccountDirectory,
+    assertion_key: &[u8],
+    now: u64,
+    credential_store: &impl TenantUpstreamCredentialStore,
+) -> Result<AuthenticatedTenantSession, AccountError> {
+    let tenant_id = authenticate(handshake, challenge, client_tls_active, account_directory)?;
+    let route = crate::tenant::authorize_handshake(handshake, tenant_id, assertion_key, now)
+        .map_err(|_| AccountError::InvalidAuthenticationResponse)?;
+    let credentials = credential_store
+        .load_runtime_credentials(tenant_id)?
+        .ok_or(AccountError::DirectoryUnavailable)?;
+    if credentials.tenant_id != tenant_id
+        || credentials.username != expected_runtime_username(tenant_id)
+        || credentials.password.is_empty()
+        || credentials.password.len() > 256
+        || !credentials.password.is_ascii()
+    {
+        return Err(AccountError::DirectoryUnavailable);
+    }
+    Ok(AuthenticatedTenantSession {
+        tenant_id,
+        database_name: route.database_name,
+        upstream_username: credentials.username,
+        upstream_password: credentials.password,
+    })
+}
+
+fn expected_runtime_username(tenant_id: Uuid) -> String {
+    let digest = Sha256::digest(tenant_id.as_bytes());
+    format!("ap_r_{}", &hex::encode(digest)[..27])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
