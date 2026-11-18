@@ -40,6 +40,7 @@ pub struct GatewayConfig {
     pub max_connections: usize,
     pub max_packet_size: usize,
     pub handshake_timeout: Duration,
+    pub idle_timeout: Duration,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -89,6 +90,8 @@ impl MySqlGateway {
             || config.max_packet_size < MIN_HANDSHAKE_PACKET_SIZE
             || config.max_packet_size >= MAX_PACKET_PAYLOAD
             || config.handshake_timeout.is_zero()
+            || config.idle_timeout.is_zero()
+            || config.idle_timeout > Duration::from_secs(24 * 60 * 60)
         {
             return Err(GatewayError::InvalidConfiguration);
         }
@@ -327,6 +330,7 @@ impl MySqlGateway {
             client,
             upstream,
             self.config.max_packet_size,
+            self.config.idle_timeout,
             Arc::clone(&self.account_directory),
             gateway_username,
             tenant_id,
@@ -385,6 +389,7 @@ async fn relay_session(
     client: ServerTlsStream<TcpStream>,
     upstream: ClientTlsStream<TcpStream>,
     max_packet_size: usize,
+    idle_timeout: Duration,
     account_directory: Arc<dyn TenantAccountDirectory>,
     gateway_username: String,
     tenant_id: uuid::Uuid,
@@ -393,6 +398,7 @@ async fn relay_session(
     let (mut upstream_reader, mut upstream_writer) = tokio::io::split(upstream);
     let (server_tx, mut server_rx) = mpsc::channel::<Packet>(32);
     let (local_tx, mut local_rx) = mpsc::channel::<Packet>(8);
+    let (activity_tx, mut activity_rx) = mpsc::channel::<()>(8);
 
     let server_reader = tokio::spawn(async move {
         loop {
@@ -411,6 +417,9 @@ async fn relay_session(
                 Ok(packet) => packet,
                 Err(_) => break,
             };
+            if activity_tx.send(()).await.is_err() {
+                break;
+            }
             if verify_sequence(&packet, 0).is_err() {
                 let error = command_error_packet(1, "Invalid MySQL command packet sequence");
                 let _ = local_tx.send(error).await;
@@ -463,11 +472,25 @@ async fn relay_session(
 
     let mut server_closed = false;
     let mut local_closed = false;
+    let mut activity_closed = false;
+    let idle_sleep = tokio::time::sleep(idle_timeout);
+    tokio::pin!(idle_sleep);
     while !(server_closed && local_closed) {
         tokio::select! {
+            _ = &mut idle_sleep => {
+                tracing::debug!(%tenant_id, gateway_username = %gateway_username, "closing idle MySQL tenant session");
+                break;
+            }
+            activity = activity_rx.recv(), if !activity_closed => {
+                match activity {
+                    Some(()) => idle_sleep.as_mut().reset(tokio::time::Instant::now() + idle_timeout),
+                    None => activity_closed = true,
+                }
+            }
             packet = server_rx.recv(), if !server_closed => {
                 match packet {
                     Some(packet) => {
+                        idle_sleep.as_mut().reset(tokio::time::Instant::now() + idle_timeout);
                         // Never forward a LOCAL INFILE request to the client.
                         // A malicious or compromised upstream server could
                         // otherwise induce a client driver to upload a local file.
@@ -491,6 +514,7 @@ async fn relay_session(
             packet = local_rx.recv(), if !local_closed => {
                 match packet {
                     Some(packet) => {
+                        idle_sleep.as_mut().reset(tokio::time::Instant::now() + idle_timeout);
                         write_packet(&mut client_writer, &packet, max_packet_size)
                             .await
                             .map_err(|_| GatewayError::TransportFailed)?;
