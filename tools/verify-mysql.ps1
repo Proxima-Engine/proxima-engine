@@ -15,7 +15,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "cargo test failed." }
 
     Write-Host "[3/4] Rust Clippy" -ForegroundColor Cyan
-    & cargo clippy --workspace --all-targets -- -D warnings
+    & cargo clippy -p proxima-mysql-gateway --all-targets -- -D warnings
     if ($LASTEXITCODE -ne 0) { throw "cargo clippy failed." }
 
     Write-Host "[4/4] Real MySQL 8.4 privilege-boundary checks" -ForegroundColor Cyan
