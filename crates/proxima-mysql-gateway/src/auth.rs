@@ -216,6 +216,8 @@ pub fn authenticate_and_resolve<
         .load_assertion_key(tenant_id)?
         .ok_or(AccountError::DirectoryUnavailable)?;
     let assertion_key = Zeroizing::new(assertion_key);
+    let token = crate::tenant::assertion_from_handshake(handshake)
+        .map_err(|_| AccountError::InvalidAuthenticationResponse)?;
     let route = crate::tenant::authorize_handshake(handshake, tenant_id, &assertion_key, now)
         .map_err(|_| AccountError::InvalidAuthenticationResponse)?;
     let mut credentials = credential_store
