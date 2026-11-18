@@ -15,7 +15,8 @@ $tenantCompact = $tenantId.Replace("-", "").ToLowerInvariant()
 $gatewayUsername = "gw_smoke_$($tenantCompact.Substring(0, 8))"
 $tenantDatabase = "ap_t_$tenantCompact"
 $otherDatabase = "ap_t_other"
-$accountHost = "172.31.90.3"
+$runtimeAccountHost = "172.31.90.3"
+$migrationAccountHost = "172.31.90.4"
 $certDir = Join-Path $repoRoot "dev\mysql-certs"
 $secretDir = Join-Path $repoRoot "dev\mysql-secrets"
 $dataDir = Join-Path $repoRoot "dev\mysql-data"
@@ -33,7 +34,8 @@ $environmentNames = @(
     "PROXIMA_MYSQL_UPSTREAM_CA_FILE",
     "PROXIMA_MYSQL_PROVISIONING_USER",
     "PROXIMA_MYSQL_PROVISIONING_PASSWORD",
-    "PROXIMA_MYSQL_ACCOUNT_HOST",
+    "PROXIMA_MYSQL_RUNTIME_ACCOUNT_HOST",
+    "PROXIMA_MYSQL_MIGRATION_ACCOUNT_HOST",
     "PROXIMA_MYSQL_SECRET_STORE_FILE",
     "PROXIMA_MYSQL_SECRET_STORE_KEY_FILE",
     "PROXIMA_MYSQL_PROVISIONING_JOURNAL_FILE",
@@ -179,7 +181,8 @@ try {
     $env:PROXIMA_MYSQL_UPSTREAM_CA_FILE = $caFile
     $env:PROXIMA_MYSQL_PROVISIONING_USER = "proxima_provisioner"
     $env:PROXIMA_MYSQL_PROVISIONING_PASSWORD = $adminPassword
-    $env:PROXIMA_MYSQL_ACCOUNT_HOST = $accountHost
+    $env:PROXIMA_MYSQL_RUNTIME_ACCOUNT_HOST = $runtimeAccountHost
+    $env:PROXIMA_MYSQL_MIGRATION_ACCOUNT_HOST = $migrationAccountHost
     $env:PROXIMA_MYSQL_SECRET_STORE_FILE = $storeFile
     $env:PROXIMA_MYSQL_SECRET_STORE_KEY_FILE = $storeKeyFile
     $env:PROXIMA_MYSQL_PROVISIONING_JOURNAL_FILE = $journalFile
