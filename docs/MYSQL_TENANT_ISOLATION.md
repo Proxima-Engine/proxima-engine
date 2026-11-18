@@ -42,6 +42,7 @@ The initial supported model is **one database per tenant**, with separate accoun
 - Migration account: schema-management privileges scoped to that same tenant database.
 - No global grants, GRANT OPTION, account administration, FILE, SUPER, SYSTEM_USER or cross-database grants are issued to tenant accounts.
 - Both accounts require TLS.
+- Runtime accounts are capped at 64 concurrent connections; migration accounts are capped at 4.
 - Account host matching is exact. Wildcard host patterns are rejected.
 - Revocation locks tenant accounts and removes their grants; it does not drop customer data.
 - Runtime and migration credentials are distinct and stored encrypted locally.
@@ -128,6 +129,12 @@ Revoke a tenant with:
     cargo run -p proxima-mysql-gateway --bin proxima-mysql-admin -- revoke <tenant-uuid>
 
 Revocation removes local gateway credentials first, so the running gateway rejects new commands on existing client sessions at the next command boundary and rejects new connections. The CLI then locks the two MySQL accounts and revokes their grants. An already-running query may complete; immediate termination of in-flight queries is not guaranteed.
+
+If provisioning is interrupted by a process crash or an ambiguous MySQL response, the journal blocks automatic reprovisioning. Inspect the actual MySQL databases and accounts first, manually restore or remove any partial resources, then acknowledge the inspected state:
+
+    cargo run -p proxima-mysql-gateway --bin proxima-mysql-admin -- reconcile <tenant-uuid> "inspected upstream state and remediation performed"
+
+The acknowledgement records an operator note; it does not change MySQL state or perform cleanup.
 
 For local-only testing, setting PROXIMA_MYSQL_ISSUE_LOCAL_ASSERTION=true allows the CLI to print a 15-minute assertion signed with PROXIMA_MYSQL_TENANT_ASSERTION_KEY. **Do not enable this in production.** Production assertions must be issued by the authenticated Control Plane; that API integration is not implemented yet.
 
