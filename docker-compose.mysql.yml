@@ -4,6 +4,7 @@ services:
     restart: unless-stopped
     environment:
       MYSQL_ROOT_PASSWORD: proxima-mysql-dev-only
+      MYSQL_ROOT_HOST: 127.0.0.1
       MYSQL_DATABASE: proxima_test
     ports:
       - "127.0.0.1:3307:3306"
@@ -32,7 +33,7 @@ services:
       context: .
       dockerfile: Dockerfile.mysql-gateway
     restart: unless-stopped
-    user: "0:0"
+    user: "65532:65532"
     entrypoint: ["/bin/sh", "-c"]
     command: "install -m 600 /run/secrets/mysql-store-key /tmp/mysql-store-key && exec /usr/local/bin/proxima-mysql-gateway"
     read_only: true
@@ -57,9 +58,11 @@ services:
     ports:
       - "127.0.0.1:13306:13306"
     volumes:
-      - ./dev/mysql-certs:/run/mysql-certs:ro
+      - ./dev/mysql-certs/ca.pem:/run/mysql-certs/ca.pem:ro
+      - ./dev/mysql-certs/gateway-cert.pem:/run/mysql-certs/gateway-cert.pem:ro
+      - ./dev/mysql-certs/gateway-key.pem:/run/mysql-certs/gateway-key.pem:ro
       - ./dev/mysql-secrets/mysql-store-key:/run/secrets/mysql-store-key:ro
-      - ./dev/mysql-data:/var/lib/proxima-mysql
+      - ./dev/mysql-data:/var/lib/proxima-mysql:ro
     networks:
       mysql-isolation:
         ipv4_address: 172.31.90.3
