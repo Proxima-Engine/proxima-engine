@@ -126,6 +126,42 @@ impl MySqlDdlExecutor for MySqlAdminExecutor {
     }
 }
 
+fn valid_tenant_database_statement(statement: &str) -> bool {
+    let rest = statement
+        .strip_prefix("CREATE DATABASE ")
+        .or_else(|| statement.strip_prefix("DROP DATABASE IF EXISTS "))
+        .or_else(|| statement.strip_prefix("DROP DATABASE "));
+    let Some(rest) = rest else { return false };
+    let token = rest.trim_start();
+    let name = if let Some(quoted) = token.strip_prefix('`') {
+        let Some(end) = quoted.find('`') else { return false };
+        &quoted[..end]
+    } else {
+        token.split_whitespace().next().unwrap_or("")
+    };
+    let Some(suffix) = name.strip_prefix("AP_T_") else { return false };
+    suffix.len() == 32 && suffix.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn valid_tenant_account_username(statement: &str) -> bool {
+    let rest = statement
+        .strip_prefix("CREATE USER ")
+        .or_else(|| statement.strip_prefix("ALTER USER "))
+        .or_else(|| statement.strip_prefix("DROP USER IF EXISTS "))
+        .or_else(|| statement.strip_prefix("REVOKE ALL PRIVILEGES, GRANT OPTION FROM "))
+        .or_else(|| statement.split_once(" TO ").map(|(_, target)| target));
+    let Some(rest) = rest else { return false };
+    let Some(start) = rest.find('\'') else { return false };
+    let after = &rest[start + 1..];
+    let Some(end) = after.find('\'') else { return false };
+    let username = &after[..end];
+    let suffix = username
+        .strip_prefix("AP_R_")
+        .or_else(|| username.strip_prefix("AP_M_"));
+    let Some(suffix) = suffix else { return false };
+    suffix.len() == 27 && suffix.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
 fn is_allowed_admin_statement(statement: &str) -> bool {
     if statement.contains(';')
         || statement.contains('\n')
@@ -161,7 +197,10 @@ fn is_allowed_admin_statement(statement: &str) -> bool {
             host.find('\'').map(|end| &host[..end])
         })
         .is_some_and(|host| host.parse::<IpAddr>().is_ok());
-    let allowed = database_prefix || (account_host_is_ip && (account_prefix || scoped_grant));
+    let allowed = (database_prefix && valid_tenant_database_statement(&upper))
+        || (account_host_is_ip
+            && (account_prefix || scoped_grant)
+            && valid_tenant_account_username(&upper));
     upper.zeroize();
     allowed
 }
@@ -636,6 +675,8 @@ mod tests {
         assert!(!is_allowed_admin_statement("CREATE USER 'ap_r_123'@'%' IDENTIFIED BY 'secret'"));
         assert!(!is_allowed_admin_statement("GRANT SELECT ON `ap_t_123`.* TO 'ap_r_123'@'%'"));
         assert!(!is_allowed_admin_statement("DROP DATABASE mysql"));
+        assert!(!is_allowed_admin_statement("CREATE DATABASE `ap_t_short`"));
+        assert!(!is_allowed_admin_statement("CREATE USER 'ap_r_short'@'127.0.0.1' IDENTIFIED BY 'secret'"));
         assert!(!is_allowed_admin_statement("CREATE DATABASE `ap_t_123`; DROP DATABASE mysql"));
     }
 
