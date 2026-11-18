@@ -633,6 +633,42 @@ mod tests {
     }
 
     #[test]
+    fn rotates_gateway_runtime_and_migration_credentials_atomically() {
+        let (_dir, store) = test_store();
+        let tenant = Uuid::new_v4();
+        let identity = MySqlTenantIdentity::for_tenant(tenant);
+        let initial = generate_gateway_credential().unwrap();
+        store.register_tenant(
+            tenant,
+            "gateway_rotate",
+            initial,
+            &identity.runtime_username,
+            &"a".repeat(64),
+            &identity.migration_username,
+            &"b".repeat(64),
+        ).unwrap();
+
+        let new_gateway = generate_gateway_credential().unwrap();
+        let new_gateway_password = store.rotate_tenant_credentials(
+            tenant,
+            "gateway_rotate",
+            new_gateway,
+            &identity.runtime_username,
+            &"c".repeat(64),
+            &identity.migration_username,
+            &"d".repeat(64),
+        ).unwrap();
+
+        let runtime = store.load_runtime_credentials(tenant).unwrap().unwrap();
+        let migration = store.load_migration_credentials(tenant).unwrap().unwrap();
+        assert_eq!(runtime.password, "c".repeat(64));
+        assert_eq!(migration.password, "d".repeat(64));
+        let account = store.find_account("gateway_rotate").unwrap().unwrap();
+        assert_eq!(account.tenant_id, tenant);
+        assert_eq!(new_gateway_password.len(), 64);
+    }
+
+    #[test]
     fn running_gateway_store_observes_external_provisioning_and_revocation() {
         let dir = tempdir().unwrap();
         let key_path = dir.path().join("key.hex");
