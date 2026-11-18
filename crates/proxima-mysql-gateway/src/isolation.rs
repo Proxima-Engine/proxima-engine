@@ -128,7 +128,7 @@ pub fn build_runtime_password_rotation(
     identity: &MySqlTenantIdentity,
     runtime_account_host: &str,
     runtime_password: &str,
-) -> Result<Vec<Zeroizing<String>>, IsolationError> {
+) -> Result<Vec<Zeroizing<String>>, MySqlIsolationError> {
     validate_host(runtime_account_host)?;
     validate_password(runtime_password)?;
     Ok(vec![Zeroizing::new(format!(
@@ -142,7 +142,7 @@ pub fn build_migration_password_rotation(
     identity: &MySqlTenantIdentity,
     migration_account_host: &str,
     migration_password: &str,
-) -> Result<Vec<Zeroizing<String>>, IsolationError> {
+) -> Result<Vec<Zeroizing<String>>, MySqlIsolationError> {
     validate_host(migration_account_host)?;
     validate_password(migration_password)?;
     Ok(vec![Zeroizing::new(format!(
