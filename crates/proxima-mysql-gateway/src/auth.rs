@@ -197,6 +197,11 @@ pub struct GatewayCredentialMaterial {
 impl GatewayCredentialMaterial {
     pub fn password(&self) -> &str { &self.password }
     pub fn verifier(&self) -> [u8; 32] { self.verifier }
+
+    /// Consume the one-time credential material. Persist only the verifier.
+    pub fn into_parts(self) -> (String, [u8; 32]) {
+        (self.password, self.verifier)
+    }
 }
 impl fmt::Debug for GatewayCredentialMaterial {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
