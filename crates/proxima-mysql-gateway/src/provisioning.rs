@@ -130,13 +130,13 @@ struct JournalEvent {
     tenant_id: String,
     event: String,
     step: Option<usize>,
+    note: Option<String>,
     timestamp: u64,
 }
 
 /// Append-only, fsync-backed journal. A tenant left active by a process crash
 /// is blocked on restart until an operator explicitly acknowledges reconciliation.
 pub struct FileProvisioningJournal {
-    path: PathBuf,
     file: File,
     active: HashSet<String>,
     blocked: HashSet<String>,
@@ -159,6 +159,15 @@ impl FileProvisioningJournal {
         let mut active = HashSet::new();
         let mut blocked = HashSet::new();
         if path.exists() {
+            let metadata = fs::metadata(&path).map_err(|_| JournalError)?;
+            if !metadata.is_file() { return Err(JournalError); }
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                if metadata.permissions().mode() & 0o077 != 0 {
+                    return Err(JournalError);
+                }
+            }
             let file = File::open(&path).map_err(|_| JournalError)?;
             let reader = BufReader::new(file);
             for line in reader.lines() {
@@ -178,10 +187,10 @@ impl FileProvisioningJournal {
             options.mode(0o600);
         }
         let file = options.open(&path).map_err(|_| JournalError)?;
-        Ok(Self { path, file, active, blocked })
+        Ok(Self { file, active, blocked })
     }
 
-    fn append(&mut self, tenant_id: &str, event: &str, step: Option<usize>) -> Result<(), JournalError> {
+    fn append(&mut self, tenant_id: &str, event: &str, step: Option<usize>, note: Option<&str>) -> Result<(), JournalError> {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_err(|_| JournalError)?
@@ -190,6 +199,7 @@ impl FileProvisioningJournal {
             tenant_id: tenant_id.to_owned(),
             event: event.to_owned(),
             step,
+            note: note.map(str::to_owned),
             timestamp,
         };
         let mut bytes = serde_json::to_vec(&record).map_err(|_| JournalError)?;
@@ -211,7 +221,7 @@ impl FileProvisioningJournal {
         {
             return Err(JournalError);
         }
-        self.append(tenant_id, "reconciled", None)?;
+        self.append(tenant_id, "reconciled", None, Some(operator_note.trim()))?;
         self.blocked.remove(tenant_id);
         Ok(())
     }
@@ -248,32 +258,32 @@ impl ProvisioningJournal for FileProvisioningJournal {
         if tenant_id.is_empty() || self.active.contains(tenant_id) || self.blocked.contains(tenant_id) {
             return Err(JournalError);
         }
-        self.append(tenant_id, "begin", None)?;
+        self.append(tenant_id, "begin", None, None)?;
         self.active.insert(tenant_id.to_owned());
         Ok(())
     }
     fn step_started(&mut self, tenant_id: &str, step: usize) -> Result<(), JournalError> {
         if !self.active.contains(tenant_id) { return Err(JournalError); }
-        self.append(tenant_id, "step_started", Some(step))
+        self.append(tenant_id, "step_started", Some(step), None)
     }
     fn step_applied(&mut self, tenant_id: &str, step: usize) -> Result<(), JournalError> {
         if !self.active.contains(tenant_id) { return Err(JournalError); }
-        self.append(tenant_id, "step_applied", Some(step))
+        self.append(tenant_id, "step_applied", Some(step), None)
     }
     fn step_compensated(&mut self, tenant_id: &str, step: usize) -> Result<(), JournalError> {
         if !self.active.contains(tenant_id) { return Err(JournalError); }
-        self.append(tenant_id, "step_compensated", Some(step))
+        self.append(tenant_id, "step_compensated", Some(step), None)
     }
     fn needs_reconciliation(&mut self, tenant_id: &str, failed_step: usize) -> Result<(), JournalError> {
         if !self.active.contains(tenant_id) { return Err(JournalError); }
-        self.append(tenant_id, "needs_reconciliation", Some(failed_step))?;
+        self.append(tenant_id, "needs_reconciliation", Some(failed_step), None)?;
         self.active.remove(tenant_id);
         self.blocked.insert(tenant_id.to_owned());
         Ok(())
     }
     fn complete(&mut self, tenant_id: &str) -> Result<(), JournalError> {
         if !self.active.contains(tenant_id) { return Err(JournalError); }
-        self.append(tenant_id, "complete", None)?;
+        self.append(tenant_id, "complete", None, None)?;
         self.active.remove(tenant_id);
         Ok(())
     }
