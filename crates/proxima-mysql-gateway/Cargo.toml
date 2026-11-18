@@ -9,3 +9,7 @@ description = "Isolated MySQL protocol and tenant-boundary gateway primitives fo
 path = "src/lib.rs"
 
 [dependencies]
+hmac = "0.12"
+sha2 = "0.10"
+hex = "0.4"
+uuid = { version = "1", features = ["v4"] }
