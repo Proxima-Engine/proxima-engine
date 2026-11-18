@@ -98,6 +98,9 @@ if (-not (Test-Path $assertionKey)) {
     [BitConverter]::ToString($bytes).Replace("-", "").ToLowerInvariant() | Set-Content -NoNewline $assertionKey
 }
 
+$assertionValue = (Get-Content $assertionKey -Raw).Trim()
+"PROXIMA_MYSQL_TENANT_ASSERTION_KEY=$assertionValue" | Set-Content -Encoding ascii (Join-Path $secretDir "mysql-gateway.env")
+
 Write-Host "Local MySQL CA, server/gateway certificates and secret keys are ready." -ForegroundColor Green
 Write-Host "Keep dev\mysql-certs and dev\mysql-secrets private; they are excluded from Git."
 Write-Host "For the gateway Compose profile, set this in the current PowerShell session:"
