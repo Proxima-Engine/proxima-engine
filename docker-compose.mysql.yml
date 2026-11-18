@@ -10,6 +10,7 @@ services:
     ports:
       - "127.0.0.1:3307:3306"
     volumes:
+      - mysql-test-data:/var/lib/mysql
       - ./dev/mysql-certs/ca.pem:/run/mysql-certs/ca.pem:ro
       - ./dev/mysql-certs/mysql-server-cert.pem:/run/mysql-certs/server-cert.pem:ro
       - ./dev/mysql-certs/mysql-server-key.pem:/run/mysql-certs/server-key.pem:ro
@@ -68,6 +69,9 @@ services:
     depends_on:
       mysql-test:
         condition: service_healthy
+
+volumes:
+  mysql-test-data:
 
 networks:
   mysql-isolation:
