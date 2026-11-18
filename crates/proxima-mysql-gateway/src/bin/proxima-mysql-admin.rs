@@ -112,7 +112,14 @@ fn main() {
                 _ => Err("usage: proxima-mysql-admin reconcile <tenant-uuid> <operator-note>".into()),
             }
         }
-        _ => Err("usage: proxima-mysql-admin <provision|rotate|revoke|reconcile> ...".into()),
+        Some("rotate-assertion-key") => {
+            let tenant = args.next();
+            match (tenant, args.next()) {
+                (Some(tenant), None) => rotate_assertion_key(tenant),
+                _ => Err("usage: proxima-mysql-admin rotate-assertion-key <tenant-uuid>".into()),
+            }
+        }
+        _ => Err("usage: proxima-mysql-admin <provision|rotate|revoke|rotate-assertion-key|reconcile> ...".into()),
     };
     if let Err(error) = result {
         eprintln!("MySQL provisioning failed: {error}");
@@ -351,6 +358,24 @@ async fn rotate(tenant_value: String, gateway_username: String) -> Result<(), St
     println!("Gateway username: {gateway_username}");
     println!("Gateway password (shown once): {gateway_password}");
     println!("Runtime and migration credentials were rotated and stored encrypted; their values were not printed.");
+    Ok(())
+}
+
+fn rotate_assertion_key(tenant_value: String) -> Result<(), String> {
+    let tenant_id = uuid::Uuid::parse_str(&tenant_value)
+        .map_err(|_| "tenant ID must be a UUID".to_owned())?;
+    let mut encoded = required("PROXIMA_MYSQL_TENANT_ASSERTION_KEY")?;
+    if encoded.len() != 64 || !encoded.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        encoded.zeroize();
+        return Err("PROXIMA_MYSQL_TENANT_ASSERTION_KEY must be 64 ASCII hexadecimal characters".into());
+    }
+    let key = Zeroizing::new(encoded.as_bytes().to_vec());
+    encoded.zeroize();
+    let store = open_store()?;
+    store.rotate_assertion_key(tenant_id, &key)
+        .map_err(|_| "could not rotate the tenant assertion key in the encrypted registry".to_owned())?;
+    println!("Tenant assertion verification key updated for {tenant_id}.");
+    println!("Coordinate this change with the Control Plane signer before issuing new tenant assertions.");
     Ok(())
 }
 
