@@ -23,6 +23,7 @@ use std::{
 };
 use uuid::Uuid;
 use zeroize::Zeroize;
+use zeroize::Zeroize;
 
 const MAGIC: &[u8; 8] = b"APMYSQL1";
 const AAD: &[u8] = b"agata-proxima-mysql-secret-store-v1";
@@ -64,6 +65,20 @@ struct StoreDocument {
     upstream: Vec<StoredUpstreamCredential>,
     #[serde(default)]
     migration: Vec<StoredMigrationCredential>,
+}
+
+impl Drop for StoreDocument {
+    fn drop(&mut self) {
+        for account in &mut self.accounts {
+            account.verifier_hex.zeroize();
+        }
+        for credential in &mut self.upstream {
+            credential.password.zeroize();
+        }
+        for credential in &mut self.migration {
+            credential.password.zeroize();
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -478,8 +493,10 @@ fn load_key(path: &Path) -> Result<[u8; 32], StoreError> {
     if encoded.len() != 64 || !encoded.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return Err(StoreError::InvalidKey);
     }
-    let bytes = hex::decode(encoded).map_err(|_| StoreError::InvalidKey)?;
-    bytes.try_into().map_err(|_| StoreError::InvalidKey)
+    let mut bytes = hex::decode(encoded).map_err(|_| StoreError::InvalidKey)?;
+    let key: [u8; 32] = bytes.as_slice().try_into().map_err(|_| StoreError::InvalidKey)?;
+    bytes.zeroize();
+    Ok(key)
 }
 
 fn read_bounded(path: &Path) -> Result<Vec<u8>, StoreError> {
@@ -532,8 +549,9 @@ fn decrypt_document(key: &[u8; 32], encrypted: &[u8]) -> Result<StoreDocument, S
     let nonce = Nonce::assume_unique_for_key(nonce_bytes);
     let plaintext = cipher.open_in_place(nonce, Aad::from(AAD), &mut ciphertext)
         .map_err(|_| StoreError::CorruptStore)?;
-    let document: StoreDocument = serde_json::from_slice(plaintext)
-        .map_err(|_| StoreError::CorruptStore)?;
+    let parsed = serde_json::from_slice(plaintext);
+    ciphertext.zeroize();
+    let document: StoreDocument = parsed.map_err(|_| StoreError::CorruptStore)?;
     Ok(document)
 }
 
