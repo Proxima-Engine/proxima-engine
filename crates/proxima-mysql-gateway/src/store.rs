@@ -1,0 +1,503 @@
+//! Encrypted local registry for MySQL gateway accounts and tenant runtime secrets.
+//!
+//! The registry is a single-writer local store. It encrypts the complete
+//! document with AES-256-GCM. The encryption key is supplied separately via a
+//! protected key file and is never stored beside the encrypted registry.
+use crate::auth::{
+    AccountError, GatewayCredentialMaterial, TenantAccount, TenantAccountDirectory,
+    TenantUpstreamCredentialStore, TenantUpstreamCredentials,
+};
+use crate::isolation::MySqlTenantIdentity;
+use ring::{
+    aead::{Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM},
+    rand::{SecureRandom, SystemRandom},
+};
+use serde::{Deserialize, Serialize};
+use std::{
+    fmt,
+    fs::{self, File, OpenOptions},
+    io::{Read, Write},
+    path::{Path, PathBuf},
+    sync::RwLock,
+};
+use uuid::Uuid;
+
+const MAGIC: &[u8; 8] = b"APMYSQL1";
+const AAD: &[u8] = b"agata-proxima-mysql-secret-store-v1";
+const NONCE_LEN: usize = 12;
+const MAX_STORE_BYTES: usize = 16 * 1024 * 1024;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StoreError {
+    InvalidConfiguration,
+    InsecureKeyPermissions,
+    InvalidKey,
+    CorruptStore,
+    StoreUnavailable,
+    DuplicateAccount,
+    InvalidAccount,
+    TenantAlreadyRegistered,
+}
+
+impl fmt::Display for StoreError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidConfiguration => write!(f, "invalid MySQL secret-store configuration"),
+            Self::InsecureKeyPermissions => write!(f, "MySQL secret-store key file permissions are too broad"),
+            Self::InvalidKey => write!(f, "MySQL secret-store key must contain exactly 32 bytes encoded as 64 hexadecimal characters"),
+            Self::CorruptStore => write!(f, "MySQL encrypted secret store is invalid or cannot be authenticated"),
+            Self::StoreUnavailable => write!(f, "MySQL encrypted secret store is unavailable"),
+            Self::DuplicateAccount => write!(f, "MySQL gateway account already exists"),
+            Self::InvalidAccount => write!(f, "invalid MySQL tenant account or runtime credential"),
+            Self::TenantAlreadyRegistered => write!(f, "MySQL tenant already has runtime credentials registered"),
+        }
+    }
+}
+impl std::error::Error for StoreError {}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct StoreDocument {
+    version: u32,
+    accounts: Vec<StoredGatewayAccount>,
+    upstream: Vec<StoredUpstreamCredential>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct StoredGatewayAccount {
+    username: String,
+    tenant_id: String,
+    verifier_hex: String,
+    enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct StoredUpstreamCredential {
+    tenant_id: String,
+    username: String,
+    password: String,
+}
+
+pub struct EncryptedTenantStore {
+    path: PathBuf,
+    key: [u8; 32],
+    document: RwLock<StoreDocument>,
+}
+
+impl fmt::Debug for EncryptedTenantStore {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("EncryptedTenantStore")
+            .field("path", &self.path)
+            .field("key", &"[REDACTED]")
+            .field("account_count", &self.document.read().map(|d| d.accounts.len()).unwrap_or(0))
+            .field("tenant_credential_count", &self.document.read().map(|d| d.upstream.len()).unwrap_or(0))
+            .finish()
+    }
+}
+
+impl EncryptedTenantStore {
+    /// Open or initialize the encrypted registry. The key file must contain
+    /// exactly 64 hexadecimal characters. On Unix it must be owner-only (0600).
+    /// On Windows, place it in a directory whose ACL grants access only to the
+    /// gateway service identity and administrators.
+    pub fn open(path: impl Into<PathBuf>, key_file: impl AsRef<Path>) -> Result<Self, StoreError> {
+        let path = path.into();
+        let key = load_key(key_file.as_ref())?;
+        reject_symlink_if_present(&path)?;
+        let document = if path.exists() {
+            let encrypted = read_bounded(&path)?;
+            decrypt_document(&key, &encrypted)?
+        } else {
+            StoreDocument { version: 1, ..StoreDocument::default() }
+        };
+        if document.version != 1 {
+            return Err(StoreError::CorruptStore);
+        }
+        Ok(Self { path, key, document: RwLock::new(document) })
+    }
+
+    /// Register a new gateway account and its matching upstream runtime
+    /// credential. The cleartext gateway password is returned exactly once;
+    /// only its MySQL-compatible double-SHA256 verifier is persisted.
+    pub fn register_tenant(
+        &self,
+        tenant_id: Uuid,
+        gateway_username: &str,
+        gateway_credential: GatewayCredentialMaterial,
+        upstream_username: &str,
+        upstream_password: &str,
+    ) -> Result<String, StoreError> {
+        validate_gateway_username(gateway_username)?;
+        let identity = MySqlTenantIdentity::for_tenant(tenant_id);
+        if upstream_username != identity.runtime_username
+            || !valid_password(upstream_password)
+        {
+            return Err(StoreError::InvalidAccount);
+        }
+        let (gateway_password, verifier) = gateway_credential.into_parts();
+        let verifier_hex = hex::encode(verifier);
+        let mut document = self.document.write().map_err(|_| StoreError::StoreUnavailable)?;
+        if document.accounts.iter().any(|account| account.username == gateway_username) {
+            return Err(StoreError::DuplicateAccount);
+        }
+        if document.upstream.iter().any(|entry| entry.tenant_id == tenant_id.to_string()) {
+            return Err(StoreError::TenantAlreadyRegistered);
+        }
+        let mut next = document.clone();
+        next.accounts.push(StoredGatewayAccount {
+            username: gateway_username.to_owned(),
+            tenant_id: tenant_id.to_string(),
+            verifier_hex,
+            enabled: true,
+        });
+        next.upstream.push(StoredUpstreamCredential {
+            tenant_id: tenant_id.to_string(),
+            username: upstream_username.to_owned(),
+            password: upstream_password.to_owned(),
+        });
+        self.persist(&next)?;
+        *document = next;
+        Ok(gateway_password)
+    }
+
+    /// Disable every gateway account for a tenant and remove its upstream
+    /// runtime credential. Existing sessions are not force-closed by this
+    /// operation; callers must drain/terminate them separately.
+    pub fn revoke_tenant(&self, tenant_id: Uuid) -> Result<(), StoreError> {
+        let mut document = self.document.write().map_err(|_| StoreError::StoreUnavailable)?;
+        let mut next = document.clone();
+        for account in &mut next.accounts {
+            if account.tenant_id == tenant_id.to_string() {
+                account.enabled = false;
+            }
+        }
+        next.upstream.retain(|entry| entry.tenant_id != tenant_id.to_string());
+        self.persist(&next)?;
+        *document = next;
+        Ok(())
+    }
+
+    /// Rotate a gateway login credential. The replacement is returned once.
+    pub fn rotate_gateway_credential(
+        &self,
+        username: &str,
+        credential: GatewayCredentialMaterial,
+    ) -> Result<String, StoreError> {
+        validate_gateway_username(username)?;
+        let (password, verifier) = credential.into_parts();
+        let mut document = self.document.write().map_err(|_| StoreError::StoreUnavailable)?;
+        let mut next = document.clone();
+        let account = next.accounts.iter_mut()
+            .find(|account| account.username == username && account.enabled)
+            .ok_or(StoreError::InvalidAccount)?;
+        account.verifier_hex = hex::encode(verifier);
+        self.persist(&next)?;
+        *document = next;
+        Ok(password)
+    }
+
+    /// Rotate the tenant's upstream MySQL runtime password. The gateway
+    /// account verifier is intentionally unaffected.
+    pub fn rotate_upstream_password(
+        &self,
+        tenant_id: Uuid,
+        password: &str,
+    ) -> Result<(), StoreError> {
+        if !valid_password(password) {
+            return Err(StoreError::InvalidAccount);
+        }
+        let mut document = self.document.write().map_err(|_| StoreError::StoreUnavailable)?;
+        let mut next = document.clone();
+        let entry = next.upstream.iter_mut()
+            .find(|entry| entry.tenant_id == tenant_id.to_string())
+            .ok_or(StoreError::InvalidAccount)?;
+        entry.password = password.to_owned();
+        self.persist(&next)?;
+        *document = next;
+        Ok(())
+    }
+
+    fn persist(&self, document: &StoreDocument) -> Result<(), StoreError> {
+        let encrypted = encrypt_document(&self.key, document)?;
+        let parent = self.path.parent().ok_or(StoreError::InvalidConfiguration)?;
+        fs::create_dir_all(parent).map_err(|_| StoreError::StoreUnavailable)?;
+        reject_symlink_if_present(&self.path)?;
+        let mut random = [0u8; 8];
+        SystemRandom::new().fill(&mut random).map_err(|_| StoreError::StoreUnavailable)?;
+        let temp_path = self.path.with_extension(format!("tmp-{}", hex::encode(random)));
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        set_private_file_mode(&mut options);
+        let mut file = options.open(&temp_path).map_err(|_| StoreError::StoreUnavailable)?;
+        let write_result = (|| {
+            file.write_all(&encrypted)?;
+            file.sync_all()?;
+            fs::rename(&temp_path, &self.path)?;
+            if let Ok(directory) = File::open(parent) {
+                let _ = directory.sync_all();
+            }
+            Ok::<(), std::io::Error>(())
+        })();
+        if write_result.is_err() {
+            let _ = fs::remove_file(&temp_path);
+            return Err(StoreError::StoreUnavailable);
+        }
+        Ok(())
+    }
+}
+
+impl Drop for EncryptedTenantStore {
+    fn drop(&mut self) {
+        use zeroize::Zeroize;
+        self.key.zeroize();
+    }
+}
+
+impl TenantAccountDirectory for EncryptedTenantStore {
+    fn find_account(&self, username: &str) -> Result<Option<TenantAccount>, AccountError> {
+        let document = self.document.read().map_err(|_| AccountError::DirectoryUnavailable)?;
+        let Some(account) = document.accounts.iter()
+            .find(|account| account.username == username && account.enabled)
+        else {
+            return Ok(None);
+        };
+        let tenant_id = Uuid::parse_str(&account.tenant_id)
+            .map_err(|_| AccountError::DirectoryUnavailable)?;
+        let verifier = hex::decode(&account.verifier_hex)
+            .map_err(|_| AccountError::DirectoryUnavailable)?;
+        let verifier: [u8; 32] = verifier.try_into()
+            .map_err(|_| AccountError::DirectoryUnavailable)?;
+        Ok(Some(TenantAccount::from_verifier(
+            account.username.clone(), tenant_id, verifier
+        )))
+    }
+}
+
+impl TenantUpstreamCredentialStore for EncryptedTenantStore {
+    fn load_runtime_credentials(&self, tenant_id: Uuid) -> Result<Option<TenantUpstreamCredentials>, AccountError> {
+        let document = self.document.read().map_err(|_| AccountError::DirectoryUnavailable)?;
+        let Some(entry) = document.upstream.iter()
+            .find(|entry| entry.tenant_id == tenant_id.to_string())
+        else {
+            return Ok(None);
+        };
+        Ok(Some(TenantUpstreamCredentials {
+            tenant_id,
+            username: entry.username.clone(),
+            password: entry.password.clone(),
+        }))
+    }
+}
+
+fn load_key(path: &Path) -> Result<[u8; 32], StoreError> {
+    reject_symlink_if_present(path)?;
+    let metadata = fs::metadata(path).map_err(|_| StoreError::StoreUnavailable)?;
+    if !metadata.is_file() {
+        return Err(StoreError::InvalidConfiguration);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if metadata.permissions().mode() & 0o077 != 0 {
+            return Err(StoreError::InsecureKeyPermissions);
+        }
+    }
+    let mut encoded = String::new();
+    File::open(path)
+        .and_then(|mut file| file.read_to_string(&mut encoded))
+        .map_err(|_| StoreError::StoreUnavailable)?;
+    let encoded = encoded.trim();
+    if encoded.len() != 64 || !encoded.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(StoreError::InvalidKey);
+    }
+    let bytes = hex::decode(encoded).map_err(|_| StoreError::InvalidKey)?;
+    bytes.try_into().map_err(|_| StoreError::InvalidKey)
+}
+
+fn read_bounded(path: &Path) -> Result<Vec<u8>, StoreError> {
+    let metadata = fs::metadata(path).map_err(|_| StoreError::StoreUnavailable)?;
+    if !metadata.is_file() || metadata.len() as usize > MAX_STORE_BYTES {
+        return Err(StoreError::CorruptStore);
+    }
+    let mut file = File::open(path).map_err(|_| StoreError::StoreUnavailable)?;
+    let mut bytes = Vec::with_capacity(metadata.len() as usize);
+    file.take((MAX_STORE_BYTES + 1) as u64)
+        .read_to_end(&mut bytes)
+        .map_err(|_| StoreError::StoreUnavailable)?;
+    if bytes.len() > MAX_STORE_BYTES {
+        return Err(StoreError::CorruptStore);
+    }
+    Ok(bytes)
+}
+
+fn encrypt_document(key: &[u8; 32], document: &StoreDocument) -> Result<Vec<u8>, StoreError> {
+    let mut plaintext = serde_json::to_vec(document).map_err(|_| StoreError::StoreUnavailable)?;
+    if plaintext.len() > MAX_STORE_BYTES {
+        return Err(StoreError::StoreUnavailable);
+    }
+    let mut nonce_bytes = [0u8; NONCE_LEN];
+    SystemRandom::new().fill(&mut nonce_bytes).map_err(|_| StoreError::StoreUnavailable)?;
+    let unbound = UnboundKey::new(&AES_256_GCM, key).map_err(|_| StoreError::InvalidKey)?;
+    let cipher = LessSafeKey::new(unbound);
+    let nonce = Nonce::assume_unique_for_key(nonce_bytes);
+    cipher.seal_in_place_append_tag(nonce, Aad::from(AAD), &mut plaintext)
+        .map_err(|_| StoreError::StoreUnavailable)?;
+    let mut output = Vec::with_capacity(MAGIC.len() + NONCE_LEN + plaintext.len());
+    output.extend_from_slice(MAGIC);
+    output.extend_from_slice(&nonce_bytes);
+    output.extend_from_slice(&plaintext);
+    Ok(output)
+}
+
+fn decrypt_document(key: &[u8; 32], encrypted: &[u8]) -> Result<StoreDocument, StoreError> {
+    if encrypted.len() < MAGIC.len() + NONCE_LEN + 16
+        || encrypted.len() > MAX_STORE_BYTES + MAGIC.len() + NONCE_LEN + 16
+        || &encrypted[..MAGIC.len()] != MAGIC
+    {
+        return Err(StoreError::CorruptStore);
+    }
+    let nonce_bytes: [u8; NONCE_LEN] = encrypted[MAGIC.len()..MAGIC.len() + NONCE_LEN]
+        .try_into().map_err(|_| StoreError::CorruptStore)?;
+    let mut ciphertext = encrypted[MAGIC.len() + NONCE_LEN..].to_vec();
+    let unbound = UnboundKey::new(&AES_256_GCM, key).map_err(|_| StoreError::InvalidKey)?;
+    let cipher = LessSafeKey::new(unbound);
+    let nonce = Nonce::assume_unique_for_key(nonce_bytes);
+    let plaintext = cipher.open_in_place(nonce, Aad::from(AAD), &mut ciphertext)
+        .map_err(|_| StoreError::CorruptStore)?;
+    let document: StoreDocument = serde_json::from_slice(plaintext)
+        .map_err(|_| StoreError::CorruptStore)?;
+    Ok(document)
+}
+
+fn reject_symlink_if_present(path: &Path) -> Result<(), StoreError> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => Err(StoreError::InvalidConfiguration),
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(_) => Err(StoreError::StoreUnavailable),
+    }
+}
+
+fn set_private_file_mode(options: &mut OpenOptions) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+}
+
+fn validate_gateway_username(username: &str) -> Result<(), StoreError> {
+    if username.is_empty() || username.len() > 32
+        || !username.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+    {
+        return Err(StoreError::InvalidAccount);
+    }
+    Ok(())
+}
+
+fn valid_password(password: &str) -> bool {
+    password.len() == 64 && password.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::auth::{generate_gateway_credential, TenantAccountDirectory, TenantUpstreamCredentialStore};
+    use tempfile::tempdir;
+
+    fn test_store() -> (tempfile::TempDir, EncryptedTenantStore) {
+        let dir = tempdir().unwrap();
+        let key_path = dir.path().join("key.hex");
+        let key = "ab".repeat(32);
+        fs::write(&key_path, &key).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&key_path, fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        let store = EncryptedTenantStore::open(dir.path().join("tenants.enc"), &key_path).unwrap();
+        (dir, store)
+    }
+
+    #[test]
+    fn registry_persists_encrypted_credentials_and_reopens() {
+        let (dir, store) = test_store();
+        let tenant = Uuid::new_v4();
+        let gateway = generate_gateway_credential().unwrap();
+        let gateway_password = gateway.password().to_owned();
+        let identity = MySqlTenantIdentity::for_tenant(tenant);
+        let runtime_password = "c".repeat(64);
+        store.register_tenant(
+            tenant, "gateway_a", gateway, &identity.runtime_username, &runtime_password
+        ).unwrap();
+
+        let encrypted = fs::read(dir.path().join("tenants.enc")).unwrap();
+        assert!(!String::from_utf8_lossy(&encrypted).contains(&gateway_password));
+        assert!(!String::from_utf8_lossy(&encrypted).contains(&runtime_password));
+
+        let key_path = dir.path().join("key.hex");
+        let reopened = EncryptedTenantStore::open(dir.path().join("tenants.enc"), key_path).unwrap();
+        let account = reopened.find_account("gateway_a").unwrap().unwrap();
+        assert_eq!(account.tenant_id, tenant);
+        let upstream = reopened.load_runtime_credentials(tenant).unwrap().unwrap();
+        assert_eq!(upstream.password, runtime_password);
+    }
+
+    #[test]
+    fn tampered_or_wrong_key_store_fails_closed() {
+        let (dir, store) = test_store();
+        let tenant = Uuid::new_v4();
+        let gateway = generate_gateway_credential().unwrap();
+        let identity = MySqlTenantIdentity::for_tenant(tenant);
+        store.register_tenant(tenant, "gateway_b", gateway, &identity.runtime_username, &"d".repeat(64)).unwrap();
+        drop(store);
+
+        let path = dir.path().join("tenants.enc");
+        let mut bytes = fs::read(&path).unwrap();
+        let last = bytes.len() - 1;
+        bytes[last] ^= 0x80;
+        fs::write(&path, bytes).unwrap();
+        assert!(matches!(
+            EncryptedTenantStore::open(&path, dir.path().join("key.hex")),
+            Err(StoreError::CorruptStore)
+        ));
+    }
+
+    #[test]
+    fn revoked_tenant_is_not_authenticatable_and_has_no_upstream_secret() {
+        let (_dir, store) = test_store();
+        let tenant = Uuid::new_v4();
+        let gateway = generate_gateway_credential().unwrap();
+        let identity = MySqlTenantIdentity::for_tenant(tenant);
+        store.register_tenant(tenant, "gateway_c", gateway, &identity.runtime_username, &"e".repeat(64)).unwrap();
+        store.revoke_tenant(tenant).unwrap();
+        assert!(store.find_account("gateway_c").unwrap().is_none());
+        assert!(store.load_runtime_credentials(tenant).unwrap().is_none());
+    }
+
+    #[test]
+    fn rejects_insecure_key_permissions_and_bad_account_names() {
+        let dir = tempdir().unwrap();
+        let key_path = dir.path().join("key.hex");
+        fs::write(&key_path, "ab".repeat(32)).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&key_path, fs::Permissions::from_mode(0o644)).unwrap();
+            assert_eq!(
+                EncryptedTenantStore::open(dir.path().join("store.enc"), &key_path).err(),
+                Some(StoreError::InsecureKeyPermissions)
+            );
+        }
+        let (_dir, store) = test_store();
+        assert_eq!(
+            store.register_tenant(
+                Uuid::new_v4(),
+                "invalid username",
+                generate_gateway_credential().unwrap(),
+                "invalid",
+                &"f".repeat(64)
+            ).err(),
+            Some(StoreError::InvalidAccount)
+        );
+    }
+}
