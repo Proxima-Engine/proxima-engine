@@ -170,7 +170,8 @@ async fn run() -> ProbeResult<()> {
     }
     println!("[PASS] tenant runtime account can write to its own database");
 
-    let ok = command(&mut tls, [vec![0x03], b"DO 1".to_vec()].concat()).await?;
+    let own_tenant_sql = format!("DO (SELECT COUNT(*) FROM {tenant_database}.records)");
+    let ok = command(&mut tls, [vec![0x03], own_tenant_sql.into_bytes()].concat()).await?;
     if ok.payload.first() != Some(&0x00) {
         return Err("tenant-scoped query did not return a MySQL OK packet".into());
     }
@@ -209,7 +210,8 @@ async fn run() -> ProbeResult<()> {
     }
     println!("[PASS] client connection reset rejected");
 
-    let final_ok = command(&mut tls, [vec![0x03], b"DO 1".to_vec()].concat()).await?;
+    let own_tenant_sql = format!("DO (SELECT COUNT(*) FROM {tenant_database}.records)");
+    let final_ok = command(&mut tls, [vec![0x03], own_tenant_sql.into_bytes()].concat()).await?;
     if final_ok.payload.first() != Some(&0x00) {
         return Err("tenant session did not remain usable after rejected commands".into());
     }
