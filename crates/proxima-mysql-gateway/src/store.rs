@@ -1015,7 +1015,9 @@ mod tests {
             ).err(),
             Some(StoreError::InvalidAccount)
         );
-    }    #[test]
+    }
+
+    #[test]
     fn encrypted_registry_fingerprint_detects_same_length_content_changes() {
         assert_ne!(content_fingerprint(b"tenant-a"), content_fingerprint(b"tenant-b"));
         assert_eq!(content_fingerprint(b"stable"), content_fingerprint(b"stable"));
