@@ -441,29 +441,6 @@ impl EncryptedTenantStore {
         Ok(())
     }
 
-    pub fn rotate_assertion_key(
-        &self,
-        tenant_id: Uuid,
-        assertion_key: &[u8],
-    ) -> Result<(), StoreError> {
-        self.reload_from_disk()?;
-        if assertion_key.len() != 64
-            || !assertion_key.iter().all(|byte| byte.is_ascii_hexdigit())
-        {
-            return Err(StoreError::InvalidKey);
-        }
-        let mut assertion_key_hex = Zeroizing::new(hex::encode(assertion_key));
-        let mut document = self.document.write().map_err(|_| StoreError::StoreUnavailable)?;
-        let mut next = document.clone();
-        let entry = next.assertion_keys.iter_mut()
-            .find(|entry| entry.tenant_id == tenant_id.to_string())
-            .ok_or(StoreError::InvalidAccount)?;
-        entry.key_hex = std::mem::take(&mut *assertion_key_hex);
-        self.persist(&next)?;
-        *document = next;
-        Ok(())
-    }
-
     pub fn rotate_migration_password(
         &self,
         tenant_id: Uuid,
