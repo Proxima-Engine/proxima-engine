@@ -148,7 +148,7 @@ impl MySqlGateway {
             .await
             .map_err(|_| GatewayError::ClientHandshakeRejected)?;
         verify_sequence(&ssl_request, 1)?;
-        if !is_ssl_request(&ssl_request.payload) {
+        if !is_ssl_request(&ssl_request.payload)? {
             send_error(
                 &mut tcp,
                 2,
