@@ -368,7 +368,10 @@ impl Command {
             other => return Err(CommandError::Unsupported(other)),
         };
         match command {
-            Self::InitDb | Self::ChangeUser | Self::ResetConnection => {
+            // These commands can change database/authentication context or
+            // negotiate multi-statement/session behavior. This gateway keeps
+            // the tenant binding immutable for the entire TCP connection.
+            Self::InitDb | Self::ChangeUser | Self::ResetConnection | Self::SetOption => {
                 Err(CommandError::ForbiddenTenantSwitch(command))
             }
             other => Ok(other),
@@ -445,6 +448,7 @@ mod tests {
         assert_eq!(Command::parse(&[0x02, b'd', b'b']), Err(CommandError::ForbiddenTenantSwitch(Command::InitDb)));
         assert_eq!(Command::parse(&[0x11]), Err(CommandError::ForbiddenTenantSwitch(Command::ChangeUser)));
         assert_eq!(Command::parse(&[0x1f]), Err(CommandError::ForbiddenTenantSwitch(Command::ResetConnection)));
+        assert_eq!(Command::parse(&[0x1b, 0x00, 0x00]), Err(CommandError::ForbiddenTenantSwitch(Command::SetOption)));
         assert_eq!(Command::parse(&[0x03, b'S', b'E', b'L']), Ok(Command::Query));
     }
 
