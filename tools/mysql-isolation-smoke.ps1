@@ -18,7 +18,10 @@ function Invoke-MySql {
         "mysql-test", "mysql", "--protocol=TCP", "--host=127.0.0.1",
         "--user=$User", "--batch", "--skip-column-names"
     )
-    if ($RequireTls) { $dockerArgs += "--ssl-mode=REQUIRED" }
+    if ($RequireTls) {
+        $dockerArgs += "--ssl-mode=VERIFY_IDENTITY"
+        $dockerArgs += "--ssl-ca=/tmp/mysql-certs/ca.pem"
+    }
     $dockerArgs += "--execute=$Sql"
     $output = & docker @dockerArgs 2>&1
     $exitCode = $LASTEXITCODE
