@@ -33,6 +33,7 @@ CN = mysql-test
 [v3_req]
 subjectAltName = @alt_names
 keyUsage = critical, digitalSignature, keyEncipherment
+basicConstraints = critical,CA:FALSE
 extendedKeyUsage = serverAuth
 [alt_names]
 DNS.1 = mysql-test
@@ -60,7 +61,7 @@ IP.1 = 127.0.0.1
 if (-not (Test-Path $caCert)) {
     & openssl genrsa -out $caKey 4096
     if ($LASTEXITCODE -ne 0) { throw "Could not generate local CA key." }
-    & openssl req -x509 -new -nodes -key $caKey -sha256 -days 3650 -subj "/CN=Agata Proxima MySQL Development CA" -out $caCert
+    & openssl req -x509 -new -nodes -key $caKey -sha256 -days 3650 -subj "/CN=Agata Proxima MySQL Development CA" -addext "basicConstraints=critical,CA:TRUE" -addext "keyUsage=critical,keyCertSign,cRLSign" -addext "subjectKeyIdentifier=hash" -out $caCert
     if ($LASTEXITCODE -ne 0) { throw "Could not generate local CA certificate." }
 }
 
