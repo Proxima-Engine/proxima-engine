@@ -196,6 +196,83 @@ Before production support, real MySQL 8.4 tests must cover:
 - MySQL restart, gateway restart and encrypted-store recovery.
 - Control Plane tenant lifecycle, audit, node enrollment and multi-node secret distribution.
 
+## Application connection contract
+
+The gateway accepts the existing Agata Proxima v1 tenant-token format. The tenant token is sent in the MySQL **initial handshake connection attributes** under the exact key \`_proxima_tenant_assertion\`. It is not a SQL variable, query attribute, database name, or username suffix.
+
+The 64-character organization tenant-signing-key representation used by the existing Control Plane is interpreted as its 64 ASCII bytes for HMAC, not hex-decoded into 32 bytes. The provisioning CLI stores that per-tenant key in the encrypted registry. The gateway container does not receive the signing key through its environment. It reads the per-tenant key from the encrypted registry.
+
+Do not set a \`database\` option in the client configuration. The gateway derives the tenant database from the verified assertion and its local tenant registry. The client must verify the gateway certificate and hostname.
+
+### Node.js (mysql2)
+
+\`\`\`javascript
+import fs from "node:fs";
+import mysql from "mysql2/promise";
+
+const connection = await mysql.createConnection({
+  host: process.env.PROXIMA_MYSQL_GATEWAY_HOST,
+  port: 13306,
+  user: process.env.PROXIMA_MYSQL_GATEWAY_USER,
+  password: process.env.PROXIMA_MYSQL_GATEWAY_PASSWORD,
+  ssl: {
+    ca: fs.readFileSync("./mysql-gateway-ca.pem"),
+    rejectUnauthorized: true,
+  },
+  connectAttributes: {
+    _proxima_tenant_assertion: tenantToken,
+  },
+  // Intentionally omit the database option.
+});
+
+try {
+  const [rows] = await connection.execute(
+    "SELECT id, name FROM customer_records WHERE id = ?",
+    [recordId],
+  );
+} finally {
+  await connection.end();
+}
+\`\`\`
+
+The connectAttributes option is part of the initial connection handshake in mysql2. See the [mysql2 connection configuration](https://sidorares.github.io/node-mysql2/docs/examples/connections/create-connection).
+
+### Python (mysql-connector-python)
+
+\`\`\`python
+import mysql.connector
+
+connection = mysql.connector.connect(
+    host=MYSQL_GATEWAY_HOST,
+    port=13306,
+    user=MYSQL_GATEWAY_USER,
+    password=MYSQL_GATEWAY_PASSWORD,
+    ssl_ca="mysql-gateway-ca.pem",
+    ssl_verify_cert=True,
+    ssl_verify_identity=True,
+    conn_attrs={
+        "_proxima_tenant_assertion": tenant_token,
+    },
+    # Intentionally omit the database argument.
+)
+
+try:
+    cursor = connection.cursor()
+    cursor.execute(
+        "SELECT id, name FROM customer_records WHERE id = %s",
+        (record_id,),
+    )
+    rows = cursor.fetchall()
+finally:
+    connection.close()
+\`\`\`
+
+See the [MySQL Connector/Python connection options](https://dev.mysql.com/doc/connector-python/en/connector-python-connectargs.html).
+
+### Pooling and token expiry
+
+A tenant assertion is checked during authentication and again at every command boundary. The gateway closes the session when the assertion expires or the tenant is revoked. The default assertion lifetime is one hour and the default idle-session timeout is 15 minutes. Applications must refresh tokens and recycle pooled connections before token expiry. Pools must be tenant-scoped; never share a pool or connection between tenant identities.
+
 ## MySQL-specific security constraints
 
 - Definer-security views, routines and triggers can execute with definer privileges. Their definers must be tenant-scoped and have no global privileges.
