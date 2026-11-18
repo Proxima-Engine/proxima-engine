@@ -861,6 +861,40 @@ mod tests {
     }
 
     #[test]
+    fn assertion_keys_are_isolated_rotatable_and_revoked_per_tenant() {
+        let (_dir, store) = test_store();
+        let tenant_a = Uuid::new_v4();
+        let tenant_b = Uuid::new_v4();
+        let identity_a = MySqlTenantIdentity::for_tenant(tenant_a);
+        let identity_b = MySqlTenantIdentity::for_tenant(tenant_b);
+        let key_a = b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let key_b = b"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let key_a_next = b"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+
+        store.register_tenant(
+            tenant_a, "gateway_key_a", generate_gateway_credential().unwrap(),
+            &identity_a.runtime_username, &"1".repeat(64),
+            &identity_a.migration_username, &"2".repeat(64), key_a,
+        ).unwrap();
+        store.register_tenant(
+            tenant_b, "gateway_key_b", generate_gateway_credential().unwrap(),
+            &identity_b.runtime_username, &"3".repeat(64),
+            &identity_b.migration_username, &"4".repeat(64), key_b,
+        ).unwrap();
+
+        assert_eq!(store.load_assertion_key(tenant_a).unwrap().unwrap(), key_a);
+        assert_eq!(store.load_assertion_key(tenant_b).unwrap().unwrap(), key_b);
+
+        store.rotate_assertion_key(tenant_a, key_a_next).unwrap();
+        assert_eq!(store.load_assertion_key(tenant_a).unwrap().unwrap(), key_a_next);
+        assert_eq!(store.load_assertion_key(tenant_b).unwrap().unwrap(), key_b);
+
+        store.revoke_tenant(tenant_a).unwrap();
+        assert!(store.load_assertion_key(tenant_a).unwrap().is_none());
+        assert_eq!(store.load_assertion_key(tenant_b).unwrap().unwrap(), key_b);
+    }
+
+    #[test]
     fn tampered_or_wrong_key_store_fails_closed() {
         let (dir, store) = test_store();
         let tenant = Uuid::new_v4();
