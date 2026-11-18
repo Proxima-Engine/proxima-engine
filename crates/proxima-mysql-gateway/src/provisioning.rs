@@ -48,16 +48,11 @@ pub fn execute_provisioning(
     let mut applied = Vec::new();
 
     for (index, statement) in plan.statements().iter().enumerate() {
-        journal.step_started(&tenant_id, index).map_err(|_| ProvisioningError::JournalUnavailable)?;
-        if executor.execute(statement).is_err() {
-            let mut compensation_failures = 0usize;
-            for (original_step, sql) in compensation_statements(plan, &applied) {
-                if executor.execute(&sql).is_err()
-                    || journal.step_compensated(&tenant_id, original_step).is_err()
-                {
-                    compensation_failures += 1;
-                }
+        if journal.step_started(&tenant_id, index).is_err() {
+            if applied.is_empty() {
+                return Err(ProvisioningError::JournalUnavailable);
             }
+            let mut compensation_failures = compensate(plan, &applied, executor, journal, &tenant_id);
             if journal.needs_reconciliation(&tenant_id, index).is_err() {
                 compensation_failures += 1;
             }
@@ -66,24 +61,61 @@ pub fn execute_provisioning(
                 compensation_failures,
             });
         }
-        if journal.step_applied(&tenant_id, index).is_err() {
-            let _ = journal.needs_reconciliation(&tenant_id, index);
+        if executor.execute(statement).is_err() {
+            let mut compensation_failures = compensate(plan, &applied, executor, journal, &tenant_id);
+            if journal.needs_reconciliation(&tenant_id, index).is_err() {
+                compensation_failures += 1;
+            }
             return Err(ProvisioningError::ExecutionFailed {
                 failed_step: index,
-                compensation_failures: 1,
+                compensation_failures,
             });
         }
         applied.push(index);
+        if journal.step_applied(&tenant_id, index).is_err() {
+            let mut compensation_failures = compensate(plan, &applied, executor, journal, &tenant_id);
+            if journal.needs_reconciliation(&tenant_id, index).is_err() {
+                compensation_failures += 1;
+            }
+            return Err(ProvisioningError::ExecutionFailed {
+                failed_step: index,
+                compensation_failures,
+            });
+        }
     }
 
     if journal.complete(&tenant_id).is_err() {
-        let _ = journal.needs_reconciliation(&tenant_id, plan.statements().len());
+        let mut compensation_failures = compensate(
+            plan, &applied, executor, journal, &tenant_id
+        );
+        if journal.needs_reconciliation(&tenant_id, plan.statements().len()).is_err() {
+            compensation_failures += 1;
+        }
         return Err(ProvisioningError::ExecutionFailed {
             failed_step: plan.statements().len(),
-            compensation_failures: 1,
+            compensation_failures,
         });
     }
     Ok(plan.identity().clone())
+}
+
+
+fn compensate(
+    plan: &MySqlProvisioningPlan,
+    applied: &[usize],
+    executor: &mut impl MySqlDdlExecutor,
+    journal: &mut impl ProvisioningJournal,
+    tenant_id: &str,
+) -> usize {
+    let mut failures = 0usize;
+    for (original_step, sql) in compensation_statements(plan, applied) {
+        if executor.execute(&sql).is_err()
+            || journal.step_compensated(tenant_id, original_step).is_err()
+        {
+            failures += 1;
+        }
+    }
+    failures
 }
 
 fn compensation_statements(
