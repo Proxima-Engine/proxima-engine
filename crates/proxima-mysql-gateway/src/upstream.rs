@@ -362,9 +362,13 @@ pub(crate) async fn write_packet<W: AsyncWrite + Unpin>(
     packet: &Packet,
     max_packet_size: usize,
 ) -> Result<(), UpstreamError> {
-    let frame = packet.encode(max_packet_size)?;
-    writer.write_all(&frame).await.map_err(|_| UpstreamError::TransportFailed)?;
-    writer.flush().await.map_err(|_| UpstreamError::TransportFailed)
+    let mut frame = packet.encode(max_packet_size)?;
+    let write_result = async {
+        writer.write_all(&frame).await.map_err(|_| UpstreamError::TransportFailed)?;
+        writer.flush().await.map_err(|_| UpstreamError::TransportFailed)
+    }.await;
+    frame.zeroize();
+    write_result
 }
 
 fn ensure_ok(packet: &Packet) -> Result<(), UpstreamError> {
