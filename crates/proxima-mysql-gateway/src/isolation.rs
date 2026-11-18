@@ -141,8 +141,8 @@ pub fn build_password_rotation(
         return Err(MySqlIsolationError::InvalidPassword);
     }
     Ok(vec![
-        format!("ALTER USER {} IDENTIFIED BY '{}' REQUIRE SSL", quote_account(&identity.runtime_username, account_host), runtime_password),
-        format!("ALTER USER {} IDENTIFIED BY '{}' REQUIRE SSL", quote_account(&identity.migration_username, account_host), migration_password),
+        Zeroizing::new(format!("ALTER USER {} IDENTIFIED BY '{}' REQUIRE SSL", quote_account(&identity.runtime_username, account_host), runtime_password)),
+        Zeroizing::new(format!("ALTER USER {} IDENTIFIED BY '{}' REQUIRE SSL", quote_account(&identity.migration_username, account_host), migration_password)),
     ])
 }
 
