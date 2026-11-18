@@ -162,6 +162,28 @@ fn valid_tenant_account_username(statement: &str) -> bool {
     suffix.len() == 27 && suffix.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
+fn tenant_identity_matches_grant(statement: &str) -> bool {
+    let database_prefix = format!(" ON {}AP_T_", 96 as char);
+    let Some((_, rest)) = statement.split_once(&database_prefix) else {
+        return false;
+    };
+    let Some((tenant_hex, target)) = rest.split_once("`.* TO ") else {
+        return false;
+    };
+    let Ok(tenant_id) = uuid::Uuid::parse_str(tenant_hex) else {
+        return false;
+    };
+    let identity = MySqlTenantIdentity::for_tenant(tenant_id);
+    let Some((target_username, _)) = target.split_once("@'") else {
+        return false;
+    };
+    let Some(target_username) = target_username.strip_prefix('\'') else {
+        return false;
+    };
+    target_username == identity.runtime_username.to_ascii_uppercase()
+        || target_username == identity.migration_username.to_ascii_uppercase()
+}
+
 fn account_target_has_no_trailing_sql(statement: &str) -> bool {
     let Some(marker) = statement.rfind("@'") else {
         return false;
@@ -208,7 +230,8 @@ fn is_allowed_admin_statement(statement: &str) -> bool {
     let scoped_grant = (runtime_grant || migration_grant)
         && !upper.contains(" ON *.*")
         && !upper.contains("WITH GRANT OPTION")
-        && account_target_has_no_trailing_sql(&upper);
+        && account_target_has_no_trailing_sql(&upper)
+        && tenant_identity_matches_grant(&upper);
     let account_host_is_ip = upper
         .rfind("@'")
         .and_then(|marker| {
@@ -804,6 +827,9 @@ mod tests {
         assert!(!is_allowed_admin_statement(&global_grant));
         let wrong_account_grant = runtime_grant.replace("ap_r_", "ap_m_");
         assert!(!is_allowed_admin_statement(&wrong_account_grant));
+        let wrong_database = format!("ap_t_{}", Uuid::new_v4().simple());
+        let wrong_tenant_grant = runtime_grant.replace(&plan.identity().database_name, &wrong_database);
+        assert!(!is_allowed_admin_statement(&wrong_tenant_grant));
     }
 
     #[test]
