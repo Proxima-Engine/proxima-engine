@@ -615,7 +615,10 @@ fn compensation_statements(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::isolation::build_provisioning_plan;
+    use crate::isolation::{
+        build_migration_password_rotation, build_password_rotation, build_provisioning_plan,
+        build_revocation, build_runtime_password_rotation,
+    };
     use uuid::Uuid;
 
     #[derive(Default)]
