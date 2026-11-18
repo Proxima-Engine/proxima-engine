@@ -92,6 +92,8 @@ try {
 
     Write-Host "--- Migration account checks ---" -ForegroundColor Cyan
     Assert-MySqlSuccess -Name "Tenant A migrator can create objects in Tenant A" -User "ap_test_a_migrator" -Password ("c" * 64) -Sql "CREATE TABLE ap_test_tenant_a.migration_probe (id INT)" -RequireTls | Out-Null
+    Assert-MySqlSuccess -Name "Tenant A migrator can create a tenant-local stored routine" -User "ap_test_a_migrator" -Password ("c" * 64) -Sql "CREATE PROCEDURE ap_test_tenant_a.tenant_count() SELECT COUNT(*) FROM ap_test_tenant_a.records" -RequireTls | Out-Null
+    Assert-MySqlSuccess -Name "Tenant B migrator can create a tenant-local stored routine" -User "ap_test_b_migrator" -Password ("d" * 64) -Sql "CREATE PROCEDURE ap_test_tenant_b.tenant_count() SELECT COUNT(*) FROM ap_test_tenant_b.records" -RequireTls | Out-Null
     Assert-MySqlDenied -Name "Tenant A migrator cannot create objects in Tenant B" -User "ap_test_a_migrator" -Password ("c" * 64) -Sql "CREATE TABLE ap_test_tenant_b.forbidden (id INT)"
 
     Write-Host "--- Credential rotation checks ---" -ForegroundColor Cyan
