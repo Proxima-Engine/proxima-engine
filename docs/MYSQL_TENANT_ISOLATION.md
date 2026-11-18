@@ -43,7 +43,7 @@ The initial supported model is **one database per tenant**, with separate accoun
 - No global grants, GRANT OPTION, account administration, FILE, SUPER, SYSTEM_USER or cross-database grants are issued to tenant accounts.
 - Both accounts require TLS.
 - Runtime accounts are capped at 64 concurrent connections; migration accounts are capped at 4.
-- Account host matching is exact. Wildcard host patterns are rejected.
+- Account host matching is restricted to literal IPv4/IPv6 addresses. DNS names, wildcards, CIDR ranges and netmasks are rejected; configure the gateway's actual source IP.
 - Revocation locks tenant accounts and removes their grants; it does not drop customer data.
 - Runtime and migration credentials are distinct and stored encrypted locally.
 
@@ -119,7 +119,7 @@ Provision a tenant from the repository root:
 
     cargo run -p proxima-mysql-gateway --bin proxima-mysql-admin -- provision <tenant-uuid> <gateway-username>
 
-The CLI generates independent high-entropy runtime, migration and gateway credentials. It sends DDL only over verified TLS, persists the runtime and migration credentials in the encrypted local registry, and prints the gateway password once. The provisioning administrator password is read from the process environment and is not persisted by the gateway. Do not capture CLI output in CI logs, shell transcripts or source control.
+The CLI generates independent high-entropy runtime, migration and gateway credentials. It sends DDL only over verified TLS, persists the runtime and migration credentials plus a per-tenant assertion signing key in the encrypted local registry, and prints the gateway password once. The gateway does not receive the signing key through its environment; it loads the tenant-specific key from the encrypted registry. The provisioning administrator password is read from the process environment and is not persisted by the gateway. Do not capture CLI output in CI logs, shell transcripts or source control.
 
 Rotate all tenant credentials (gateway, runtime and migration) with:
 
