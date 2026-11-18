@@ -108,8 +108,8 @@ impl MySqlDdlExecutor for MySqlAdminExecutor {
                 return Err(DdlExecutionError);
             }
             match response.payload.first() {
-                Some(0x00) => Ok(()), // OK packet
-                Some(0xff) => Err(DdlExecutionError), // ERR packet; stream remains synchronized
+                Some(&0x00) => Ok(()), // OK packet
+                Some(&0xff) => Err(DdlExecutionError), // ERR packet; stream remains synchronized
                 _ => {
                     // DDL plan statements must return OK or ERR. A result set,
                     // LOCAL INFILE request or unknown response makes the
@@ -585,7 +585,7 @@ mod tests {
             &plan,
             &mut executor,
             &mut journal,
-            |_| Err(()),
+            |_| Err::<(), ()>(()),
             |_, _| Ok(()),
         ).await.unwrap_err();
         assert!(matches!(error, ProvisioningError::ExecutionFailed { .. }));
