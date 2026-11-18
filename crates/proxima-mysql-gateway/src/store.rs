@@ -586,6 +586,38 @@ mod tests {
     }
 
     #[test]
+    fn running_gateway_store_observes_external_provisioning_and_revocation() {
+        let dir = tempdir().unwrap();
+        let key_path = dir.path().join("key.hex");
+        fs::write(&key_path, "cd".repeat(32)).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&key_path, fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        let store_path = dir.path().join("tenants.enc");
+        let gateway_view = EncryptedTenantStore::open(&store_path, &key_path).unwrap();
+        let admin_view = EncryptedTenantStore::open(&store_path, &key_path).unwrap();
+
+        let tenant = Uuid::new_v4();
+        let identity = MySqlTenantIdentity::for_tenant(tenant);
+        admin_view.register_tenant(
+            tenant,
+            "gateway_live_reload",
+            generate_gateway_credential().unwrap(),
+            &identity.runtime_username,
+            &"1".repeat(64),
+            &identity.migration_username,
+            &"2".repeat(64),
+        ).unwrap();
+
+        assert!(gateway_view.find_account("gateway_live_reload").unwrap().is_some());
+        admin_view.revoke_tenant(tenant).unwrap();
+        assert!(gateway_view.find_account("gateway_live_reload").unwrap().is_none());
+        assert!(gateway_view.load_runtime_credentials(tenant).unwrap().is_none());
+    }
+
+    #[test]
     fn tampered_or_wrong_key_store_fails_closed() {
         let (dir, store) = test_store();
         let tenant = Uuid::new_v4();
