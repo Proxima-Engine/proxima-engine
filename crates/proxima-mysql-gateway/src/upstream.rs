@@ -10,6 +10,7 @@ use crate::protocol::{
     CLIENT_PROTOCOL_41, CLIENT_SECURE_CONNECTION, CLIENT_SSL, MAX_PACKET_PAYLOAD,
     CLIENT_LONG_PASSWORD, CLIENT_LONG_FLAG, CLIENT_TRANSACTIONS, CLIENT_MULTI_RESULTS,
     CLIENT_PS_MULTI_RESULTS, CLIENT_SESSION_TRACK, CLIENT_DEPRECATE_EOF,
+    MIN_HANDSHAKE_PACKET_SIZE,
 };
 use rustls::pki_types::ServerName;
 use rustls::{ClientConfig, RootCertStore};
@@ -44,7 +45,7 @@ impl UpstreamTlsConfig {
         max_packet_size: usize,
     ) -> Result<Self, UpstreamError> {
         if host.is_empty() || port == 0 || connect_timeout.is_zero() || handshake_timeout.is_zero()
-            || max_packet_size == 0 || max_packet_size >= MAX_PACKET_PAYLOAD {
+            || max_packet_size < MIN_HANDSHAKE_PACKET_SIZE || max_packet_size >= MAX_PACKET_PAYLOAD {
             return Err(UpstreamError::InvalidConfiguration);
         }
         let server_name = ServerName::try_from(server_name)
