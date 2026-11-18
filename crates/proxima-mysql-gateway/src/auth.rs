@@ -114,7 +114,7 @@ pub trait TenantUpstreamCredentialStore {
     fn load_runtime_credentials(&self, tenant_id: Uuid) -> Result<Option<TenantUpstreamCredentials>, AccountError>;
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct AuthenticatedTenantSession {
     pub tenant_id: Uuid,
     pub database_name: String,
