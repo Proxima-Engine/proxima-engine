@@ -132,17 +132,19 @@ impl ServerHandshake {
         c.skip(10)?;
 
         if capability_flags & CLIENT_PLUGIN_AUTH != 0 {
-            let second_len = auth_len.saturating_sub(8).max(13);
-            let remaining = c.remaining();
-            let take = second_len.min(remaining);
-            if take > 0 {
-                let part = c.take(take)?;
-                let end = part.iter().position(|b| *b == 0).unwrap_or(part.len());
-                auth.extend_from_slice(&part[..end]);
+            if auth_len < 21 || c.remaining() < 13 {
+                return Err(ProtocolError::InvalidHandshake);
             }
+            let part = c.take(13)?;
+            if part[12] != 0 {
+                return Err(ProtocolError::InvalidHandshake);
+            }
+            auth.extend_from_slice(&part[..12]);
         }
-        let auth_plugin_name = if capability_flags & CLIENT_PLUGIN_AUTH != 0 && c.remaining() > 0 {
-            Some(c.nul_string()?)
+        let auth_plugin_name = if capability_flags & CLIENT_PLUGIN_AUTH != 0 {
+            let plugin = c.nul_string()?;
+            if plugin.is_empty() { return Err(ProtocolError::InvalidHandshake); }
+            Some(plugin)
         } else {
             None
         };
@@ -239,6 +241,7 @@ fn parse_attributes(input: &[u8]) -> Result<Vec<(String, String)>, ProtocolError
         let key_len = usize::try_from(c.lenenc_integer()?.ok_or(ProtocolError::InvalidLengthEncodedInteger)?)
             .map_err(|_| ProtocolError::PacketTooLarge)?;
         if key_len > 256 { return Err(ProtocolError::PacketTooLarge); }
+        if key_len == 0 { return Err(ProtocolError::InvalidHandshake); }
         let key = c.utf8(c.take(key_len)?)?;
         let value_len = usize::try_from(c.lenenc_integer()?.ok_or(ProtocolError::InvalidLengthEncodedInteger)?)
             .map_err(|_| ProtocolError::PacketTooLarge)?;
