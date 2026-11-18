@@ -6,6 +6,7 @@
 use std::fmt;
 
 pub const MAX_PACKET_PAYLOAD: usize = 0x00ff_ffff;
+pub const MIN_HANDSHAKE_PACKET_SIZE: usize = 17 * 1024;
 pub const CLIENT_CONNECT_WITH_DB: u32 = 0x0000_0008;
 pub const CLIENT_SECURE_CONNECTION: u32 = 0x0000_8000;
 pub const CLIENT_PLUGIN_AUTH: u32 = 0x0008_0000;
