@@ -22,6 +22,7 @@ use std::{
 use tokio::{net::TcpStream, time::timeout};
 use tokio_rustls::client::TlsStream;
 use zeroize::Zeroize;
+use zeroize::Zeroize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DdlExecutionError;
