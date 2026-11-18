@@ -9,4 +9,3 @@ pub mod security_breaker;
 pub mod session;
 pub mod tenant;
 pub mod tls;
-pub mod mysql_isolation;
