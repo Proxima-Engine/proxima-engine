@@ -170,6 +170,12 @@ impl MySqlGateway {
                 .try_into()
                 .map_err(|_| GatewayError::ClientHandshakeRejected)?,
         );
+        let requested_max_packet_size = u32::from_le_bytes(
+            ssl_request.payload[4..8]
+                .try_into()
+                .map_err(|_| GatewayError::ClientHandshakeRejected)?,
+        );
+        let requested_character_set = ssl_request.payload[8];
         crate::protocol::validate_client_capabilities(requested_flags, capabilities)?;
 
         let mut client = timeout(
@@ -238,6 +244,21 @@ impl MySqlGateway {
                 return Err(GatewayError::ClientHandshakeRejected);
             }
         };
+
+        if handshake.capability_flags != requested_flags
+            || handshake.max_packet_size != requested_max_packet_size
+            || handshake.character_set != requested_character_set
+        {
+            send_error(
+                &mut client,
+                3,
+                1045,
+                "28000",
+                "MySQL TLS and handshake capabilities do not match",
+                self.config.max_packet_size,
+            ).await?;
+            return Err(GatewayError::ClientHandshakeRejected);
+        }
 
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
