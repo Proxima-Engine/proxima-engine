@@ -91,7 +91,9 @@ pub fn generate_mysql_password() -> Result<String, MySqlIsolationError> {
     SystemRandom::new()
         .fill(&mut bytes)
         .map_err(|_| MySqlIsolationError::RandomSourceUnavailable)?;
-    Ok(hex::encode(bytes))
+    let password = hex::encode(bytes);
+    bytes.zeroize();
+    Ok(password)
 }
 
 pub fn build_provisioning_plan(
