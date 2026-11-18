@@ -172,7 +172,10 @@ impl EncryptedTenantStore {
         let (gateway_password, verifier) = gateway_credential.into_parts();
         let verifier_hex = hex::encode(verifier);
         let mut document = self.document.write().map_err(|_| StoreError::StoreUnavailable)?;
-        if document.accounts.iter().any(|account| account.username == gateway_username) {
+        if document.accounts.iter().any(|account| {
+            account.username == gateway_username
+                && (account.enabled || account.tenant_id != tenant_id.to_string())
+        }) {
             return Err(StoreError::DuplicateAccount);
         }
         if document.upstream.iter().any(|entry| entry.tenant_id == tenant_id.to_string())
@@ -184,6 +187,8 @@ impl EncryptedTenantStore {
         if let Some(existing) = next.accounts.iter_mut()
             .find(|account| account.username == gateway_username)
         {
+            // A previously revoked username may be reactivated only for the
+            // same tenant and only with a freshly generated credential.
             if existing.tenant_id != tenant_id.to_string() || existing.enabled {
                 return Err(StoreError::DuplicateAccount);
             }
