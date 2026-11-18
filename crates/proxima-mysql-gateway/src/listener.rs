@@ -283,8 +283,20 @@ impl MySqlGateway {
             }
         };
 
-        let ok = Packet {
+        // caching_sha2_password requires an AuthMoreData fast-auth-success
+        // packet before the final OK packet. Preserve the MySQL handshake
+        // sequence numbers: greeting=0, SSL request=1, response=2,
+        // AuthMoreData=3, OK=4.
+        let fast_auth_success = Packet {
             sequence: 3,
+            payload: vec![0x01, 0x03],
+        };
+        write_packet(&mut client, &fast_auth_success, self.config.max_packet_size)
+            .await
+            .map_err(|_| GatewayError::TransportFailed)?;
+
+        let ok = Packet {
+            sequence: 4,
             payload: vec![0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00],
         };
         write_packet(&mut client, &ok, self.config.max_packet_size)
