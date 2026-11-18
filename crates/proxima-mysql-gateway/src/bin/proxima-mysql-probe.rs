@@ -45,6 +45,7 @@ async fn run() -> ProbeResult<()> {
     let username = args.next().ok_or("missing gateway username")?;
     let password = args.next().ok_or("missing gateway password")?;
     let assertion = args.next().ok_or("missing tenant assertion")?;
+    let tenant_database = args.next().ok_or("missing tenant database name")?;
     let other_database = args.next().ok_or("missing cross-tenant database name")?;
     let expect_denied = match args.next() {
         None => false,
@@ -155,6 +156,18 @@ async fn run() -> ProbeResult<()> {
         return Err("revoked gateway account was unexpectedly accepted".into());
     }
     println!("[PASS] TLS, gateway authentication and signed tenant assertion");
+
+    let own_insert_sql = format!(
+        "INSERT INTO {tenant_database}.records VALUES (2, 'gateway-probe')"
+    );
+    let own_insert = command(
+        &mut tls,
+        [vec![0x03], own_insert_sql.into_bytes()].concat(),
+    ).await?;
+    if own_insert.payload.first() != Some(&0x00) {
+        return Err("tenant runtime account could not write within its own database".into());
+    }
+    println!("[PASS] tenant runtime account can write to its own database");
 
     let ok = command(&mut tls, [vec![0x03], b"DO 1".to_vec()].concat()).await?;
     if ok.payload.first() != Some(&0x00) {
