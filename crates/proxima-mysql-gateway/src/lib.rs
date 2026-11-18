@@ -5,6 +5,7 @@
 //! packets before they can influence tenant routing.
 
 pub mod auth;
+pub mod listener;
 pub mod protocol;
 pub mod provisioning;
 pub mod tenant;
