@@ -1,10 +1,10 @@
 use proxima_mysql_gateway::{
     auth::{
-        generate_gateway_credential, TenantMigrationCredentialStore,
-        TenantUpstreamCredentialStore,
+        generate_gateway_credential, TenantUpstreamCredentialStore,
     },
     isolation::{
-        build_password_rotation, build_provisioning_plan, build_revocation,
+        build_migration_password_rotation, build_provisioning_plan, build_revocation,
+        build_runtime_password_rotation,
         generate_mysql_password, MySqlTenantIdentity,
     },
     provisioning::{
@@ -112,6 +112,16 @@ fn main() {
                 _ => Err("usage: proxima-mysql-admin reconcile <tenant-uuid> <operator-note>".into()),
             }
         }
+        Some("rotate-migration") => {
+            let tenant = args.next();
+            match (tenant, args.next()) {
+                (Some(tenant), None) => match Runtime::new() {
+                    Ok(runtime) => runtime.block_on(rotate_migration(tenant)),
+                    Err(error) => Err(error.to_string()),
+                },
+                _ => Err("usage: proxima-mysql-admin rotate-migration <tenant-uuid>".into()),
+            }
+        }
         Some("rotate-assertion-key") => {
             let tenant = args.next();
             match (tenant, args.next()) {
@@ -119,7 +129,7 @@ fn main() {
                 _ => Err("usage: proxima-mysql-admin rotate-assertion-key <tenant-uuid>".into()),
             }
         }
-        _ => Err("usage: proxima-mysql-admin <provision|rotate|revoke|rotate-assertion-key|reconcile> ...".into()),
+        _ => Err("usage: proxima-mysql-admin <provision|rotate|rotate-migration|revoke|rotate-assertion-key|reconcile> ...".into()),
     };
     if let Err(error) = result {
         eprintln!("MySQL provisioning failed: {error}");
@@ -346,6 +356,74 @@ async fn rotate(tenant_value: String, gateway_username: String) -> Result<(), St
     println!("Gateway password (shown once): {gateway_password}");
     println!("Runtime database password remains encrypted in the gateway registry.");
     println!("The separate migration account and its secret-manager password were not changed.");
+    Ok(())
+}
+
+async fn rotate_migration(tenant_value: String) -> Result<(), String> {
+    let tenant_id = uuid::Uuid::parse_str(&tenant_value)
+        .map_err(|_| "tenant ID must be a UUID".to_owned())?;
+    let identity = MySqlTenantIdentity::for_tenant(tenant_id);
+    let account_host = required("PROXIMA_MYSQL_ACCOUNT_HOST")?;
+    let new_password = Zeroizing::new(generate_mysql_password()
+        .map_err(|_| "operating-system random source unavailable".to_owned())?);
+    let statement = build_migration_password_rotation(
+        &identity,
+        &account_host,
+        &new_password,
+    ).map_err(|_| "invalid migration credential rotation plan".to_owned())?
+        .into_iter().next()
+        .ok_or_else(|| "migration credential rotation plan is empty".to_owned())?;
+
+    let admin_password = Zeroizing::new(required("PROXIMA_MYSQL_PROVISIONING_PASSWORD")?);
+    let upstream = upstream_config()?;
+    let timeout = Duration::from_millis(number("PROXIMA_MYSQL_STATEMENT_TIMEOUT_MS", 30_000)?);
+    let admin_user = required("PROXIMA_MYSQL_PROVISIONING_USER")?;
+    let mut admin = MySqlAdminExecutor::connect(
+        &upstream,
+        &admin_user,
+        &admin_password,
+        timeout,
+    ).await.map_err(|_| "could not authenticate to MySQL with the provisioning account over verified TLS".to_owned())?;
+
+    let first_attempt = admin.execute(&statement).await;
+    let mut verified = MySqlAdminExecutor::connect(
+        &upstream,
+        &identity.migration_username,
+        &new_password,
+        timeout,
+    ).await.is_ok();
+
+    if !verified {
+        // A lost response is ambiguous. Reapply the same ALTER USER value,
+        // then verify by authenticating with the new migration credential.
+        let mut retry_admin = MySqlAdminExecutor::connect(
+            &upstream,
+            &admin_user,
+            &admin_password,
+            timeout,
+        ).await.map_err(|_| "migration password rotation outcome is ambiguous; provisioning account could not reconnect for safe retry".to_owned())?;
+        let retry_result = retry_admin.execute(&statement).await;
+        let retry_verified = MySqlAdminExecutor::connect(
+            &upstream,
+            &identity.migration_username,
+            &new_password,
+            timeout,
+        ).await.is_ok();
+        verified = retry_verified;
+        if !verified {
+            let detail = if first_attempt.is_err() || retry_result.is_err() {
+                "MySQL did not confirm the new migration credential after retry"
+            } else {
+                "the new migration credential could not authenticate after rotation"
+            };
+            return Err(format!("{detail}; keep the existing secret-manager value and reconcile the upstream account before continuing"));
+        }
+    }
+
+    println!("Migration credential rotated and verified over TLS.");
+    println!("Migration username: {}", identity.migration_username);
+    println!("Migration password (shown once; store in the customer secret manager): {new_password}");
+    println!("The migration credential is not stored in the gateway registry or loaded by the gateway process.");
     Ok(())
 }
 
