@@ -35,6 +35,19 @@ https://github.com/user-attachments/assets/bca488eb-829c-4672-bbe9-b25878e5401c
 
 ---
 
+
+## MySQL integration development
+
+The MySQL work is under active development on the `feature/mysql-security-integration` branch. It is not a supported production integration yet. The initial isolation model uses one MySQL database per tenant with separate runtime and migration accounts; shared-table row-level filtering is not claimed.
+
+On Windows, from the repository root, run the single local verification entry point:
+
+```powershell
+.\tools\verify-mysql.ps1
+```
+
+It runs Rust formatting, workspace tests, Clippy, and the disposable MySQL 8.4 privilege-boundary smoke test. The smoke test only creates and removes databases and accounts with the `ap_test_` prefix inside the dedicated local Docker service. Do not point it at a production MySQL server.
+
 ## What is Agata Proxima?
 
 Agata Proxima provides security infrastructure for applications that serve multiple customers from a shared PostgreSQL environment. Its core job is to make tenant identity part of the database connection boundary and route each verified tenant session to a dedicated PostgreSQL role.
