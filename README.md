@@ -3,8 +3,8 @@
 </p>
 
 <h1 align="center">Agata Proxima</h1>
-<p align="center"><strong>Security infrastructure for multi-tenant PostgreSQL applications.</strong></p>
-<p align="center">Proxima Engine is a Rust PostgreSQL-protocol gateway that verifies signed tenant context and routes each database session to its tenant-specific PostgreSQL role.</p>
+<p align="center"><strong>Database security and tenant isolation for multi-tenant applications.</strong></p>
+<p align="center">Agata Proxima focuses on database access security and tenant isolation. Proxima Engine is its Rust PostgreSQL wire-protocol gateway, verifying signed tenant context and routing each database session to its tenant-specific PostgreSQL role. PostgreSQL is the current supported database integration.</p>
 
 <p align="center">
   <a href="https://github.com/Agata-Proxima/proxima-engine/actions/workflows/ci.yml">Continuous integration</a> ·
@@ -37,7 +37,7 @@ https://github.com/user-attachments/assets/bca488eb-829c-4672-bbe9-b25878e5401c
 
 ## What is Agata Proxima?
 
-Agata Proxima provides security infrastructure for applications that serve multiple customers from a shared PostgreSQL environment. Its core job is to make tenant identity part of the database connection boundary and route each verified tenant session to a dedicated PostgreSQL role.
+Agata Proxima provides database security infrastructure for applications that serve multiple customers and need enforceable tenant isolation. Its core job is to make tenant identity part of the database connection boundary. PostgreSQL is the current supported integration: Proxima Engine verifies each tenant session and routes it to a dedicated PostgreSQL role, where PostgreSQL privileges and Row-Level Security (RLS) enforce data access.
 
 The product has two cooperating components:
 
@@ -60,6 +60,17 @@ The Engine provides:
 Agata Proxima Cloud is the separate hosted control plane for organization workflows, teams, plans, billing, registered nodes, and hosted management. It coordinates authorized Engine nodes while database traffic remains in the customer environment.
 
 The Cloud application and its private source are separate from this public Engine repository. The MIT license in this repository applies to the material covered by its license; it does not grant access to the hosted application's source code or hosted account features.
+
+## Database integration status
+
+Agata Proxima is being developed with a protocol-specific approach to database security. It does **not** claim universal database compatibility or production support for every database engine.
+
+- **PostgreSQL — supported.** The current Proxima Engine gateway implements the PostgreSQL wire protocol, signed tenant-context verification, tenant-to-role routing, and PostgreSQL-native grants and Row-Level Security (RLS). The repository includes PostgreSQL integration and tenant-isolation verification.
+- **MySQL — experimental development.** A separate MySQL gateway is under development. It is not a production-supported integration and must not be used for customer production traffic.
+- **MongoDB — early development.** Protocol and tenant-isolation foundations are being explored separately. MongoDB is not currently a supported production integration.
+- **Other database systems — not currently supported.** Each integration requires its own protocol-aware implementation, security model, and independent verification.
+
+These capabilities address database security, database tenant isolation, multi-tenant database security, PostgreSQL security proxy deployments, Rust database gateways, signed tenant context, database access control, and PostgreSQL Row-Level Security (RLS).
 
 ## How the request path works
 
