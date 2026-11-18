@@ -22,7 +22,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tokio::runtime::Runtime;
-use zeroize::Zeroizing;
+use zeroize::{Zeroize, Zeroizing};
 
 fn required(name: &str) -> Result<String, String> {
     let value = env::var(name).map_err(|_| format!("required environment variable {name} is missing"))?;
@@ -182,7 +182,7 @@ async fn provision(tenant_value: String, gateway_username: String) -> Result<(),
                 &runtime_password_for_store,
                 &migration_username,
                 &migration_password_for_store,
-            ).map_err(|_| ())
+            ).map(Zeroizing::new).map_err(|_| ())
         },
         move |identity, _gateway_password| {
             rollback_store.revoke_tenant(identity.tenant_id).map_err(|_| ())
@@ -311,7 +311,7 @@ async fn rotate(tenant_value: String, gateway_username: String) -> Result<(), St
         }
     }
 
-    let gateway_password = match store.rotate_tenant_credentials(
+    let gateway_password = Zeroizing::new(match store.rotate_tenant_credentials(
         tenant_id,
         &gateway_username,
         new_gateway_credential,
@@ -339,13 +339,11 @@ async fn rotate(tenant_value: String, gateway_username: String) -> Result<(), St
             }
             return Err("credential store update failed; previous MySQL credentials were restored".into());
         }
-    };
+    });
 
     println!("Tenant credentials rotated.");
     println!("Gateway username: {gateway_username}");
     println!("Gateway password (shown once): {gateway_password}");
-    let mut gateway_password = gateway_password;
-    gateway_password.zeroize();
     println!("Runtime and migration credentials were rotated and stored encrypted; their values were not printed.");
     Ok(())
 }
