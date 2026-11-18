@@ -12,6 +12,7 @@ use uuid::Uuid;
 
 type HmacSha256 = Hmac<Sha256>;
 pub const TENANT_ASSERTION_ATTRIBUTE: &str = "_proxima_tenant_assertion";
+pub const MAX_ASSERTION_TTL_SECONDS: u64 = 3_600;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TenantError {
@@ -19,6 +20,7 @@ pub enum TenantError {
     MalformedAssertion,
     InvalidSignature,
     ExpiredAssertion,
+    AssertionLifetimeExceeded,
     TenantMismatch,
     ClientDatabaseSelection,
     MissingAssertion,
@@ -30,6 +32,7 @@ impl fmt::Display for TenantError {
             Self::MalformedAssertion => write!(f, "malformed Proxima MySQL tenant assertion"),
             Self::InvalidSignature => write!(f, "invalid Proxima MySQL tenant assertion signature"),
             Self::ExpiredAssertion => write!(f, "Proxima MySQL tenant assertion has expired"),
+            Self::AssertionLifetimeExceeded => write!(f, "Proxima MySQL tenant assertion lifetime exceeds the one-hour maximum"),
             Self::TenantMismatch => write!(f, "authenticated MySQL account and tenant assertion do not match"),
             Self::ClientDatabaseSelection => write!(f, "client-selected MySQL database is forbidden; routing is server-controlled"),
             Self::MissingAssertion => write!(f, "required Proxima MySQL tenant assertion is missing"),
@@ -66,6 +69,9 @@ impl TenantAssertion {
         let tenant_id = Uuid::parse_str(tenant).map_err(|_| TenantError::MalformedAssertion)?;
         let expires_at = expiry.parse::<u64>().map_err(|_| TenantError::MalformedAssertion)?;
         if expires_at <= now { return Err(TenantError::ExpiredAssertion); }
+        if expires_at > now.saturating_add(MAX_ASSERTION_TTL_SECONDS) {
+            return Err(TenantError::AssertionLifetimeExceeded);
+        }
         let signature = hex::decode(signature).map_err(|_| TenantError::MalformedAssertion)?;
         let payload = format!("v1.{tenant_id}.{expires_at}");
         let mut mac = HmacSha256::new_from_slice(key).map_err(|_| TenantError::InvalidSigningKey)?;
@@ -162,6 +168,14 @@ mod tests {
         let tenant = Uuid::new_v4();
         let token = TenantAssertion::issue(tenant, 100, KEY).unwrap();
         assert_eq!(TenantAssertion::verify(&token, KEY, 100), Err(TenantError::ExpiredAssertion));
+    }
+
+
+    #[test]
+    fn assertion_lifetime_is_limited_to_one_hour() {
+        let tenant = Uuid::new_v4();
+        let token = TenantAssertion::issue(tenant, 3701, KEY).unwrap();
+        assert_eq!(TenantAssertion::verify(&token, KEY, 100), Err(TenantError::AssertionLifetimeExceeded));
     }
 
     #[test]
