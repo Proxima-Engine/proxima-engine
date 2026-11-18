@@ -9,10 +9,10 @@ pub const MAX_PACKET_PAYLOAD: usize = 0x00ff_ffff;
 pub const CLIENT_CONNECT_WITH_DB: u32 = 0x0000_0008;
 pub const CLIENT_SECURE_CONNECTION: u32 = 0x0000_8000;
 pub const CLIENT_PLUGIN_AUTH: u32 = 0x0008_0000;
-pub const CLIENT_CONNECT_ATTRS: u32 = 0x0010_0000;
 pub const CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA: u32 = 0x0020_0000;
 pub const CLIENT_PROTOCOL_41: u32 = 0x0000_0200;
 pub const CLIENT_SSL: u32 = 0x0000_0800;
+pub const CLIENT_CONNECT_ATTRS: u32 = 0x0010_0000;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProtocolError {
@@ -88,6 +88,18 @@ impl Packet {
         frame.extend_from_slice(&self.payload);
         Ok(frame)
     }
+}
+
+
+pub fn validate_client_capabilities(client_flags: u32, server_flags: u32) -> Result<(), ProtocolError> {
+    let unsupported = client_flags & !server_flags;
+    if unsupported != 0 {
+        return Err(ProtocolError::UnsupportedCapabilities(unsupported));
+    }
+    if client_flags & CLIENT_PROTOCOL_41 == 0 {
+        return Err(ProtocolError::InvalidHandshake);
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -180,7 +192,8 @@ impl ClientHandshake {
         }
 
         let auth_response = if capability_flags & CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA != 0 {
-            let length = c.lenenc_integer()?.ok_or(ProtocolError::InvalidLengthEncodedInteger)? as usize;
+            let length = usize::try_from(c.lenenc_integer()?.ok_or(ProtocolError::InvalidLengthEncodedInteger)?)
+                .map_err(|_| ProtocolError::PacketTooLarge)?;
             if length > max_auth_bytes { return Err(ProtocolError::PacketTooLarge); }
             c.take(length)?.to_vec()
         } else if capability_flags & CLIENT_SECURE_CONNECTION != 0 {
@@ -223,10 +236,12 @@ fn parse_attributes(input: &[u8]) -> Result<Vec<(String, String)>, ProtocolError
     let mut attributes = Vec::new();
     while c.remaining() > 0 {
         if attributes.len() >= 64 { return Err(ProtocolError::PacketTooLarge); }
-        let key_len = c.lenenc_integer()?.ok_or(ProtocolError::InvalidLengthEncodedInteger)? as usize;
+        let key_len = usize::try_from(c.lenenc_integer()?.ok_or(ProtocolError::InvalidLengthEncodedInteger)?)
+            .map_err(|_| ProtocolError::PacketTooLarge)?;
         if key_len > 256 { return Err(ProtocolError::PacketTooLarge); }
         let key = c.utf8(c.take(key_len)?)?;
-        let value_len = c.lenenc_integer()?.ok_or(ProtocolError::InvalidLengthEncodedInteger)? as usize;
+        let value_len = usize::try_from(c.lenenc_integer()?.ok_or(ProtocolError::InvalidLengthEncodedInteger)?)
+            .map_err(|_| ProtocolError::PacketTooLarge)?;
         if value_len > 4096 { return Err(ProtocolError::PacketTooLarge); }
         let value = c.utf8(c.take(value_len)?)?;
         attributes.push((key, value));
@@ -413,6 +428,14 @@ mod tests {
         payload.extend_from_slice(&[0u8; 23]);
         assert!(is_ssl_request(&payload).unwrap());
         assert_eq!(ClientHandshake::parse(&payload, 1024, 1024), Err(ProtocolError::Truncated));
+    }
+
+
+    #[test]
+    fn client_cannot_negotiate_capabilities_the_gateway_did_not_advertise() {
+        let server = CLIENT_PROTOCOL_41 | CLIENT_SECURE_CONNECTION | CLIENT_PLUGIN_AUTH;
+        let client = server | CLIENT_CONNECT_WITH_DB;
+        assert_eq!(validate_client_capabilities(client, server), Err(ProtocolError::UnsupportedCapabilities(CLIENT_CONNECT_WITH_DB)));
     }
 
     #[test]
