@@ -82,14 +82,6 @@ impl fmt::Debug for MySqlProvisioningPlan {
             .finish()
     }
 }
-impl Drop for MySqlProvisioningPlan {
-    fn drop(&mut self) {
-        for statement in &mut self.statements {
-            statement.zeroize();
-        }
-    }
-}
-
 
 /// Generate a 256-bit random MySQL account password using the operating
 /// system random source used by UUID v4. The returned value is 64 hex chars,
