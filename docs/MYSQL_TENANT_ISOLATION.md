@@ -84,7 +84,7 @@ Required environment variables:
 - PROXIMA_MYSQL_SECRET_STORE_FILE: encrypted registry path.
 - PROXIMA_MYSQL_SECRET_STORE_KEY_FILE: path to a separate 64-character hexadecimal (32-byte) key file.
 
-On Unix, the key file must be owner-only (0600). On Windows, its directory and file ACL must restrict access to the gateway service identity and administrators. The registry file is encrypted and temporary writes use owner-only permissions on Unix.
+On Unix, the key file must be owner-only (0600). On Windows, its directory and file ACL must restrict access to the gateway service identity and administrators. The registry file is encrypted and temporary writes use owner-only permissions on Unix. The current native Windows build does not inspect NTFS ACLs; production provisioning should therefore run from WSL/Linux or a hardened container where the 0600 permission check is enforced. The PowerShell smoke scripts are disposable development tests, not a production secret-management path.
 
 The registry is a single-writer local store. Do not run multiple gateway processes against the same file. The key file is not stored inside the encrypted registry directory by the code and must be backed up separately. Loss of the key makes the registry unreadable. Store backups and the key separately under the customer's secret-management and recovery policy.
 
