@@ -193,6 +193,18 @@ mod tests {
         assert_eq!(authorize_handshake(&handshake(&token, Some("tenant_b")), tenant, KEY, 100), Err(TenantError::ClientDatabaseSelection));
     }
 
+
+    #[test]
+    fn duplicate_tenant_assertion_attributes_are_rejected() {
+        let tenant = Uuid::new_v4();
+        let token = TenantAssertion::issue(tenant, 500, KEY).unwrap();
+        let mut value = handshake(&token, None);
+        value.connection_attributes.push((
+            TENANT_ASSERTION_ATTRIBUTE.into(), token
+        ));
+        assert_eq!(assertion_from_handshake(&value), Err(TenantError::MalformedAssertion));
+    }
+
     #[test]
     fn short_signing_key_is_rejected() {
         assert_eq!(TenantAssertion::issue(Uuid::new_v4(), 500, b"short"), Err(TenantError::InvalidSigningKey));
