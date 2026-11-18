@@ -38,7 +38,7 @@ MySQL does not provide PostgreSQL-style row-level security. Proxima will not cla
 
 The initial supported model is **one database per tenant**, with separate accounts:
 
-- Runtime account: SELECT, INSERT, UPDATE and DELETE only, scoped to that tenant database.
+- Runtime account: SELECT, INSERT, UPDATE, DELETE and EXECUTE, scoped to that tenant database. EXECUTE permits tenant-local stored routines but does not permit creating or altering them.
 - Migration account: schema-management privileges scoped to that same tenant database.
 - No global grants, GRANT OPTION, account administration, FILE, SUPER, SYSTEM_USER or cross-database grants are issued to tenant accounts.
 - Both accounts require TLS.
