@@ -20,7 +20,7 @@ function Invoke-MySql {
     )
     if ($RequireTls) {
         $dockerArgs += "--ssl-mode=VERIFY_IDENTITY"
-        $dockerArgs += "--ssl-ca=/tmp/mysql-certs/ca.pem"
+        $dockerArgs += "--ssl-ca=/run/mysql-certs/ca.pem"
     }
     $dockerArgs += "--execute=$Sql"
     $output = & docker @dockerArgs 2>&1
