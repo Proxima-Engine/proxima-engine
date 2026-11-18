@@ -11,7 +11,7 @@ use std::{
     env,
     error::Error,
     fs::File,
-    io::BufReader,
+    io::{BufReader, Write},
     net::SocketAddr,
     sync::Arc,
     time::Duration,
@@ -48,11 +48,18 @@ async fn run() -> ProbeResult<()> {
     let assertion = Zeroizing::new(args.next().ok_or("missing tenant assertion")?);
     let tenant_database = args.next().ok_or("missing tenant database name")?;
     let other_database = args.next().ok_or("missing cross-tenant database name")?;
-    let expect_denied = match args.next() {
-        None => false,
-        Some(flag) if flag == "--expect-auth-denied" => true,
-        Some(_) => return Err("unknown probe option".into()),
-    };
+    let mut expect_denied = false;
+    let mut expect_revoked_after_ms = None;
+    while let Some(flag) = args.next() {
+        match flag.as_str() {
+            "--expect-auth-denied" => expect_denied = true,
+            "--expect-revoked-after-ms" => {
+                let value = args.next().ok_or("missing revocation wait duration")?;
+                expect_revoked_after_ms = Some(value.parse::<u64>()?);
+            }
+            _ => return Err("unknown probe option".into()),
+        }
+    }
 
     let address: SocketAddr = format!("{host}:{port}").parse()?;
     let mut connected = None;
@@ -226,6 +233,19 @@ async fn run() -> ProbeResult<()> {
         return Err("tenant session did not remain usable after rejected commands".into());
     }
     println!("[PASS] tenant session remains bound after rejected commands");
+
+    if let Some(delay_ms) = expect_revoked_after_ms {
+        println!("ACTIVE_SESSION_READY");
+        std::io::stdout().flush()?;
+        sleep(Duration::from_millis(delay_ms)).await;
+        match command(&mut tls, vec![0x0e]).await {
+            Err(_) => println!("[PASS] active tenant session closed after registry revocation"),
+            Ok(packet) if packet.payload.first() == Some(&0xff) => {
+                println!("[PASS] active tenant session rejected after registry revocation");
+            }
+            Ok(_) => return Err("active tenant session remained usable after revocation".into()),
+        }
+    }
     Ok(())
 }
 
