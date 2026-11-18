@@ -6,6 +6,7 @@
 
 pub mod auth;
 pub mod listener;
+pub mod isolation;
 pub mod protocol;
 pub mod provisioning;
 pub mod tenant;
