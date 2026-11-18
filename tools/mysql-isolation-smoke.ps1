@@ -44,19 +44,19 @@ Write-Host "--- Start disposable MySQL 8.4 ---" -ForegroundColor Cyan
 if ($LASTEXITCODE -ne 0) { throw "MySQL test container did not become healthy." }
 
 $setup = @"
-DROP USER IF EXISTS 'ap_test_a_runtime'@'localhost', 'ap_test_b_runtime'@'localhost', 'ap_test_a_migrator'@'localhost', 'ap_test_b_migrator'@'localhost';
+DROP USER IF EXISTS 'ap_test_a_runtime'@'127.0.0.1', 'ap_test_b_runtime'@'127.0.0.1', 'ap_test_a_migrator'@'127.0.0.1', 'ap_test_b_migrator'@'127.0.0.1';
 DROP DATABASE IF EXISTS ap_test_tenant_a;
 DROP DATABASE IF EXISTS ap_test_tenant_b;
 CREATE DATABASE ap_test_tenant_a CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
 CREATE DATABASE ap_test_tenant_b CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
-CREATE USER 'ap_test_a_runtime'@'localhost' IDENTIFIED BY 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' REQUIRE SSL;
-CREATE USER 'ap_test_b_runtime'@'localhost' IDENTIFIED BY 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' REQUIRE SSL;
-CREATE USER 'ap_test_a_migrator'@'localhost' IDENTIFIED BY 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc' REQUIRE SSL;
-CREATE USER 'ap_test_b_migrator'@'localhost' IDENTIFIED BY 'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd' REQUIRE SSL;
-GRANT SELECT, INSERT, UPDATE, DELETE, EXECUTE, SHOW VIEW ON ap_test_tenant_a.* TO 'ap_test_a_runtime'@'localhost';
-GRANT SELECT, INSERT, UPDATE, DELETE, EXECUTE, SHOW VIEW ON ap_test_tenant_b.* TO 'ap_test_b_runtime'@'localhost';
-GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX, DROP, REFERENCES, CREATE VIEW, SHOW VIEW, TRIGGER, EVENT, CREATE ROUTINE, ALTER ROUTINE, EXECUTE ON ap_test_tenant_a.* TO 'ap_test_a_migrator'@'localhost';
-GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX, DROP, REFERENCES, CREATE VIEW, SHOW VIEW, TRIGGER, EVENT, CREATE ROUTINE, ALTER ROUTINE, EXECUTE ON ap_test_tenant_b.* TO 'ap_test_b_migrator'@'localhost';
+CREATE USER 'ap_test_a_runtime'@'127.0.0.1' IDENTIFIED BY 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' REQUIRE SSL;
+CREATE USER 'ap_test_b_runtime'@'127.0.0.1' IDENTIFIED BY 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' REQUIRE SSL;
+CREATE USER 'ap_test_a_migrator'@'127.0.0.1' IDENTIFIED BY 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc' REQUIRE SSL;
+CREATE USER 'ap_test_b_migrator'@'127.0.0.1' IDENTIFIED BY 'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd' REQUIRE SSL;
+GRANT SELECT, INSERT, UPDATE, DELETE, EXECUTE, SHOW VIEW ON ap_test_tenant_a.* TO 'ap_test_a_runtime'@'127.0.0.1';
+GRANT SELECT, INSERT, UPDATE, DELETE, EXECUTE, SHOW VIEW ON ap_test_tenant_b.* TO 'ap_test_b_runtime'@'127.0.0.1';
+GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX, DROP, REFERENCES, CREATE VIEW, SHOW VIEW, TRIGGER, EVENT, CREATE ROUTINE, ALTER ROUTINE, EXECUTE ON ap_test_tenant_a.* TO 'ap_test_a_migrator'@'127.0.0.1';
+GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX, DROP, REFERENCES, CREATE VIEW, SHOW VIEW, TRIGGER, EVENT, CREATE ROUTINE, ALTER ROUTINE, EXECUTE ON ap_test_tenant_b.* TO 'ap_test_b_migrator'@'127.0.0.1';
 CREATE TABLE ap_test_tenant_a.records (id INT PRIMARY KEY, secret VARCHAR(100) NOT NULL);
 CREATE TABLE ap_test_tenant_b.records (id INT PRIMARY KEY, secret VARCHAR(100) NOT NULL);
 INSERT INTO ap_test_tenant_a.records VALUES (1, 'tenant-a-secret');
@@ -79,14 +79,14 @@ try {
     Assert-MySqlDenied -Name "Tenant A migrator cannot create objects in Tenant B" -User "ap_test_a_migrator" -Password ("c" * 64) -Sql "CREATE TABLE ap_test_tenant_b.forbidden (id INT)"
 
     Write-Host "--- Revocation checks ---" -ForegroundColor Cyan
-    Assert-MySqlSuccess -Name "Lock Tenant A runtime account" -User "root" -Password $rootPassword -Sql "ALTER USER 'ap_test_a_runtime'@'localhost' ACCOUNT LOCK" | Out-Null
+    Assert-MySqlSuccess -Name "Lock Tenant A runtime account" -User "root" -Password $rootPassword -Sql "ALTER USER 'ap_test_a_runtime'@'127.0.0.1' ACCOUNT LOCK" | Out-Null
     Assert-MySqlDenied -Name "Revoked Tenant A account cannot reconnect" -User "ap_test_a_runtime" -Password ("a" * 64) -Sql "SELECT 1"
 
     Write-Host "All MySQL database-boundary checks passed. This validates MySQL grants, not the unfinished Proxima MySQL protocol gateway." -ForegroundColor Green
 }
 finally {
     $cleanup = @"
-DROP USER IF EXISTS 'ap_test_a_runtime'@'localhost', 'ap_test_b_runtime'@'localhost', 'ap_test_a_migrator'@'localhost', 'ap_test_b_migrator'@'localhost';
+DROP USER IF EXISTS 'ap_test_a_runtime'@'127.0.0.1', 'ap_test_b_runtime'@'127.0.0.1', 'ap_test_a_migrator'@'127.0.0.1', 'ap_test_b_migrator'@'127.0.0.1';
 DROP DATABASE IF EXISTS ap_test_tenant_a;
 DROP DATABASE IF EXISTS ap_test_tenant_b;
 "@
