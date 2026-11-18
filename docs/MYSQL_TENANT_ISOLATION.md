@@ -119,6 +119,16 @@ Provision a tenant from the repository root:
 
 The CLI generates independent high-entropy runtime, migration and gateway credentials. It sends DDL only over verified TLS, persists the runtime and migration credentials in the encrypted local registry, and prints the gateway password once. The provisioning administrator password is read from the process environment and is not persisted by the gateway. Do not capture CLI output in CI logs, shell transcripts or source control.
 
+Rotate all tenant credentials (gateway, runtime and migration) with:
+
+    cargo run -p proxima-mysql-gateway --bin proxima-mysql-admin -- rotate <tenant-uuid> <gateway-username>
+
+Revoke a tenant with:
+
+    cargo run -p proxima-mysql-gateway --bin proxima-mysql-admin -- revoke <tenant-uuid>
+
+Revocation removes local gateway credentials first, so the running gateway rejects new commands on existing client sessions at the next command boundary and rejects new connections. The CLI then locks the two MySQL accounts and revokes their grants. An already-running query may complete; immediate termination of in-flight queries is not guaranteed.
+
 For local-only testing, setting PROXIMA_MYSQL_ISSUE_LOCAL_ASSERTION=true allows the CLI to print a 15-minute assertion signed with PROXIMA_MYSQL_TENANT_ASSERTION_KEY. **Do not enable this in production.** Production assertions must be issued by the authenticated Control Plane; that API integration is not implemented yet.
 
 MySQL DDL implicitly commits. The append-only journal records each operation and fsyncs every event. If the process crashes during provisioning, the tenant is blocked from automatic reprovisioning until an operator inspects the MySQL state and explicitly acknowledges reconciliation. Never delete or edit the journal to bypass this block.
@@ -157,7 +167,13 @@ From the repository root on Windows:
 
     .\tools\verify-mysql.ps1
 
-This runs Rust formatting, workspace tests, Clippy and the disposable MySQL 8.4 grant-boundary smoke test. The smoke test exercises direct MySQL grants and is not a full end-to-end test of the MySQL gateway. No GitHub Actions run is required for this local workflow.
+This formats the Rust workspace, runs workspace tests and gateway Clippy, then runs two Docker checks:
+- Direct MySQL 8.4 grant-boundary tests.
+- A full gateway protocol probe covering TLS, gateway authentication, signed tenant assertions, cross-database denial, blocked database/session switching and revocation.
+
+The gateway smoke test builds the optional Docker gateway profile and uses a disposable development CA, a development-only MySQL root password and a fixed private Docker subnet. It writes all keys, certificates and tenant data under the gitignored dev directory. Do not reuse this Compose topology or its root password in production. The Docker image defaults to a non-root user; the local Compose profile runs as root only to read Windows bind-mounted development secrets after copying the registry key into a private tmpfs file.
+
+No GitHub Actions run is required for this local workflow.
 
 Before production support, real MySQL 8.4 tests must cover:
 
