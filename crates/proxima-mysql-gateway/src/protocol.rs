@@ -467,6 +467,54 @@ mod tests {
         assert_eq!(Packet::decode(&[2, 0, 0, 0, 1, 2], 1), Err(ProtocolError::PacketTooLarge));
     }
 
+
+    #[test]
+    fn client_handshake_parses_bounded_connection_attributes() {
+        let flags = CLIENT_PROTOCOL_41
+            | CLIENT_SECURE_CONNECTION
+            | CLIENT_PLUGIN_AUTH
+            | CLIENT_CONNECT_ATTRS
+            | CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA;
+        let key = b"_proxima_tenant_assertion";
+        let value = b"v1.tenant.expiry.signature";
+        let mut attributes = Vec::new();
+        attributes.push(key.len() as u8);
+        attributes.extend_from_slice(key);
+        attributes.push(value.len() as u8);
+        attributes.extend_from_slice(value);
+
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&flags.to_le_bytes());
+        payload.extend_from_slice(&4096u32.to_le_bytes());
+        payload.push(45);
+        payload.extend_from_slice(&[0u8; 23]);
+        payload.extend_from_slice(b"gateway_a\0");
+        payload.push(32);
+        payload.extend_from_slice(&[7u8; 32]);
+        payload.extend_from_slice(b"caching_sha2_password\0");
+        payload.push(attributes.len() as u8);
+        payload.extend_from_slice(&attributes);
+
+        let parsed = ClientHandshake::parse(&payload, 64, 1024).unwrap();
+        assert_eq!(parsed.username, "gateway_a");
+        assert_eq!(parsed.connection_attributes, vec![
+            ("_proxima_tenant_assertion".into(), "v1.tenant.expiry.signature".into())
+        ]);
+    }
+
+    #[test]
+    fn connection_attribute_flag_without_length_is_rejected() {
+        let flags = CLIENT_PROTOCOL_41 | CLIENT_SECURE_CONNECTION | CLIENT_CONNECT_ATTRS;
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&flags.to_le_bytes());
+        payload.extend_from_slice(&1024u32.to_le_bytes());
+        payload.push(45);
+        payload.extend_from_slice(&[0u8; 23]);
+        payload.extend_from_slice(b"gateway_a\0");
+        payload.push(0);
+        assert_eq!(ClientHandshake::parse(&payload, 64, 1024), Err(ProtocolError::Truncated));
+    }
+
     #[test]
     fn client_handshake_rejects_legacy_protocol() {
         let mut payload = vec![0u8; 32];
