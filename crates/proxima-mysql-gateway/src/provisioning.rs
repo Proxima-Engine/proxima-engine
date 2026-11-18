@@ -154,7 +154,14 @@ fn is_allowed_admin_statement(statement: &str) -> bool {
         && (upper.contains(".* TO 'AP_R_") || upper.contains(".* TO 'AP_M_"))
         && !upper.contains(" ON *.*")
         && !upper.contains("WITH GRANT OPTION");
-    let allowed = account_prefix || database_prefix || scoped_grant;
+    let account_host_is_ip = upper
+        .rfind("@'")
+        .and_then(|marker| {
+            let host = &upper[marker + 2..];
+            host.find('\'').map(|end| &host[..end])
+        })
+        .is_some_and(|host| host.parse::<IpAddr>().is_ok());
+    let allowed = database_prefix || (account_host_is_ip && (account_prefix || scoped_grant));
     upper.zeroize();
     allowed
 }
@@ -626,6 +633,8 @@ mod tests {
         assert!(!is_allowed_admin_statement("SELECT 1"));
         assert!(!is_allowed_admin_statement("GRANT ALL PRIVILEGES ON *.* TO 'attacker'@'%'"));
         assert!(!is_allowed_admin_statement("CREATE USER 'root'@'%' IDENTIFIED BY 'secret'"));
+        assert!(!is_allowed_admin_statement("CREATE USER 'ap_r_123'@'%' IDENTIFIED BY 'secret'"));
+        assert!(!is_allowed_admin_statement("GRANT SELECT ON `ap_t_123`.* TO 'ap_r_123'@'%'"));
         assert!(!is_allowed_admin_statement("DROP DATABASE mysql"));
         assert!(!is_allowed_admin_statement("CREATE DATABASE `ap_t_123`; DROP DATABASE mysql"));
     }
