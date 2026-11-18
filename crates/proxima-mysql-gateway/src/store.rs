@@ -232,7 +232,6 @@ impl EncryptedTenantStore {
             return Err(StoreError::InvalidAccount);
         }
         let (gateway_password, verifier) = gateway_credential.into_parts();
-        let gateway_password = Zeroizing::new(gateway_password);
         let verifier = Zeroizing::new(verifier);
         let verifier_hex = hex::encode(*verifier);
         let mut assertion_key_hex = Zeroizing::new(hex::encode(assertion_key));
@@ -313,7 +312,6 @@ impl EncryptedTenantStore {
             return Err(StoreError::InvalidAccount);
         }
         let (gateway_password, verifier) = gateway_credential.into_parts();
-        let gateway_password = Zeroizing::new(gateway_password);
         let verifier = Zeroizing::new(verifier);
         let mut document = self.document.write().map_err(|_| StoreError::StoreUnavailable)?;
         let mut next = document.clone();
@@ -367,7 +365,6 @@ impl EncryptedTenantStore {
         self.reload_from_disk()?;
         validate_gateway_username(username)?;
         let (password, verifier) = credential.into_parts();
-        let password = Zeroizing::new(password);
         let verifier = Zeroizing::new(verifier);
         let mut document = self.document.write().map_err(|_| StoreError::StoreUnavailable)?;
         let mut next = document.clone();
@@ -706,6 +703,8 @@ mod tests {
     use crate::auth::{generate_gateway_credential, TenantAccountDirectory, TenantUpstreamCredentialStore};
     use tempfile::tempdir;
 
+    const TEST_ASSERTION_KEY: &[u8] = b"0123456789abcdef0123456789abcdef";
+
     fn test_store() -> (tempfile::TempDir, EncryptedTenantStore) {
         let dir = tempdir().unwrap();
         let key_path = dir.path().join("key.hex");
@@ -729,7 +728,7 @@ mod tests {
         let identity = MySqlTenantIdentity::for_tenant(tenant);
         let runtime_password = "c".repeat(64);
         store.register_tenant(
-            tenant, "gateway_a", gateway, &identity.runtime_username, &runtime_password, &identity.migration_username, &"d".repeat(64)
+            tenant, "gateway_a", gateway, &identity.runtime_username, &runtime_password, &identity.migration_username, &"d".repeat(64), TEST_ASSERTION_KEY
         ).unwrap();
 
         let encrypted = fs::read(dir.path().join("tenants.enc")).unwrap();
@@ -758,7 +757,7 @@ mod tests {
         let gateway = generate_gateway_credential().unwrap();
         let identity = MySqlTenantIdentity::for_tenant(tenant);
         let gateway_password = store.register_tenant(
-            tenant, "gateway_auth_test", gateway, &identity.runtime_username, &"9".repeat(64), &identity.migration_username, &"8".repeat(64)
+            tenant, "gateway_auth_test", gateway, &identity.runtime_username, &"9".repeat(64), &identity.migration_username, &"8".repeat(64), TEST_ASSERTION_KEY
         ).unwrap();
 
         let challenge = [0x5au8; 20];
@@ -800,6 +799,7 @@ mod tests {
             &"a".repeat(64),
             &identity.migration_username,
             &"b".repeat(64),
+            TEST_ASSERTION_KEY,
         ).unwrap();
 
         let new_gateway = generate_gateway_credential().unwrap();
@@ -846,6 +846,7 @@ mod tests {
             &"1".repeat(64),
             &identity.migration_username,
             &"2".repeat(64),
+            TEST_ASSERTION_KEY,
         ).unwrap();
 
         assert!(gateway_view.find_account("gateway_live_reload").unwrap().is_some());
@@ -860,7 +861,7 @@ mod tests {
         let tenant = Uuid::new_v4();
         let gateway = generate_gateway_credential().unwrap();
         let identity = MySqlTenantIdentity::for_tenant(tenant);
-        store.register_tenant(tenant, "gateway_b", gateway, &identity.runtime_username, &"d".repeat(64), &identity.migration_username, &"e".repeat(64)).unwrap();
+        store.register_tenant(tenant, "gateway_b", gateway, &identity.runtime_username, &"d".repeat(64), &identity.migration_username, &"e".repeat(64), TEST_ASSERTION_KEY).unwrap();
         drop(store);
 
         let path = dir.path().join("tenants.enc");
@@ -880,7 +881,7 @@ mod tests {
         let tenant = Uuid::new_v4();
         let gateway = generate_gateway_credential().unwrap();
         let identity = MySqlTenantIdentity::for_tenant(tenant);
-        store.register_tenant(tenant, "gateway_c", gateway, &identity.runtime_username, &"e".repeat(64), &identity.migration_username, &"f".repeat(64)).unwrap();
+        store.register_tenant(tenant, "gateway_c", gateway, &identity.runtime_username, &"e".repeat(64), &identity.migration_username, &"f".repeat(64), TEST_ASSERTION_KEY).unwrap();
         store.revoke_tenant(tenant).unwrap();
         assert!(store.find_account("gateway_c").unwrap().is_none());
         assert!(store.load_runtime_credentials(tenant).unwrap().is_none());
@@ -895,6 +896,7 @@ mod tests {
             &"7".repeat(64),
             &identity.migration_username,
             &"8".repeat(64),
+            TEST_ASSERTION_KEY,
         ).unwrap();
         assert_eq!(replacement_password.len(), 64);
         assert!(store.find_account("gateway_c").unwrap().is_some());
@@ -924,7 +926,8 @@ mod tests {
                 "invalid",
                 &"f".repeat(64),
                 "invalid_migrator",
-                &"g".repeat(64)
+                &"g".repeat(64),
+                TEST_ASSERTION_KEY,
             ).err(),
             Some(StoreError::InvalidAccount)
         );
