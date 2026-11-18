@@ -213,9 +213,11 @@ mod tests {
         assert!(sql.contains("GRANT SELECT, INSERT, UPDATE, DELETE ON"));
         assert!(!sql.contains("CREATE TEMPORARY TABLES"));
         assert!(!sql.contains("LOCK TABLES"));
-        assert!(!sql.contains("EXECUTE"));
-        assert!(!sql.contains("GRANT EXECUTE"));
-        assert!(!sql.contains("GRANT SHOW VIEW"));
+        let runtime_grant = plan.statements()[3].as_str();
+        let migration_grant = plan.statements()[4].as_str();
+        assert!(!runtime_grant.contains("EXECUTE"));
+        assert!(!runtime_grant.contains("SHOW VIEW"));
+        assert!(migration_grant.contains("EXECUTE"));
         assert!(sql.contains("MAX_USER_CONNECTIONS 64"));
         assert!(sql.contains("MAX_USER_CONNECTIONS 4"));
         assert!(sql.contains(" TO 'ap_r_"));
