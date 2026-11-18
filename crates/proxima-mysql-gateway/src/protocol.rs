@@ -361,7 +361,12 @@ impl Command {
 }
 
 pub fn server_capabilities(supports_tls: bool) -> u32 {
-    let capabilities = server_capabilities(supports_tls);
+    let mut capabilities = CLIENT_PROTOCOL_41
+        | CLIENT_SECURE_CONNECTION
+        | CLIENT_PLUGIN_AUTH
+        | CLIENT_CONNECT_ATTRS
+        | CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA;
+    if supports_tls { capabilities |= CLIENT_SSL; }
     capabilities
 }
 
@@ -374,12 +379,7 @@ pub fn encode_server_handshake(
     if server_version.is_empty() || server_version.len() > 128 || server_version.as_bytes().contains(&0) {
         return Err(ProtocolError::InvalidHandshake);
     }
-    let mut capabilities = CLIENT_PROTOCOL_41
-        | CLIENT_SECURE_CONNECTION
-        | CLIENT_PLUGIN_AUTH
-        | CLIENT_CONNECT_ATTRS
-        | CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA;
-    if supports_tls { capabilities |= CLIENT_SSL; }
+    let capabilities = server_capabilities(supports_tls);
 
     let mut payload = Vec::with_capacity(96);
     payload.push(10);
