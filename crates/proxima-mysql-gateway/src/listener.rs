@@ -29,6 +29,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, Semaphore};
 use tokio::time::timeout;
 use tokio_rustls::{client::TlsStream as ClientTlsStream, server::TlsStream as ServerTlsStream, TlsAcceptor};
+use zeroize::Zeroize;
 
 static NEXT_CONNECTION_ID: AtomicU32 = AtomicU32::new(1);
 
@@ -41,6 +42,11 @@ pub struct GatewayConfig {
     pub max_connections: usize,
     pub max_packet_size: usize,
     pub handshake_timeout: Duration,
+}
+impl Drop for GatewayConfig {
+    fn drop(&mut self) {
+        self.tenant_assertion_key.zeroize();
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
