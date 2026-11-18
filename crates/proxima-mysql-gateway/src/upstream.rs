@@ -404,6 +404,8 @@ mod tests {
         let session = AuthenticatedTenantSession {
             tenant_id: tenant,
             database_name: format!("ap_t_{}", tenant.simple()),
+            assertion_expires_at: 1_000,
+            tenant_assertion: "test-assertion".into(),
             upstream_username: "root".into(),
             upstream_password: "a".repeat(64),
         };
