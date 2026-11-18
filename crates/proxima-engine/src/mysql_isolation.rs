@@ -6,6 +6,7 @@
 //! claim shared-table row filtering.
 use sha2::{Digest, Sha256};
 use std::fmt;
+use std::net::IpAddr;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -81,6 +82,9 @@ pub fn build_provisioning_plan(
     validate_host(account_host)?;
     validate_password(runtime_password)?;
     validate_password(migration_password)?;
+    if runtime_password == migration_password {
+        return Err(MySqlIsolationError::InvalidPassword);
+    }
     let identity = MySqlTenantIdentity::for_tenant(tenant_id);
     let database = quote_identifier(&identity.database_name);
     let runtime_user = quote_account(&identity.runtime_username, account_host);
@@ -104,6 +108,9 @@ pub fn build_password_rotation(
     validate_host(account_host)?;
     validate_password(runtime_password)?;
     validate_password(migration_password)?;
+    if runtime_password == migration_password {
+        return Err(MySqlIsolationError::InvalidPassword);
+    }
     Ok(vec![
         format!("ALTER USER {} IDENTIFIED BY '{}' REQUIRE SSL", quote_account(&identity.runtime_username, account_host), runtime_password),
         format!("ALTER USER {} IDENTIFIED BY '{}' REQUIRE SSL", quote_account(&identity.migration_username, account_host), migration_password),
@@ -127,9 +134,20 @@ pub fn build_revocation(
 }
 
 fn validate_host(host: &str) -> Result<(), MySqlIsolationError> {
-    if host.is_empty() || host.len() > 255 || !host.is_ascii()
-        || !host.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b':'))
-    {
+    if host == "localhost" || host.parse::<IpAddr>().is_ok() {
+        return Ok(());
+    }
+    if host.is_empty() || host.len() > 253 || !host.is_ascii() {
+        return Err(MySqlIsolationError::InvalidHost);
+    }
+    let valid_dns = host.split('.').all(|label| {
+        !label.is_empty()
+            && label.len() <= 63
+            && label.as_bytes().first().is_some_and(u8::is_ascii_alphanumeric)
+            && label.as_bytes().last().is_some_and(u8::is_ascii_alphanumeric)
+            && label.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+    });
+    if !valid_dns {
         return Err(MySqlIsolationError::InvalidHost);
     }
     Ok(())
@@ -178,6 +196,7 @@ mod tests {
         assert!(sql.contains(" TO 'ap_m_"));
         assert!(!sql.contains("ON *.*"));
         assert!(!sql.contains("WITH GRANT OPTION"));
+        assert!(!sql.contains("IF NOT EXISTS"));
         assert!(sql.contains("REQUIRE SSL"));
     }
 
@@ -190,6 +209,7 @@ mod tests {
     #[test]
     fn weak_or_non_hex_passwords_are_rejected() {
         assert_eq!(build_provisioning_plan(Uuid::new_v4(), "localhost", "password", PASSWORD_B).unwrap_err(), MySqlIsolationError::InvalidPassword);
+        assert_eq!(build_provisioning_plan(Uuid::new_v4(), "localhost", PASSWORD_A, PASSWORD_A).unwrap_err(), MySqlIsolationError::InvalidPassword);
     }
 
     #[test]
