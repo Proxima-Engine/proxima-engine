@@ -1,5 +1,5 @@
 use proxima_mysql_gateway::protocol::{
-    server_capabilities, validate_client_capabilities, Packet, ServerHandshake,
+    validate_client_capabilities, Packet, ServerHandshake,
     CLIENT_CONNECT_ATTRS, CLIENT_DEPRECATE_EOF, CLIENT_LONG_FLAG, CLIENT_LONG_PASSWORD,
     CLIENT_MULTI_RESULTS, CLIENT_PLUGIN_AUTH, CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA,
     CLIENT_PROTOCOL_41, CLIENT_PS_MULTI_RESULTS, CLIENT_SECURE_CONNECTION, CLIENT_SESSION_TRACK,
@@ -46,10 +46,11 @@ async fn run() -> ProbeResult<()> {
     let password = args.next().ok_or("missing gateway password")?;
     let assertion = args.next().ok_or("missing tenant assertion")?;
     let other_database = args.next().ok_or("missing cross-tenant database name")?;
-    let expect_denied = args.next().as_deref() == Some("--expect-auth-denied");
-    if args.next().is_some() {
-        return Err("too many arguments".into());
-    }
+    let expect_denied = match args.next() {
+        None => false,
+        Some(flag) if flag == "--expect-auth-denied" => true,
+        Some(_) => return Err("unknown probe option".into()),
+    };
 
     let address: SocketAddr = format!("{host}:{port}").parse()?;
     let mut tcp = timeout(Duration::from_secs(5), TcpStream::connect(address)).await??;
