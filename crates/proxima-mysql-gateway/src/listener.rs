@@ -11,6 +11,7 @@ use crate::auth::{
 use crate::protocol::{
     encode_server_handshake, is_ssl_request, server_capabilities, verify_sequence, Command,
     CommandError, Packet, ProtocolError, CLIENT_SSL, MAX_PACKET_PAYLOAD,
+    MIN_HANDSHAKE_PACKET_SIZE,
 };
 use crate::upstream::{
     connect_upstream, read_packet, write_packet, UpstreamError, UpstreamTlsConfig,
@@ -87,7 +88,7 @@ impl MySqlGateway {
     ) -> Result<Self, GatewayError> {
         if config.tenant_assertion_key.len() < 32
             || config.max_connections == 0
-            || config.max_packet_size == 0
+            || config.max_packet_size < MIN_HANDSHAKE_PACKET_SIZE
             || config.max_packet_size >= MAX_PACKET_PAYLOAD
             || config.handshake_timeout.is_zero()
         {
