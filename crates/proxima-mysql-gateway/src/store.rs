@@ -458,6 +458,44 @@ mod tests {
     }
 
     #[test]
+    fn encrypted_registry_authenticates_gateway_password_with_mysql_scramble() {
+        use crate::auth::{authenticate, CACHING_SHA2_PASSWORD};
+        use crate::protocol::{ClientHandshake, CLIENT_CONNECT_ATTRS, CLIENT_PLUGIN_AUTH, CLIENT_PROTOCOL_41, CLIENT_SECURE_CONNECTION};
+
+        let (_dir, store) = test_store();
+        let tenant = Uuid::new_v4();
+        let gateway = generate_gateway_credential().unwrap();
+        let identity = MySqlTenantIdentity::for_tenant(tenant);
+        let gateway_password = store.register_tenant(
+            tenant, "gateway_auth_test", gateway, &identity.runtime_username, &"9".repeat(64)
+        ).unwrap();
+
+        let challenge = [0x5au8; 20];
+        let first = sha2::Sha256::digest(gateway_password.as_bytes());
+        let second = sha2::Sha256::digest(first);
+        let mut material = Vec::new();
+        material.extend_from_slice(&second);
+        material.extend_from_slice(&challenge);
+        let mask = sha2::Sha256::digest(material);
+        let response = first.iter().zip(mask.iter()).map(|(left, right)| left ^ right).collect();
+
+        let handshake = ClientHandshake {
+            capability_flags: CLIENT_PROTOCOL_41 | CLIENT_SECURE_CONNECTION | CLIENT_PLUGIN_AUTH | CLIENT_CONNECT_ATTRS,
+            max_packet_size: 4096,
+            character_set: 45,
+            username: "gateway_auth_test".into(),
+            auth_response: response,
+            requested_database: None,
+            auth_plugin_name: Some(CACHING_SHA2_PASSWORD.into()),
+            connection_attributes: Vec::new(),
+        };
+        assert_eq!(authenticate(&handshake, &challenge, true, &store), Ok(tenant));
+        let mut invalid = handshake;
+        invalid.auth_response[0] ^= 1;
+        assert!(authenticate(&invalid, &challenge, true, &store).is_err());
+    }
+
+    #[test]
     fn tampered_or_wrong_key_store_fails_closed() {
         let (dir, store) = test_store();
         let tenant = Uuid::new_v4();
