@@ -23,6 +23,7 @@ use tokio::net::TcpStream;
 use tokio::time::timeout;
 use tokio_rustls::client::TlsStream;
 use tokio_rustls::TlsConnector;
+use zeroize::{Zeroize, Zeroizing};
 
 pub struct UpstreamTlsConfig {
     host: String,
