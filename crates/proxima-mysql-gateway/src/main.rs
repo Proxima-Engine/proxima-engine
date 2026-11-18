@@ -69,6 +69,7 @@ async fn run() -> Result<(), String> {
 
     let connect_timeout = Duration::from_millis(parse_u64("PROXIMA_MYSQL_CONNECT_TIMEOUT_MS", 10_000)?);
     let handshake_timeout = Duration::from_millis(parse_u64("PROXIMA_MYSQL_HANDSHAKE_TIMEOUT_MS", 10_000)?);
+    let idle_timeout = Duration::from_millis(parse_u64("PROXIMA_MYSQL_IDLE_TIMEOUT_MS", 900_000)?);
     let max_connections = parse_usize("PROXIMA_MYSQL_MAX_CONNECTIONS", 256)?;
     let max_packet_size = parse_usize("PROXIMA_MYSQL_MAX_PACKET_SIZE", 16_777_214)?;
 
@@ -97,6 +98,7 @@ async fn run() -> Result<(), String> {
         max_connections,
         max_packet_size,
         handshake_timeout,
+        idle_timeout,
     };
 
     let gateway = MySqlGateway::new(
