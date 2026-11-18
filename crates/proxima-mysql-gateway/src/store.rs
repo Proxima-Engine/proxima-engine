@@ -22,7 +22,7 @@ use std::{
     sync::RwLock,
 };
 use uuid::Uuid;
-use zeroize::Zeroize;
+use zeroize::{Zeroize, Zeroizing};
 use zeroize::Zeroize;
 
 const MAGIC: &[u8; 8] = b"APMYSQL1";
@@ -201,7 +201,9 @@ impl EncryptedTenantStore {
             return Err(StoreError::InvalidAccount);
         }
         let (gateway_password, verifier) = gateway_credential.into_parts();
-        let verifier_hex = hex::encode(verifier);
+        let gateway_password = Zeroizing::new(gateway_password);
+        let verifier = Zeroizing::new(verifier);
+        let verifier_hex = hex::encode(*verifier);
         let mut document = self.document.write().map_err(|_| StoreError::StoreUnavailable)?;
         if document.accounts.iter().any(|account| {
             account.username == gateway_username
@@ -274,6 +276,8 @@ impl EncryptedTenantStore {
             return Err(StoreError::InvalidAccount);
         }
         let (gateway_password, verifier) = gateway_credential.into_parts();
+        let gateway_password = Zeroizing::new(gateway_password);
+        let verifier = Zeroizing::new(verifier);
         let mut document = self.document.write().map_err(|_| StoreError::StoreUnavailable)?;
         let mut next = document.clone();
         let account = next.accounts.iter_mut()
@@ -281,7 +285,7 @@ impl EncryptedTenantStore {
                 && account.tenant_id == tenant_id.to_string()
                 && account.enabled)
             .ok_or(StoreError::InvalidAccount)?;
-        account.verifier_hex = hex::encode(verifier);
+        account.verifier_hex = hex::encode(*verifier);
         let runtime = next.upstream.iter_mut()
             .find(|entry| entry.tenant_id == tenant_id.to_string())
             .ok_or(StoreError::InvalidAccount)?;
@@ -294,7 +298,7 @@ impl EncryptedTenantStore {
         migration.password = migration_password.to_owned();
         self.persist(&next)?;
         *document = next;
-        Ok(gateway_password)
+        Ok(std::mem::take(&mut *gateway_password))
     }
 
     /// Disable every gateway account for a tenant and remove its upstream
@@ -325,15 +329,17 @@ impl EncryptedTenantStore {
         self.reload_from_disk()?;
         validate_gateway_username(username)?;
         let (password, verifier) = credential.into_parts();
+        let password = Zeroizing::new(password);
+        let verifier = Zeroizing::new(verifier);
         let mut document = self.document.write().map_err(|_| StoreError::StoreUnavailable)?;
         let mut next = document.clone();
         let account = next.accounts.iter_mut()
             .find(|account| account.username == username && account.enabled)
             .ok_or(StoreError::InvalidAccount)?;
-        account.verifier_hex = hex::encode(verifier);
+        account.verifier_hex = hex::encode(*verifier);
         self.persist(&next)?;
         *document = next;
-        Ok(password)
+        Ok(std::mem::take(&mut *password))
     }
 
     /// Rotate the tenant's upstream MySQL runtime password. The gateway
