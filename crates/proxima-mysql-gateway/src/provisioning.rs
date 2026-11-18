@@ -182,8 +182,8 @@ fn tenant_identity_matches_grant(statement: &str) -> bool {
         .and_then(|value| value.strip_suffix('\'')) else {
         return false;
     };
-    target_username == identity.runtime_username.to_ascii_uppercase()
-        || target_username == identity.migration_username.to_ascii_uppercase()
+    target_username.eq_ignore_ascii_case(&identity.runtime_username)
+        || target_username.eq_ignore_ascii_case(&identity.migration_username)
 }
 
 fn account_target_has_no_trailing_sql(statement: &str) -> bool {
