@@ -340,6 +340,30 @@ pub async fn execute_provisioning(
     executor: &mut impl MySqlDdlExecutor,
     journal: &mut impl ProvisioningJournal,
 ) -> Result<MySqlTenantIdentity, ProvisioningError> {
+    let (identity, ()) = execute_provisioning_with_finalize(
+        plan,
+        executor,
+        journal,
+        |_| Ok(()),
+        |_, _| Ok(()),
+    ).await?;
+    Ok(identity)
+}
+
+/// Run the DDL plan, persist the gateway's local tenant credentials, and only
+/// then mark provisioning complete. If finalization or journal completion
+/// fails, revoke the local record and compensate the acknowledged DDL steps.
+pub async fn execute_provisioning_with_finalize<T, F, R>(
+    plan: &MySqlProvisioningPlan,
+    executor: &mut impl MySqlDdlExecutor,
+    journal: &mut impl ProvisioningJournal,
+    finalize: F,
+    rollback_finalize: R,
+) -> Result<(MySqlTenantIdentity, T), ProvisioningError>
+where
+    F: FnOnce(&MySqlTenantIdentity) -> Result<T, ()>,
+    R: FnOnce(&MySqlTenantIdentity, &T) -> Result<(), ()>,
+{
     let tenant_id = plan.identity().tenant_id.to_string();
     journal.begin(&tenant_id).map_err(|_| ProvisioningError::JournalUnavailable)?;
     let mut applied = Vec::new();
@@ -381,8 +405,29 @@ pub async fn execute_provisioning(
         }
     }
 
+    let identity = plan.identity().clone();
+    let finalized = match finalize(&identity) {
+        Ok(value) => value,
+        Err(()) => {
+            let mut compensation_failures = compensate(
+                plan, &applied, executor, journal, &tenant_id
+            ).await;
+            if journal.needs_reconciliation(&tenant_id, plan.statements().len()).is_err() {
+                compensation_failures += 1;
+            }
+            return Err(ProvisioningError::ExecutionFailed {
+                failed_step: plan.statements().len(),
+                compensation_failures,
+            });
+        }
+    };
+
     if journal.complete(&tenant_id).is_err() {
-        let mut compensation_failures = compensate(
+        let mut compensation_failures = 0usize;
+        if rollback_finalize(&identity, &finalized).is_err() {
+            compensation_failures += 1;
+        }
+        compensation_failures += compensate(
             plan, &applied, executor, journal, &tenant_id
         ).await;
         if journal.needs_reconciliation(&tenant_id, plan.statements().len()).is_err() {
@@ -393,7 +438,7 @@ pub async fn execute_provisioning(
             compensation_failures,
         });
     }
-    Ok(plan.identity().clone())
+    Ok((identity, finalized))
 }
 
 
