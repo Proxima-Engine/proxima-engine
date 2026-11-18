@@ -97,7 +97,7 @@ pub fn authenticate<D: TenantAccountDirectory + ?Sized>(
         recovered_stage_one[index] = handshake.auth_response[index] ^ mask[index];
     }
     let candidate_verifier = Sha256::digest(recovered_stage_one);
-    if candidate_verifier.as_slice().ct_eq(&account.password_verifier).unwrap_u8() != 1 {
+    if candidate_verifier[..].ct_eq(&account.password_verifier[..]).unwrap_u8() != 1 {
         return Err(AccountError::InvalidAuthenticationResponse);
     }
     Ok(account.tenant_id)
