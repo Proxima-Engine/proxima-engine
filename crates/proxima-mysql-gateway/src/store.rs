@@ -58,7 +58,7 @@ impl fmt::Display for StoreError {
 }
 impl std::error::Error for StoreError {}
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Clone, Serialize, Deserialize, Default)]
 struct StoreDocument {
     version: u32,
     accounts: Vec<StoredGatewayAccount>,
@@ -81,7 +81,7 @@ impl Drop for StoreDocument {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 struct StoredGatewayAccount {
     username: String,
     tenant_id: String,
@@ -94,7 +94,7 @@ impl Drop for StoredGatewayAccount {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 struct StoredUpstreamCredential {
     tenant_id: String,
     username: String,
@@ -106,7 +106,7 @@ impl Drop for StoredUpstreamCredential {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 struct StoredMigrationCredential {
     tenant_id: String,
     username: String,
