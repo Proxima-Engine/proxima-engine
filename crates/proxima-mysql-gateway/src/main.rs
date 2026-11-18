@@ -21,34 +21,6 @@ fn required(name: &str) -> Result<String, String> {
         })
 }
 
-fn assertion_key() -> Result<Vec<u8>, String> {
-    let encoded = Zeroizing::new(required("PROXIMA_MYSQL_TENANT_ASSERTION_KEY")?);
-    if encoded.len() != 64 || !encoded.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        return Err("PROXIMA_MYSQL_TENANT_ASSERTION_KEY must be exactly 64 hexadecimal characters".into());
-    }
-    let mut decoded = Zeroizing::new(
-        hex::decode(&*encoded)
-            .map_err(|_| "PROXIMA_MYSQL_TENANT_ASSERTION_KEY is invalid hexadecimal".to_owned())?
-    );
-    Ok(std::mem::take(&mut *decoded))
-}
-
-fn parse_u64(name: &str, default: u64) -> Result<u64, String> {
-    match env::var(name) {
-        Ok(value) => value.parse::<u64>()
-            .map_err(|_| format!("{name} must be an unsigned integer")),
-        Err(_) => Ok(default),
-    }
-}
-
-fn parse_usize(name: &str, default: usize) -> Result<usize, String> {
-    match env::var(name) {
-        Ok(value) => value.parse::<usize>()
-            .map_err(|_| format!("{name} must be an unsigned integer")),
-        Err(_) => Ok(default),
-    }
-}
-
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt()
@@ -108,7 +80,6 @@ async fn run() -> Result<(), String> {
         client_certificate_file,
         client_private_key_file,
         upstream,
-        tenant_assertion_key: assertion_key()?,
         max_connections,
         max_packet_size,
         handshake_timeout,
