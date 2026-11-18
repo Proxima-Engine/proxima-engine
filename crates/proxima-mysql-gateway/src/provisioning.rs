@@ -169,7 +169,7 @@ pub async fn execute_provisioning(
         }
         applied.push(index);
         if journal.step_applied(&tenant_id, index).is_err() {
-            let mut compensation_failures = compensate(plan, &applied, executor, journal, &tenant_id);
+            let mut compensation_failures = compensate(plan, &applied, executor, journal, &tenant_id).await;
             if journal.needs_reconciliation(&tenant_id, index).is_err() {
                 compensation_failures += 1;
             }
