@@ -122,6 +122,34 @@ pub fn build_provisioning_plan(
     Ok(MySqlProvisioningPlan { identity, account_host: account_host.to_owned(), statements })
 }
 
+pub fn build_runtime_password_rotation(
+    identity: &MySqlTenantIdentity,
+    account_host: &str,
+    runtime_password: &str,
+) -> Result<Vec<Zeroizing<String>>, IsolationError> {
+    validate_host(account_host)?;
+    validate_password(runtime_password)?;
+    Ok(vec![Zeroizing::new(format!(
+        "ALTER USER {} IDENTIFIED BY '{}' REQUIRE SSL",
+        quote_account(&identity.runtime_username, account_host),
+        runtime_password
+    ))])
+}
+
+pub fn build_migration_password_rotation(
+    identity: &MySqlTenantIdentity,
+    account_host: &str,
+    migration_password: &str,
+) -> Result<Vec<Zeroizing<String>>, IsolationError> {
+    validate_host(account_host)?;
+    validate_password(migration_password)?;
+    Ok(vec![Zeroizing::new(format!(
+        "ALTER USER {} IDENTIFIED BY '{}' REQUIRE SSL",
+        quote_account(&identity.migration_username, account_host),
+        migration_password
+    ))])
+}
+
 pub fn build_password_rotation(
     identity: &MySqlTenantIdentity,
     account_host: &str,
