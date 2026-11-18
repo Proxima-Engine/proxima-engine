@@ -222,9 +222,9 @@ async fn provision(tenant_value: String, gateway_username: String) -> Result<(),
     if env::var("PROXIMA_MYSQL_ISSUE_LOCAL_ASSERTION").ok().as_deref() == Some("true") {
         let now = SystemTime::now().duration_since(UNIX_EPOCH)
             .map_err(|_| "system clock is before Unix epoch".to_owned())?.as_secs();
-        let mut assertion = TenantAssertion::issue(created.tenant_id, now + 900, &assertion_key)
+        let mut assertion = TenantAssertion::issue(created.tenant_id, now + 3600, &assertion_key)
             .map_err(|_| "could not issue local tenant assertion".to_owned())?;
-        println!("LOCAL DEVELOPMENT ASSERTION (15 minutes): {assertion}");
+        println!("LOCAL DEVELOPMENT ASSERTION (60 minutes): {assertion}");
         assertion.zeroize();
         println!("Do not enable local assertion issuance in production; production assertions must come from the authenticated Control Plane.");
     } else {
