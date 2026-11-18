@@ -6,15 +6,15 @@ Push-Location $repoRoot
 try {
     Write-Host "=== Proxima MySQL local verification ===" -ForegroundColor Cyan
 
-    Write-Host "[1/4] Format Rust workspace" -ForegroundColor Cyan
+    Write-Host "[1/5] Format Rust workspace" -ForegroundColor Cyan
     & cargo fmt -p proxima-mysql-gateway
     if ($LASTEXITCODE -ne 0) { throw "cargo fmt failed." }
 
-    Write-Host "[2/4] Rust workspace tests" -ForegroundColor Cyan
+    Write-Host "[2/5] Rust workspace tests" -ForegroundColor Cyan
     & cargo test --workspace --all-targets
     if ($LASTEXITCODE -ne 0) { throw "cargo test failed." }
 
-    Write-Host "[3/4] Rust Clippy" -ForegroundColor Cyan
+    Write-Host "[3/5] Rust Clippy" -ForegroundColor Cyan
     & cargo clippy -p proxima-mysql-gateway --all-targets -- -D warnings
     if ($LASTEXITCODE -ne 0) { throw "cargo clippy failed." }
 
