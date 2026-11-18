@@ -13,7 +13,7 @@ use rustls::pki_types::ServerName;
 use rustls::{ClientConfig, RootCertStore};
 use sha2::{Digest, Sha256};
 use std::fs::File;
-use std::io::{self, BufReader};
+use std::io::BufReader;
 use std::net::ToSocketAddrs;
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -42,7 +42,8 @@ impl UpstreamTlsConfig {
         handshake_timeout: Duration,
         max_packet_size: usize,
     ) -> Result<Self, UpstreamError> {
-        if host.is_empty() || port == 0 || max_packet_size == 0 || max_packet_size >= MAX_PACKET_PAYLOAD {
+        if host.is_empty() || port == 0 || connect_timeout.is_zero() || handshake_timeout.is_zero()
+            || max_packet_size == 0 || max_packet_size >= MAX_PACKET_PAYLOAD {
             return Err(UpstreamError::InvalidConfiguration);
         }
         let server_name = ServerName::try_from(server_name)
@@ -174,7 +175,7 @@ pub async fn connect_upstream(
         .as_slice()
         .try_into()
         .map_err(|_| UpstreamError::InvalidServerGreeting)?;
-    let response = build_handshake_response(session, &challenge, client_flags, config.max_packet_size)?;
+    let response = build_handshake_response(session, &challenge, client_flags, config.max_packet_size);
     write_packet(
         &mut upstream,
         &Packet { sequence: 2, payload: response },
@@ -245,7 +246,7 @@ fn build_handshake_response(
     challenge: &[u8; 20],
     capabilities: u32,
     max_packet_size: usize,
-) -> Result<Vec<u8>, UpstreamError> {
+) -> Vec<u8> {
     let auth = caching_sha2_response(session.upstream_password.as_bytes(), challenge);
     let mut payload = Vec::with_capacity(128);
     payload.extend_from_slice(&capabilities.to_le_bytes());
@@ -259,7 +260,7 @@ fn build_handshake_response(
     payload.extend_from_slice(session.database_name.as_bytes());
     payload.push(0);
     payload.extend_from_slice(b"caching_sha2_password\0");
-    Ok(payload)
+    payload
 }
 
 fn caching_sha2_response(password: &[u8], challenge: &[u8; 20]) -> Vec<u8> {
