@@ -70,12 +70,20 @@ pub fn authenticate<D: TenantAccountDirectory + ?Sized>(
     if handshake.auth_plugin_name.as_deref() != Some(CACHING_SHA2_PASSWORD) {
         return Err(AccountError::UnsupportedAuthenticationPlugin);
     }
-    if handshake.auth_response.len() != 32 {
+    if handshake.username.is_empty()
+        || handshake.username.len() > 32
+        || !handshake.username.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+        || handshake.auth_response.len() != 32
+    {
         return Err(AccountError::InvalidAuthenticationResponse);
     }
     let account = directory
         .find_account(&handshake.username)?
         .ok_or(AccountError::UnknownAccount)?;
+
+    if account.username != handshake.username {
+        return Err(AccountError::InvalidAuthenticationResponse);
+    }
 
     let mut material = Vec::with_capacity(52);
     material.extend_from_slice(&account.password_verifier);
@@ -156,8 +164,8 @@ pub fn authenticate_and_resolve<
     if credentials.tenant_id != tenant_id
         || credentials.username != expected_runtime_username(tenant_id)
         || credentials.password.is_empty()
-        || credentials.password.len() > 256
-        || !credentials.password.is_ascii()
+        || credentials.password.len() != 64
+        || !credentials.password.bytes().all(|byte| byte.is_ascii_hexdigit())
     {
         return Err(AccountError::DirectoryUnavailable);
     }
