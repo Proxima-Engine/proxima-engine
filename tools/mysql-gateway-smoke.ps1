@@ -106,6 +106,10 @@ try {
     & docker compose -f $composeFile up -d --wait mysql-test
     if ($LASTEXITCODE -ne 0) { throw "MySQL 8.4 did not become healthy." }
 
+    Write-Host "--- Build the gateway image before issuing the one-hour assertion ---" -ForegroundColor Cyan
+    & docker compose -f $composeFile --profile gateway build mysql-gateway
+    if ($LASTEXITCODE -ne 0) { throw "MySQL gateway image build failed." }
+
     $provisionerSql = @"
 DROP USER IF EXISTS 'proxima_provisioner'@'%';
 CREATE USER 'proxima_provisioner'@'%' IDENTIFIED BY '$adminPassword' REQUIRE SSL;
