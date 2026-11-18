@@ -211,11 +211,15 @@ impl ClientHandshake {
         let requested_database = if capability_flags & CLIENT_CONNECT_WITH_DB != 0 {
             Some(c.nul_string()?)
         } else { None };
-        let auth_plugin_name = if capability_flags & CLIENT_PLUGIN_AUTH != 0 && c.remaining() > 0 {
-            Some(c.nul_string()?)
+        let auth_plugin_name = if capability_flags & CLIENT_PLUGIN_AUTH != 0 {
+            let plugin = c.nul_string()?;
+            if plugin.is_empty() { return Err(ProtocolError::InvalidHandshake); }
+            Some(plugin)
         } else { None };
-        let connection_attributes = if capability_flags & CLIENT_CONNECT_ATTRS != 0 && c.remaining() > 0 {
-            let length = c.lenenc_integer()?.ok_or(ProtocolError::InvalidLengthEncodedInteger)? as usize;
+        let connection_attributes = if capability_flags & CLIENT_CONNECT_ATTRS != 0 {
+            let length = usize::try_from(
+                c.lenenc_integer()?.ok_or(ProtocolError::InvalidLengthEncodedInteger)?
+            ).map_err(|_| ProtocolError::PacketTooLarge)?;
             if length > max_attributes_bytes { return Err(ProtocolError::PacketTooLarge); }
             parse_attributes(c.take(length)?)?
         } else { Vec::new() };
