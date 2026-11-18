@@ -22,6 +22,7 @@ use std::{
     sync::RwLock,
 };
 use uuid::Uuid;
+use zeroize::Zeroize;
 
 const MAGIC: &[u8; 8] = b"APMYSQL1";
 const AAD: &[u8] = b"agata-proxima-mysql-secret-store-v1";
@@ -72,6 +73,11 @@ struct StoredGatewayAccount {
     verifier_hex: String,
     enabled: bool,
 }
+impl Drop for StoredGatewayAccount {
+    fn drop(&mut self) {
+        self.verifier_hex.zeroize();
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct StoredUpstreamCredential {
@@ -79,12 +85,22 @@ struct StoredUpstreamCredential {
     username: String,
     password: String,
 }
+impl Drop for StoredUpstreamCredential {
+    fn drop(&mut self) {
+        self.password.zeroize();
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct StoredMigrationCredential {
     tenant_id: String,
     username: String,
     password: String,
+}
+impl Drop for StoredMigrationCredential {
+    fn drop(&mut self) {
+        self.password.zeroize();
+    }
 }
 
 pub struct EncryptedTenantStore {
