@@ -116,7 +116,7 @@ pub fn build_provisioning_plan(
         Zeroizing::new(format!("CREATE DATABASE {database} CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci")),
         Zeroizing::new(format!("CREATE USER {runtime_user} IDENTIFIED BY '{runtime_password}' REQUIRE SSL WITH MAX_USER_CONNECTIONS 64")),
         Zeroizing::new(format!("CREATE USER {migration_user} IDENTIFIED BY '{migration_password}' REQUIRE SSL WITH MAX_USER_CONNECTIONS 4")),
-        Zeroizing::new(format!("GRANT SELECT, INSERT, UPDATE, DELETE ON {database}.* TO {runtime_user}")),
+        Zeroizing::new(format!("GRANT SELECT, INSERT, UPDATE, DELETE, EXECUTE ON {database}.* TO {runtime_user}")),
         Zeroizing::new(format!("GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX, DROP, REFERENCES, CREATE VIEW, SHOW VIEW, TRIGGER, EVENT, CREATE ROUTINE, ALTER ROUTINE, EXECUTE ON {database}.* TO {migration_user}")),
     ];
     Ok(MySqlProvisioningPlan { identity, account_host: account_host.to_owned(), statements })
@@ -210,7 +210,7 @@ mod tests {
         let plan = build_provisioning_plan(tenant, "10.0.0.12", PASSWORD_A, PASSWORD_B).unwrap();
         assert_eq!(plan.statements().len(), 5);
         let sql = plan.statements().iter().map(|statement| statement.as_str()).collect::<Vec<_>>().join("\n");
-        assert!(sql.contains("GRANT SELECT, INSERT, UPDATE, DELETE ON"));
+        assert!(sql.contains("GRANT SELECT, INSERT, UPDATE, DELETE, EXECUTE ON"));
         assert!(!sql.contains("GRANT EXECUTE"));
         assert!(!sql.contains("GRANT SHOW VIEW"));
         assert!(sql.contains("MAX_USER_CONNECTIONS 64"));
