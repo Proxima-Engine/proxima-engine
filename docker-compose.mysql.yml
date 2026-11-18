@@ -56,7 +56,6 @@ services:
       PROXIMA_MYSQL_TLS_KEY_FILE: /run/mysql-certs/gateway-key.pem
       PROXIMA_MYSQL_SECRET_STORE_FILE: /var/lib/proxima-mysql/tenants.enc
       PROXIMA_MYSQL_SECRET_STORE_KEY_FILE: /tmp/mysql-store-key
-      PROXIMA_MYSQL_TENANT_ASSERTION_KEY: \${PROXIMA_MYSQL_TENANT_ASSERTION_KEY:-}
       PROXIMA_MYSQL_MAX_CONNECTIONS: "128"
     ports:
       - "127.0.0.1:13306:13306"
