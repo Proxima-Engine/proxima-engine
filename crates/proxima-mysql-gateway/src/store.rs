@@ -491,8 +491,8 @@ impl EncryptedTenantStore {
             let _ = fs::remove_file(&temp_path);
             return Err(StoreError::StoreUnavailable);
         }
-        *self.loaded_metadata.write().map_err(|_| StoreError::StoreUnavailable)? =
-            metadata_stamp(&self.path)?;
+        let stamp = metadata_stamp(&self.path).ok().flatten();
+        *self.loaded_metadata.write().map_err(|_| StoreError::StoreUnavailable)? = stamp;
         Ok(())
     }
 }
