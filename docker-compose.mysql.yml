@@ -5,6 +5,7 @@ services:
     restart: unless-stopped
     environment:
       MYSQL_ROOT_PASSWORD: proxima-mysql-dev-only
+      MYSQL_ROOT_HOST: 127.0.0.1
       MYSQL_DATABASE: proxima_test
     ports:
       - "127.0.0.1:3307:3306"
