@@ -143,12 +143,24 @@ impl EncryptedTenantStore {
             return Err(StoreError::TenantAlreadyRegistered);
         }
         let mut next = document.clone();
-        next.accounts.push(StoredGatewayAccount {
-            username: gateway_username.to_owned(),
-            tenant_id: tenant_id.to_string(),
-            verifier_hex,
-            enabled: true,
-        });
+        if let Some(existing) = next.accounts.iter_mut()
+            .find(|account| account.username == gateway_username)
+        {
+            if existing.tenant_id != tenant_id.to_string() || existing.enabled {
+                return Err(StoreError::DuplicateAccount);
+            }
+            // A previously revoked username may be reactivated only with a
+            // freshly generated credential for the same tenant.
+            existing.verifier_hex = verifier_hex;
+            existing.enabled = true;
+        } else {
+            next.accounts.push(StoredGatewayAccount {
+                username: gateway_username.to_owned(),
+                tenant_id: tenant_id.to_string(),
+                verifier_hex,
+                enabled: true,
+            });
+        }
         next.upstream.push(StoredUpstreamCredential {
             tenant_id: tenant_id.to_string(),
             username: upstream_username.to_owned(),
