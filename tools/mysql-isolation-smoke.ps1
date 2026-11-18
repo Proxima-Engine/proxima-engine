@@ -69,6 +69,7 @@ CREATE TABLE ap_test_tenant_a.records (id INT PRIMARY KEY, secret VARCHAR(100) N
 CREATE TABLE ap_test_tenant_b.records (id INT PRIMARY KEY, secret VARCHAR(100) NOT NULL);
 INSERT INTO ap_test_tenant_a.records VALUES (1, 'tenant-a-secret');
 INSERT INTO ap_test_tenant_b.records VALUES (1, 'tenant-b-secret');
+CREATE PROCEDURE ap_test_tenant_a.read_secret() SELECT secret FROM ap_test_tenant_a.records;
 "@
 
 try {
@@ -81,6 +82,9 @@ try {
     Assert-MySqlDenied -Name "Tenant A cannot read Tenant B" -User "ap_test_a_runtime" -Password ("a" * 64) -Sql "SELECT secret FROM ap_test_tenant_b.records"
     Assert-MySqlDenied -Name "Tenant A cannot write Tenant B" -User "ap_test_a_runtime" -Password ("a" * 64) -Sql "INSERT INTO ap_test_tenant_b.records VALUES (2, 'forbidden')"
     Assert-MySqlDenied -Name "Runtime account cannot perform DDL" -User "ap_test_a_runtime" -Password ("a" * 64) -Sql "CREATE TABLE ap_test_tenant_a.forbidden (id INT)"
+    Assert-MySqlDenied -Name "Runtime account cannot create temporary tables" -User "ap_test_a_runtime" -Password ("a" * 64) -Sql "CREATE TEMPORARY TABLE ap_test_tenant_a.temp_forbidden (id INT)"
+    Assert-MySqlDenied -Name "Runtime account cannot lock tables" -User "ap_test_a_runtime" -Password ("a" * 64) -Sql "LOCK TABLES ap_test_tenant_a.records READ"
+    Assert-MySqlDenied -Name "Runtime account cannot execute stored procedures" -User "ap_test_a_runtime" -Password ("a" * 64) -Sql "CALL ap_test_tenant_a.read_secret()"
     Assert-MySqlSuccess -Name "Runtime account can create a temporary table in its own database" -User "ap_test_a_runtime" -Password ("a" * 64) -Sql "CREATE TEMPORARY TABLE ap_test_tenant_a.temp_probe (id INT); INSERT INTO ap_test_tenant_a.temp_probe VALUES (1); SELECT COUNT(*) FROM ap_test_tenant_a.temp_probe" -RequireTls | Out-Null
     Assert-MySqlSuccess -Name "Runtime account can lock and unlock its own tenant table" -User "ap_test_a_runtime" -Password ("a" * 64) -Sql "LOCK TABLES ap_test_tenant_a.records READ; UNLOCK TABLES" -RequireTls | Out-Null
     Assert-MySqlSuccess -Name "Tenant A runtime can execute its own stored routine" -User "ap_test_a_runtime" -Password ("a" * 64) -Sql "CALL ap_test_tenant_a.tenant_count()" -RequireTls | Out-Null
