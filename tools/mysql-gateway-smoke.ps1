@@ -60,6 +60,23 @@ function Invoke-RootSql {
     return ($output -join [Environment]::NewLine)
 }
 
+function Invoke-MigrationSql {
+    param(
+        [Parameter(Mandatory)][string]$User,
+        [Parameter(Mandatory)][string]$Password,
+        [Parameter(Mandatory)][string]$Sql
+    )
+    $dockerArgs = @(
+        "compose", "-f", $composeFile, "--profile", "gateway", "exec", "-T",
+        "-e", "MYSQL_PWD=$Password",
+        "mysql-migration-client", "mysql", "--protocol=TCP", "--host=mysql-test",
+        "--user=$User", "--ssl-mode=VERIFY_IDENTITY", "--ssl-ca=/run/mysql-certs/ca.pem",
+        "--batch", "--skip-column-names", "--execute=$Sql"
+    )
+    $output = & docker @dockerArgs 2>&1
+    return [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = ($output -join [Environment]::NewLine) }
+}
+
 function Invoke-AdminCli {
     param([string[]]$Arguments)
     $output = & cargo run -p proxima-mysql-gateway --bin proxima-mysql-admin -- @Arguments 2>&1
