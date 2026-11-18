@@ -231,7 +231,8 @@ impl EncryptedTenantStore {
             || !valid_password(upstream_password)
             || !valid_password(migration_password)
             || upstream_password == migration_password
-            || assertion_key.len() < 32
+            || assertion_key.len() != 64
+            || !assertion_key.iter().all(|byte| byte.is_ascii_hexdigit())
         {
             return Err(StoreError::InvalidAccount);
         }
@@ -409,7 +410,9 @@ impl EncryptedTenantStore {
         assertion_key: &[u8],
     ) -> Result<(), StoreError> {
         self.reload_from_disk()?;
-        if assertion_key.len() < 32 {
+        if assertion_key.len() != 64
+            || !assertion_key.iter().all(|byte| byte.is_ascii_hexdigit())
+        {
             return Err(StoreError::InvalidKey);
         }
         let mut assertion_key_hex = Zeroizing::new(hex::encode(assertion_key));
@@ -525,7 +528,7 @@ impl TenantAssertionKeyStore for EncryptedTenantStore {
         };
         let mut key = hex::decode(&entry.key_hex)
             .map_err(|_| AccountError::DirectoryUnavailable)?;
-        if key.len() < 32 {
+        if key.len() != 64 || !key.iter().all(|byte| byte.is_ascii_hexdigit()) {
             key.zeroize();
             return Err(AccountError::DirectoryUnavailable);
         }
@@ -713,7 +716,7 @@ mod tests {
     use crate::auth::{generate_gateway_credential, TenantAccountDirectory, TenantUpstreamCredentialStore};
     use tempfile::tempdir;
 
-    const TEST_ASSERTION_KEY: &[u8] = b"0123456789abcdef0123456789abcdef";
+    const TEST_ASSERTION_KEY: &[u8] = b"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
     fn test_store() -> (tempfile::TempDir, EncryptedTenantStore) {
         let dir = tempdir().unwrap();
