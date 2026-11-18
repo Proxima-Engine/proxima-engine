@@ -522,6 +522,47 @@ mod tests {
     }
 
     #[test]
+    fn file_journal_blocks_crash_interrupted_tenants_until_acknowledged() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("mysql-provisioning.jsonl");
+        let tenant = Uuid::new_v4().to_string();
+        {
+            let mut journal = FileProvisioningJournal::open(&path).unwrap();
+            journal.begin(&tenant).unwrap();
+            journal.step_started(&tenant, 0).unwrap();
+        }
+        {
+            let mut journal = FileProvisioningJournal::open(&path).unwrap();
+            assert!(journal.reconciliation_required(&tenant));
+            assert!(journal.begin(&tenant).is_err());
+            journal.acknowledge_reconciliation(&tenant, "Inspected MySQL state; safe to retry").unwrap();
+            assert!(!journal.reconciliation_required(&tenant));
+            journal.begin(&tenant).unwrap();
+            journal.complete(&tenant).unwrap();
+        }
+        let journal = FileProvisioningJournal::open(&path).unwrap();
+        assert!(!journal.reconciliation_required(&tenant));
+        let text = std::fs::read_to_string(path).unwrap();
+        assert!(text.contains("Inspected MySQL state; safe to retry"));
+    }
+
+    #[test]
+    fn file_journal_rejects_corrupt_or_out_of_order_events() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bad-journal.jsonl");
+        std::fs::write(
+            &path,
+            r#"{"tenant_id":"tenant-a","event":"step_applied","step":0,"note":null,"timestamp":1}"#,
+        ).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        assert!(FileProvisioningJournal::open(&path).is_err());
+    }
+
+    #[test]
     fn errors_do_not_disclose_passwords_or_sql() {
         let error = ProvisioningError::ExecutionFailed { failed_step: 2, compensation_failures: 1 };
         let message = error.to_string();
