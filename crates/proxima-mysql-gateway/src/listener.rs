@@ -453,7 +453,7 @@ async fn relay_session(
                         // Never forward a LOCAL INFILE request to the client.
                         // A malicious or compromised upstream server could
                         // otherwise induce a client driver to upload a local file.
-                        if packet.payload.first() == Some(&0xfb) {
+                        if is_local_infile_request(&packet) {
                             let error = command_error_packet(
                                 packet.sequence.wrapping_add(1),
                                 "LOCAL INFILE is disabled by the Proxima MySQL gateway",
@@ -494,4 +494,27 @@ fn command_error_packet(sequence: u8, message: &str) -> Packet {
     payload.extend_from_slice(b"42000");
     payload.extend_from_slice(message.as_bytes());
     Packet { sequence, payload }
+}
+
+fn is_local_infile_request(packet: &Packet) -> bool {
+    packet.payload.first() == Some(&0xfb)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn upstream_local_infile_request_is_identified_and_rejected() {
+        let request = Packet { sequence: 7, payload: vec![0xfb, b'/', b't', b'm', b'p'] };
+        assert!(is_local_infile_request(&request));
+
+        let ordinary_result = Packet { sequence: 7, payload: vec![0x01, 0x00] };
+        assert!(!is_local_infile_request(&ordinary_result));
+
+        let error = command_error_packet(8, "LOCAL INFILE disabled");
+        assert_eq!(error.sequence, 8);
+        assert_eq!(error.payload.first(), Some(&0xff));
+        assert!(String::from_utf8_lossy(&error.payload).contains("LOCAL INFILE disabled"));
+    }
 }
