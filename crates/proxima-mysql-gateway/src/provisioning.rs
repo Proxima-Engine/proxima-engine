@@ -841,6 +841,12 @@ mod tests {
         for statement in build_password_rotation(&identity, "10.0.0.12", PASSWORD_B, PASSWORD_A).unwrap() {
             assert!(is_allowed_admin_statement(&statement));
         }
+        for statement in build_runtime_password_rotation(&identity, "10.0.0.12", PASSWORD_B).unwrap() {
+            assert!(is_allowed_admin_statement(&statement));
+        }
+        for statement in build_migration_password_rotation(&identity, "10.0.0.12", PASSWORD_A).unwrap() {
+            assert!(is_allowed_admin_statement(&statement));
+        }
         for statement in build_revocation(&identity, "10.0.0.12").unwrap() {
             assert!(is_allowed_admin_statement(&statement));
         }
