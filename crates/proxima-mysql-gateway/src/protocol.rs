@@ -473,6 +473,30 @@ mod tests {
 
 
     #[test]
+    fn tls_upgrade_rejects_nonzero_reserved_bytes() {
+        let flags = CLIENT_PROTOCOL_41 | CLIENT_SSL;
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&flags.to_le_bytes());
+        payload.extend_from_slice(&4096u32.to_le_bytes());
+        payload.push(45);
+        payload.extend_from_slice(&[0u8; 23]);
+        payload[31] = 1;
+        assert_eq!(is_ssl_request(&payload), Err(ProtocolError::InvalidHandshake));
+    }
+
+    #[test]
+    fn client_handshake_rejects_nonzero_reserved_bytes() {
+        let flags = CLIENT_PROTOCOL_41 | CLIENT_SECURE_CONNECTION | CLIENT_PLUGIN_AUTH;
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&flags.to_le_bytes());
+        payload.extend_from_slice(&4096u32.to_le_bytes());
+        payload.push(45);
+        payload.extend_from_slice(&[0u8; 23]);
+        payload[31] = 1;
+        assert_eq!(ClientHandshake::parse(&payload, 1024, 1024), Err(ProtocolError::InvalidHandshake));
+    }
+
+    #[test]
     fn client_cannot_negotiate_capabilities_the_gateway_did_not_advertise() {
         let server = CLIENT_PROTOCOL_41 | CLIENT_SECURE_CONNECTION | CLIENT_PLUGIN_AUTH;
         let client = server | CLIENT_CONNECT_WITH_DB;
