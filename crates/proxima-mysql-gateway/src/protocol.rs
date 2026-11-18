@@ -13,6 +13,13 @@ pub const CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA: u32 = 0x0020_0000;
 pub const CLIENT_PROTOCOL_41: u32 = 0x0000_0200;
 pub const CLIENT_SSL: u32 = 0x0000_0800;
 pub const CLIENT_CONNECT_ATTRS: u32 = 0x0010_0000;
+pub const CLIENT_LONG_PASSWORD: u32 = 0x0000_0001;
+pub const CLIENT_LONG_FLAG: u32 = 0x0000_0004;
+pub const CLIENT_TRANSACTIONS: u32 = 0x0000_2000;
+pub const CLIENT_MULTI_RESULTS: u32 = 0x0002_0000;
+pub const CLIENT_PS_MULTI_RESULTS: u32 = 0x0004_0000;
+pub const CLIENT_SESSION_TRACK: u32 = 0x0080_0000;
+pub const CLIENT_DEPRECATE_EOF: u32 = 0x0100_0000;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProtocolError {
@@ -365,11 +372,18 @@ impl Command {
 }
 
 pub fn server_capabilities(supports_tls: bool) -> u32 {
-    let mut capabilities = CLIENT_PROTOCOL_41
+    let mut capabilities = CLIENT_LONG_PASSWORD
+        | CLIENT_LONG_FLAG
+        | CLIENT_PROTOCOL_41
+        | CLIENT_TRANSACTIONS
         | CLIENT_SECURE_CONNECTION
+        | CLIENT_MULTI_RESULTS
+        | CLIENT_PS_MULTI_RESULTS
         | CLIENT_PLUGIN_AUTH
         | CLIENT_CONNECT_ATTRS
-        | CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA;
+        | CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA
+        | CLIENT_SESSION_TRACK
+        | CLIENT_DEPRECATE_EOF;
     if supports_tls { capabilities |= CLIENT_SSL; }
     capabilities
 }
