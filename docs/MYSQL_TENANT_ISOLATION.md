@@ -15,7 +15,7 @@ The branch currently contains:
 - A tenant-bound packet relay that rejects commands that can change database, authentication or session protocol state.
 - Database-per-tenant provisioning plans with distinct runtime and migration accounts.
 - An asynchronous MySQL DDL executor and append-only, fsync-backed provisioning journal.
-- An AES-256-GCM encrypted local tenant registry for gateway verifiers and upstream runtime/migration credentials.
+- An AES-256-GCM encrypted local tenant registry for gateway verifiers, tenant-scoped assertion keys and upstream runtime/migration credentials.
 - A provisioning CLI that writes the tenant record before marking the DDL journal complete and compensates the DDL if local registration fails.
 
 **It is still experimental and is not a production-supported database integration.** No real MySQL end-to-end gateway test or customer deployment has passed yet. The private Control Plane API, dashboard, tenant lifecycle, fleet configuration and production packaging are not integrated. Do not route customer traffic through this branch.
@@ -106,6 +106,7 @@ Required environment variables:
 - PROXIMA_MYSQL_SECRET_STORE_FILE
 - PROXIMA_MYSQL_SECRET_STORE_KEY_FILE
 - PROXIMA_MYSQL_PROVISIONING_JOURNAL_FILE
+- PROXIMA_MYSQL_TENANT_ASSERTION_KEY — the tenant/organization-scoped 32-byte signing key supplied by the authenticated Control Plane, encoded as 64 hexadecimal characters
 
 Optional timeout/size variables:
 
@@ -151,7 +152,6 @@ Required variables:
 - PROXIMA_MYSQL_UPSTREAM_PORT
 - PROXIMA_MYSQL_UPSTREAM_SERVER_NAME
 - PROXIMA_MYSQL_UPSTREAM_CA_FILE
-- PROXIMA_MYSQL_TENANT_ASSERTION_KEY — exactly 64 hexadecimal characters
 - PROXIMA_MYSQL_SECRET_STORE_FILE
 - PROXIMA_MYSQL_SECRET_STORE_KEY_FILE
 
@@ -166,7 +166,7 @@ Run the separate gateway:
 
     cargo run -p proxima-mysql-gateway
 
-The gateway uses its own TLS certificate for client connections and a separately verified CA/server name for the upstream MySQL connection. Do not disable upstream certificate verification in production.
+The gateway loads each tenant's assertion verification key from the encrypted registry after authenticating that tenant's gateway account. The shared assertion key is not present in gateway process configuration. The provisioning process stores the Control Plane-derived tenant/organization key with that tenant's encrypted credentials. The gateway uses its own TLS certificate for client connections and a separately verified CA/server name for the upstream MySQL connection. Do not disable upstream certificate verification in production.
 
 ## Verification
 
