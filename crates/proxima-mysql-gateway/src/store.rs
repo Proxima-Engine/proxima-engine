@@ -486,15 +486,29 @@ fn load_key(path: &Path) -> Result<[u8; 32], StoreError> {
         }
     }
     let mut encoded = String::new();
-    File::open(path)
+    if File::open(path)
         .and_then(|mut file| file.read_to_string(&mut encoded))
-        .map_err(|_| StoreError::StoreUnavailable)?;
-    let encoded = encoded.trim();
-    if encoded.len() != 64 || !encoded.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        .is_err()
+    {
+        encoded.zeroize();
+        return Err(StoreError::StoreUnavailable);
+    }
+    let mut trimmed = encoded.trim().to_owned();
+    encoded.zeroize();
+    if trimmed.len() != 64 || !trimmed.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        trimmed.zeroize();
         return Err(StoreError::InvalidKey);
     }
-    let mut bytes = hex::decode(encoded).map_err(|_| StoreError::InvalidKey)?;
-    let key: [u8; 32] = bytes.as_slice().try_into().map_err(|_| StoreError::InvalidKey)?;
+    let decoded = hex::decode(&trimmed);
+    trimmed.zeroize();
+    let mut bytes = decoded.map_err(|_| StoreError::InvalidKey)?;
+    let key: [u8; 32] = match bytes.as_slice().try_into() {
+        Ok(key) => key,
+        Err(_) => {
+            bytes.zeroize();
+            return Err(StoreError::InvalidKey);
+        }
+    };
     bytes.zeroize();
     Ok(key)
 }
