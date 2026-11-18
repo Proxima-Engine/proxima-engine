@@ -254,6 +254,76 @@ mod tests {
         assert!(debug.contains("REDACTED"));
     }
 
+
+    struct MemoryCredentialStore(TenantUpstreamCredentials);
+    impl TenantUpstreamCredentialStore for MemoryCredentialStore {
+        fn load_runtime_credentials(&self, tenant_id: Uuid) -> Result<Option<TenantUpstreamCredentials>, AccountError> {
+            if self.0.tenant_id == tenant_id { Ok(Some(self.0.clone())) } else { Ok(None) }
+        }
+    }
+
+    #[test]
+    fn authenticated_gateway_account_and_assertion_resolve_exact_upstream_tenant() {
+        let tenant = Uuid::new_v4();
+        let gateway_password = b"gateway-password-test";
+        let challenge = [5u8; 20];
+        let account = TenantAccount::from_verifier(
+            "gateway_a".into(), tenant, password_verifier(gateway_password)
+        );
+        let directory = MemoryDirectory(HashMap::from([("gateway_a".into(), account)]));
+        let runtime_name = expected_runtime_username(tenant);
+        let store = MemoryCredentialStore(TenantUpstreamCredentials {
+            tenant_id: tenant,
+            username: runtime_name.clone(),
+            password: "a".repeat(64),
+        });
+        let assertion = crate::tenant::TenantAssertion::issue(
+            tenant, 500, b"0123456789abcdef0123456789abcdef"
+        ).unwrap();
+        let mut handshake = test_handshake("gateway_a", response(gateway_password, &challenge));
+        handshake.connection_attributes.push((
+            crate::tenant::TENANT_ASSERTION_ATTRIBUTE.into(), assertion
+        ));
+        let session = authenticate_and_resolve(
+            &handshake, &challenge, true, &directory,
+            b"0123456789abcdef0123456789abcdef", 100, &store
+        ).unwrap();
+        assert_eq!(session.tenant_id, tenant);
+        assert_eq!(session.upstream_username, runtime_name);
+        assert_eq!(session.database_name, format!("ap_t_{}", tenant.simple()));
+        assert!(!format!("{session:?}").contains(&session.upstream_password));
+    }
+
+    #[test]
+    fn rejects_upstream_credentials_for_another_tenant_or_unexpected_account() {
+        let tenant = Uuid::new_v4();
+        let gateway_password = b"gateway-password-test";
+        let challenge = [6u8; 20];
+        let account = TenantAccount::from_verifier(
+            "gateway_a".into(), tenant, password_verifier(gateway_password)
+        );
+        let directory = MemoryDirectory(HashMap::from([("gateway_a".into(), account)]));
+        let store = MemoryCredentialStore(TenantUpstreamCredentials {
+            tenant_id: tenant,
+            username: "root".into(),
+            password: "a".repeat(64),
+        });
+        let assertion = crate::tenant::TenantAssertion::issue(
+            tenant, 500, b"0123456789abcdef0123456789abcdef"
+        ).unwrap();
+        let mut handshake = test_handshake("gateway_a", response(gateway_password, &challenge));
+        handshake.connection_attributes.push((
+            crate::tenant::TENANT_ASSERTION_ATTRIBUTE.into(), assertion
+        ));
+        assert_eq!(
+            authenticate_and_resolve(
+                &handshake, &challenge, true, &directory,
+                b"0123456789abcdef0123456789abcdef", 100, &store
+            ),
+            Err(AccountError::DirectoryUnavailable)
+        );
+    }
+
     #[test]
     fn authenticates_caching_sha2_account_and_returns_bound_tenant() {
         let tenant = Uuid::new_v4();
