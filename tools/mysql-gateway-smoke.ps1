@@ -25,6 +25,24 @@ $storeFile = Join-Path $dataDir "tenants.enc"
 $journalFile = Join-Path $dataDir "provisioning.jsonl"
 $provisioned = $false
 $gatewayStarted = $false
+$environmentNames = @(
+    "PROXIMA_MYSQL_UPSTREAM_HOST",
+    "PROXIMA_MYSQL_UPSTREAM_PORT",
+    "PROXIMA_MYSQL_UPSTREAM_SERVER_NAME",
+    "PROXIMA_MYSQL_UPSTREAM_CA_FILE",
+    "PROXIMA_MYSQL_PROVISIONING_USER",
+    "PROXIMA_MYSQL_PROVISIONING_PASSWORD",
+    "PROXIMA_MYSQL_ACCOUNT_HOST",
+    "PROXIMA_MYSQL_SECRET_STORE_FILE",
+    "PROXIMA_MYSQL_SECRET_STORE_KEY_FILE",
+    "PROXIMA_MYSQL_PROVISIONING_JOURNAL_FILE",
+    "PROXIMA_MYSQL_ISSUE_LOCAL_ASSERTION",
+    "PROXIMA_MYSQL_TENANT_ASSERTION_KEY"
+)
+$originalEnvironment = @{}
+foreach ($name in $environmentNames) {
+    $originalEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, "Process")
+}
 
 function Invoke-RootSql {
     param([Parameter(Mandatory)][string]$Sql)
@@ -162,5 +180,11 @@ DROP USER IF EXISTS '$migrationUser'@'$accountHost';
     } catch {
         Write-Warning "Could not remove the disposable MySQL provisioning account: $_"
     }
+    foreach ($name in $environmentNames) {
+        [Environment]::SetEnvironmentVariable($name, $originalEnvironment[$name], "Process")
+    }
+    $adminPassword = $null
+    $gatewayPassword = $null
+    $assertion = $null
     Pop-Location
 }
