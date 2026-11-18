@@ -399,6 +399,7 @@ async fn relay_session(
     let (server_tx, mut server_rx) = mpsc::channel::<Packet>(32);
     let (local_tx, mut local_rx) = mpsc::channel::<Packet>(8);
     let (activity_tx, mut activity_rx) = mpsc::channel::<()>(8);
+    let log_gateway_username = gateway_username.clone();
 
     let server_reader = tokio::spawn(async move {
         loop {
@@ -478,7 +479,7 @@ async fn relay_session(
     while !(server_closed && local_closed) {
         tokio::select! {
             _ = &mut idle_sleep => {
-                tracing::debug!(%tenant_id, gateway_username = %gateway_username, "closing idle MySQL tenant session");
+                tracing::debug!(%tenant_id, gateway_username = %log_gateway_username, "closing idle MySQL tenant session");
                 break;
             }
             activity = activity_rx.recv(), if !activity_closed => {
