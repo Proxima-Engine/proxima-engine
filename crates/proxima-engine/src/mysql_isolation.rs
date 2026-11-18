@@ -52,6 +52,7 @@ impl MySqlTenantIdentity {
 /// account. MySQL DDL can implicitly commit; callers need compensating cleanup.
 pub struct MySqlProvisioningPlan {
     identity: MySqlTenantIdentity,
+    account_host: String,
     statements: Vec<String>,
 }
 
@@ -62,11 +63,15 @@ impl MySqlProvisioningPlan {
     pub fn statements(&self) -> &[String] {
         &self.statements
     }
+    pub fn account_host(&self) -> &str {
+        &self.account_host
+    }
 }
 impl fmt::Debug for MySqlProvisioningPlan {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("MySqlProvisioningPlan")
             .field("identity", &self.identity)
+            .field("account_host", &self.account_host)
             .field("statement_count", &self.statements.len())
             .field("credentials", &"[REDACTED]")
             .finish()
@@ -107,7 +112,7 @@ pub fn build_provisioning_plan(
         format!("GRANT SELECT, INSERT, UPDATE, DELETE, EXECUTE, SHOW VIEW ON {database}.* TO {runtime_user}"),
         format!("GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX, DROP, REFERENCES, CREATE VIEW, SHOW VIEW, TRIGGER, EVENT, CREATE ROUTINE, ALTER ROUTINE, EXECUTE ON {database}.* TO {migration_user}"),
     ];
-    Ok(MySqlProvisioningPlan { identity, statements })
+    Ok(MySqlProvisioningPlan { identity, account_host: account_host.to_owned(), statements })
 }
 
 pub fn build_password_rotation(
