@@ -10,6 +10,7 @@ use std::fmt;
 use subtle::ConstantTimeEq;
 use ring::rand::{SecureRandom, SystemRandom};
 use uuid::Uuid;
+use zeroize::Zeroizing;
 use zeroize::Zeroize;
 
 pub const CACHING_SHA2_PASSWORD: &str = "caching_sha2_password";
@@ -244,7 +245,7 @@ fn expected_runtime_username(tenant_id: Uuid) -> String {
 /// is returned to the trusted provisioning caller once; only the verifier
 /// should be persisted in the gateway account directory.
 pub struct GatewayCredentialMaterial {
-    password: String,
+    password: Zeroizing<String>,
     verifier: [u8; 32],
 }
 impl GatewayCredentialMaterial {
@@ -281,7 +282,7 @@ pub fn generate_gateway_credential() -> Result<GatewayCredentialMaterial, Accoun
     let password = hex::encode(random);
     let first = Sha256::digest(password.as_bytes());
     let verifier = Sha256::digest(first).into();
-    Ok(GatewayCredentialMaterial { password, verifier })
+    Ok(GatewayCredentialMaterial { password: Zeroizing::new(password), verifier })
 }
 
 #[cfg(test)]
