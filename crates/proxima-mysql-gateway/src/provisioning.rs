@@ -504,7 +504,10 @@ mod tests {
     }
 
     #[derive(Default)]
-    struct FakeJournal { events: Vec<String> }
+    struct FakeJournal {
+        events: Vec<String>,
+        fail_complete: bool,
+    }
     impl ProvisioningJournal for FakeJournal {
         fn begin(&mut self, tenant_id: &str) -> Result<(), JournalError> {
             self.events.push(format!("begin:{tenant_id}")); Ok(())
@@ -522,6 +525,7 @@ mod tests {
             self.events.push(format!("reconcile:{step}")); Ok(())
         }
         fn complete(&mut self, tenant_id: &str) -> Result<(), JournalError> {
+            if self.fail_complete { return Err(JournalError); }
             self.events.push(format!("complete:{tenant_id}")); Ok(())
         }
     }
@@ -564,6 +568,48 @@ mod tests {
         let _ = execute_provisioning(&plan, &mut executor, &mut journal).await;
         assert_eq!(executor.calls.len(), 1);
         assert!(!executor.calls.iter().any(|sql| sql.starts_with("DROP DATABASE")));
+    }
+
+    #[tokio::test]
+    async fn finalization_failure_compensates_database_and_requires_reconciliation() {
+        let plan = plan();
+        let mut executor = FakeExecutor::default();
+        let mut journal = FakeJournal::default();
+        let error = execute_provisioning_with_finalize(
+            &plan,
+            &mut executor,
+            &mut journal,
+            |_| Err(()),
+            |_, _| Ok(()),
+        ).await.unwrap_err();
+        assert!(matches!(error, ProvisioningError::ExecutionFailed { .. }));
+        assert!(executor.calls.iter().any(|sql| sql.starts_with("DROP DATABASE")));
+        assert!(journal.events.iter().any(|event| event.starts_with("reconcile:")));
+    }
+
+    #[tokio::test]
+    async fn journal_completion_failure_rolls_back_finalized_registry() {
+        use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+        let plan = plan();
+        let mut executor = FakeExecutor::default();
+        let mut journal = FakeJournal { fail_complete: true, ..FakeJournal::default() };
+        let rollback_called = Arc::new(AtomicBool::new(false));
+        let rollback_flag = Arc::clone(&rollback_called);
+        let result = execute_provisioning_with_finalize(
+            &plan,
+            &mut executor,
+            &mut journal,
+            |_| Ok("one-time-credential".to_owned()),
+            move |_, credential| {
+                assert_eq!(credential, "one-time-credential");
+                rollback_flag.store(true, Ordering::SeqCst);
+                Ok(())
+            },
+        ).await;
+        assert!(result.is_err());
+        assert!(rollback_called.load(Ordering::SeqCst));
+        assert!(executor.calls.iter().any(|sql| sql.starts_with("DROP DATABASE")));
+        assert!(journal.events.iter().any(|event| event.starts_with("reconcile:")));
     }
 
     #[test]
