@@ -247,6 +247,8 @@ mod tests {
         assert!(sql.contains("MAX_USER_CONNECTIONS 4"));
         assert!(sql.contains(" TO 'ap_r_"));
         assert!(sql.contains(" TO 'ap_m_"));
+        assert!(plan.statements()[1].contains("@'10.0.0.12'"));
+        assert!(plan.statements()[2].contains("@'10.0.0.13'"));
         assert!(!sql.contains("ON *.*"));
         assert!(!sql.contains("WITH GRANT OPTION"));
         assert!(!sql.contains("IF NOT EXISTS"));
