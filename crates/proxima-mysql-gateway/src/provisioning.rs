@@ -3,8 +3,14 @@
 //! MySQL DDL implicitly commits. This module requires a durable journal and
 //! compensates only operations whose success was recorded. It never assumes
 //! that a failed network call means the server did not apply the statement.
-use crate::isolation::{MySqlProvisioningPlan, MySqlTenantIdentity};
-use std::fmt;
+use crate::{
+    isolation::{MySqlProvisioningPlan, MySqlTenantIdentity},
+    protocol::{Packet, ProtocolError},
+    upstream::{connect_admin, read_packet, write_packet, UpstreamTlsConfig, UpstreamError},
+};
+use std::{fmt, future::Future, pin::Pin, time::Duration};
+use tokio::{net::TcpStream, time::timeout};
+use tokio_rustls::client::TlsStream;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DdlExecutionError;
@@ -12,8 +18,92 @@ pub struct DdlExecutionError;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct JournalError;
 
-pub trait MySqlDdlExecutor {
-    fn execute(&mut self, statement: &str) -> Result<(), DdlExecutionError>;
+pub trait MySqlDdlExecutor: Send {
+    fn execute<'a>(
+        &'a mut self,
+        statement: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), DdlExecutionError>> + Send + 'a>>;
+}
+
+/// Verified-TLS administrator connection used only by tenant provisioning.
+/// Do not share this connection with application traffic.
+pub struct MySqlAdminExecutor {
+    stream: TlsStream<TcpStream>,
+    max_packet_size: usize,
+    statement_timeout: Duration,
+    usable: bool,
+}
+
+impl MySqlAdminExecutor {
+    pub async fn connect(
+        config: &UpstreamTlsConfig,
+        username: &str,
+        password: &str,
+        statement_timeout: Duration,
+    ) -> Result<Self, DdlExecutionError> {
+        if statement_timeout.is_zero() {
+            return Err(DdlExecutionError);
+        }
+        let stream = connect_admin(config, username, password)
+            .await
+            .map_err(|_| DdlExecutionError)?;
+        // The configured maximum is already validated by UpstreamTlsConfig.
+        Ok(Self {
+            stream,
+            max_packet_size: crate::protocol::MAX_PACKET_PAYLOAD - 1,
+            statement_timeout,
+            usable: true,
+        })
+    }
+}
+
+impl MySqlDdlExecutor for MySqlAdminExecutor {
+    fn execute<'a>(
+        &'a mut self,
+        statement: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), DdlExecutionError>> + Send + 'a>> {
+        Box::pin(async move {
+            if !self.usable || statement.is_empty()
+                || statement.len() + 1 > self.max_packet_size
+                || statement.as_bytes().contains(&0)
+            {
+                return Err(DdlExecutionError);
+            }
+            let mut payload = Vec::with_capacity(statement.len() + 1);
+            payload.push(0x03); // COM_QUERY
+            payload.extend_from_slice(statement.as_bytes());
+            let request = Packet { sequence: 0, payload };
+            if write_packet(&mut self.stream, &request, self.max_packet_size).await.is_err() {
+                self.usable = false;
+                return Err(DdlExecutionError);
+            }
+            let response = match timeout(
+                self.statement_timeout,
+                read_packet(&mut self.stream, self.max_packet_size),
+            ).await {
+                Ok(Ok(packet)) => packet,
+                _ => {
+                    self.usable = false;
+                    return Err(DdlExecutionError);
+                }
+            };
+            if response.sequence != 1 {
+                self.usable = false;
+                return Err(DdlExecutionError);
+            }
+            match response.payload.first() {
+                Some(0x00) => Ok(()), // OK packet
+                Some(0xff) => Err(DdlExecutionError), // ERR packet; stream remains synchronized
+                _ => {
+                    // DDL plan statements must return OK or ERR. A result set,
+                    // LOCAL INFILE request or unknown response makes the
+                    // connection unsuitable for compensation.
+                    self.usable = false;
+                    Err(DdlExecutionError)
+                }
+            }
+        })
+    }
 }
 
 pub trait ProvisioningJournal {
@@ -44,7 +134,7 @@ impl std::error::Error for ProvisioningError {}
 /// DDL is sent. On ambiguous failure, only acknowledged steps are compensated.
 /// The journal records that the failed DDL may have committed before its reply
 /// was lost, so operator reconciliation remains mandatory.
-pub fn execute_provisioning(
+pub async fn execute_provisioning(
     plan: &MySqlProvisioningPlan,
     executor: &mut impl MySqlDdlExecutor,
     journal: &mut impl ProvisioningJournal,
@@ -58,7 +148,7 @@ pub fn execute_provisioning(
             if applied.is_empty() {
                 return Err(ProvisioningError::JournalUnavailable);
             }
-            let mut compensation_failures = compensate(plan, &applied, executor, journal, &tenant_id);
+            let mut compensation_failures = compensate(plan, &applied, executor, journal, &tenant_id).await;
             if journal.needs_reconciliation(&tenant_id, index).is_err() {
                 compensation_failures += 1;
             }
@@ -67,8 +157,8 @@ pub fn execute_provisioning(
                 compensation_failures,
             });
         }
-        if executor.execute(statement).is_err() {
-            let mut compensation_failures = compensate(plan, &applied, executor, journal, &tenant_id);
+        if executor.execute(statement).await.is_err() {
+            let mut compensation_failures = compensate(plan, &applied, executor, journal, &tenant_id).await;
             if journal.needs_reconciliation(&tenant_id, index).is_err() {
                 compensation_failures += 1;
             }
@@ -93,7 +183,7 @@ pub fn execute_provisioning(
     if journal.complete(&tenant_id).is_err() {
         let mut compensation_failures = compensate(
             plan, &applied, executor, journal, &tenant_id
-        );
+        ).await;
         if journal.needs_reconciliation(&tenant_id, plan.statements().len()).is_err() {
             compensation_failures += 1;
         }
@@ -106,7 +196,7 @@ pub fn execute_provisioning(
 }
 
 
-fn compensate(
+async fn compensate(
     plan: &MySqlProvisioningPlan,
     applied: &[usize],
     executor: &mut impl MySqlDdlExecutor,
@@ -115,7 +205,7 @@ fn compensate(
 ) -> usize {
     let mut failures = 0usize;
     for (original_step, sql) in compensation_statements(plan, applied) {
-        if executor.execute(&sql).is_err()
+        if executor.execute(&sql).await.is_err()
             || journal.step_compensated(tenant_id, original_step).is_err()
         {
             failures += 1;
@@ -155,10 +245,15 @@ mod tests {
         fail_at: Option<usize>,
     }
     impl MySqlDdlExecutor for FakeExecutor {
-        fn execute(&mut self, statement: &str) -> Result<(), DdlExecutionError> {
-            let index = self.calls.len();
-            self.calls.push(statement.to_owned());
-            if self.fail_at == Some(index) { Err(DdlExecutionError) } else { Ok(()) }
+        fn execute<'a>(
+            &'a mut self,
+            statement: &'a str,
+        ) -> Pin<Box<dyn Future<Output = Result<(), DdlExecutionError>> + Send + 'a>> {
+            Box::pin(async move {
+                let index = self.calls.len();
+                self.calls.push(statement.to_owned());
+                if self.fail_at == Some(index) { Err(DdlExecutionError) } else { Ok(()) }
+            })
         }
     }
 
@@ -192,35 +287,35 @@ mod tests {
         build_provisioning_plan(Uuid::new_v4(), "127.0.0.1", PASSWORD_A, PASSWORD_B).unwrap()
     }
 
-    #[test]
-    fn successful_provisioning_journals_each_step() {
+    #[tokio::test]
+    async fn successful_provisioning_journals_each_step() {
         let plan = plan();
         let mut executor = FakeExecutor::default();
         let mut journal = FakeJournal::default();
-        let result = execute_provisioning(&plan, &mut executor, &mut journal).unwrap();
+        let result = execute_provisioning(&plan, &mut executor, &mut journal).await.unwrap();
         assert_eq!(result, plan.identity().clone());
         assert_eq!(executor.calls.len(), 5);
         assert!(journal.events.iter().any(|event| event.starts_with("complete:")));
     }
 
-    #[test]
-    fn failed_provisioning_compensates_confirmed_resources_and_flags_reconciliation() {
+    #[tokio::test]
+    async fn failed_provisioning_compensates_confirmed_resources_and_flags_reconciliation() {
         let plan = plan();
         let mut executor = FakeExecutor { calls: Vec::new(), fail_at: Some(3) };
         let mut journal = FakeJournal::default();
-        let error = execute_provisioning(&plan, &mut executor, &mut journal).unwrap_err();
+        let error = execute_provisioning(&plan, &mut executor, &mut journal).await.unwrap_err();
         assert!(matches!(error, ProvisioningError::ExecutionFailed { failed_step: 3, .. }));
         assert!(journal.events.iter().any(|event| event == "reconcile:3"));
         assert!(executor.calls.iter().any(|sql| sql.starts_with("DROP USER IF EXISTS")));
         assert!(executor.calls.iter().any(|sql| sql.starts_with("DROP DATABASE")));
     }
 
-    #[test]
-    fn first_statement_failure_never_drops_a_preexisting_database() {
+    #[tokio::test]
+    async fn first_statement_failure_never_drops_a_preexisting_database() {
         let plan = plan();
         let mut executor = FakeExecutor { calls: Vec::new(), fail_at: Some(0) };
         let mut journal = FakeJournal::default();
-        let _ = execute_provisioning(&plan, &mut executor, &mut journal);
+        let _ = execute_provisioning(&plan, &mut executor, &mut journal).await;
         assert_eq!(executor.calls.len(), 1);
         assert!(!executor.calls.iter().any(|sql| sql.starts_with("DROP DATABASE")));
     }
