@@ -85,11 +85,16 @@ impl TenantAssertion {
 pub struct TenantRoute {
     pub tenant_id: Uuid,
     pub database_name: String,
+    pub assertion_expires_at: u64,
 }
 
 impl TenantRoute {
-    pub fn from_verified_tenant(tenant_id: Uuid) -> Self {
-        Self { tenant_id, database_name: format!("ap_t_{}", tenant_id.simple()) }
+    pub fn from_verified_tenant(tenant_id: Uuid, assertion_expires_at: u64) -> Self {
+        Self {
+            tenant_id,
+            database_name: format!("ap_t_{}", tenant_id.simple()),
+            assertion_expires_at,
+        }
     }
 }
 
@@ -120,7 +125,7 @@ pub fn authorize_handshake(
     if assertion.tenant_id != authenticated_tenant {
         return Err(TenantError::TenantMismatch);
     }
-    Ok(TenantRoute::from_verified_tenant(authenticated_tenant))
+    Ok(TenantRoute::from_verified_tenant(authenticated_tenant, assertion.expires_at))
 }
 
 fn validate_key(key: &[u8]) -> Result<(), TenantError> {
