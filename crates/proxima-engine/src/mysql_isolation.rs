@@ -73,6 +73,17 @@ impl fmt::Debug for MySqlProvisioningPlan {
     }
 }
 
+
+/// Generate a 256-bit random MySQL account password using the operating
+/// system random source used by UUID v4. The returned value is 64 hex chars,
+/// matching the provisioning-plan validation contract.
+pub fn generate_mysql_password() -> String {
+    let mut bytes = [0u8; 32];
+    bytes[..16].copy_from_slice(Uuid::new_v4().as_bytes());
+    bytes[16..].copy_from_slice(Uuid::new_v4().as_bytes());
+    hex::encode(bytes)
+}
+
 pub fn build_provisioning_plan(
     tenant_id: Uuid,
     account_host: &str,
@@ -171,6 +182,16 @@ mod tests {
     use super::*;
     const PASSWORD_A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     const PASSWORD_B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+
+    #[test]
+    fn generated_passwords_are_distinct_and_meet_entropy_format() {
+        let first = generate_mysql_password();
+        let second = generate_mysql_password();
+        assert_eq!(first.len(), 64);
+        assert!(first.bytes().all(|byte| byte.is_ascii_hexdigit()));
+        assert_ne!(first, second);
+    }
 
     #[test]
     fn tenant_accounts_are_distinct_and_fit_mysql_limits() {
