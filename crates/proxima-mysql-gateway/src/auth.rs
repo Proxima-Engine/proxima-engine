@@ -5,6 +5,7 @@
 //! tenant assertion validation remains a separate mandatory authorization step.
 use crate::protocol::ClientHandshake;
 use sha2::{Digest, Sha256};
+use crate::isolation::MySqlTenantIdentity;
 use std::fmt;
 use subtle::ConstantTimeEq;
 use ring::rand::{SecureRandom, SystemRandom};
@@ -181,8 +182,7 @@ pub fn authenticate_and_resolve<
 }
 
 fn expected_runtime_username(tenant_id: Uuid) -> String {
-    let digest = Sha256::digest(tenant_id.as_bytes());
-    format!("ap_r_{}", &hex::encode(digest)[..27])
+    MySqlTenantIdentity::for_tenant(tenant_id).runtime_username
 }
 
 
