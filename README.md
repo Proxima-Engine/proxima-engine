@@ -46,7 +46,7 @@ On Windows, from the repository root, run the single local verification entry po
 .\tools\verify-mysql.ps1
 ```
 
-It runs Rust formatting, workspace tests, Clippy, and the disposable MySQL 8.4 privilege-boundary smoke test. The smoke test only creates and removes databases and accounts with the `ap_test_` prefix inside the dedicated local Docker service. Do not point it at a production MySQL server.
+It formats the dedicated MySQL crate, runs workspace tests and MySQL-gateway Clippy, then executes direct MySQL grant checks and a Docker-backed gateway protocol smoke test covering TLS, tenant authentication, cross-database denial, blocked database/session switching and revocation. The test uses disposable development credentials and must never be pointed at a production MySQL server.
 
 ## Database protocol boundaries
 
