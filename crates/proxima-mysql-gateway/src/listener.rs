@@ -29,7 +29,6 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, Semaphore};
 use tokio::time::timeout;
 use tokio_rustls::{client::TlsStream as ClientTlsStream, server::TlsStream as ServerTlsStream, TlsAcceptor};
-use zeroize::Zeroize;
 
 static NEXT_CONNECTION_ID: AtomicU32 = AtomicU32::new(1);
 
@@ -38,15 +37,9 @@ pub struct GatewayConfig {
     pub client_certificate_file: String,
     pub client_private_key_file: String,
     pub upstream: UpstreamTlsConfig,
-    pub tenant_assertion_key: Vec<u8>,
     pub max_connections: usize,
     pub max_packet_size: usize,
     pub handshake_timeout: Duration,
-}
-impl Drop for GatewayConfig {
-    fn drop(&mut self) {
-        self.tenant_assertion_key.zeroize();
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -92,8 +85,7 @@ impl MySqlGateway {
         account_directory: Arc<dyn TenantAccountDirectory>,
         credential_store: Arc<dyn TenantUpstreamCredentialStore>,
     ) -> Result<Self, GatewayError> {
-        if config.tenant_assertion_key.len() < 32
-            || config.max_connections == 0
+        if config.max_connections == 0
             || config.max_packet_size < MIN_HANDSHAKE_PACKET_SIZE
             || config.max_packet_size >= MAX_PACKET_PAYLOAD
             || config.handshake_timeout.is_zero()
@@ -275,7 +267,6 @@ impl MySqlGateway {
             &challenge,
             true,
             self.account_directory.as_ref(),
-            &self.config.tenant_assertion_key,
             now,
             self.credential_store.as_ref(),
         ) {
