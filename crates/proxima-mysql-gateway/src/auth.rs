@@ -32,7 +32,7 @@ impl fmt::Debug for TenantAccount {
     }
 }
 
-pub trait TenantAccountDirectory {
+pub trait TenantAccountDirectory: Send + Sync {
     fn find_account(&self, username: &str) -> Result<Option<TenantAccount>, AccountError>;
 }
 
@@ -110,7 +110,7 @@ impl fmt::Debug for TenantUpstreamCredentials {
     }
 }
 
-pub trait TenantUpstreamCredentialStore {
+pub trait TenantUpstreamCredentialStore: Send + Sync {
     fn load_runtime_credentials(&self, tenant_id: Uuid) -> Result<Option<TenantUpstreamCredentials>, AccountError>;
 }
 
