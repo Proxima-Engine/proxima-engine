@@ -545,8 +545,10 @@ fn encrypt_document(key: &[u8; 32], document: &StoreDocument) -> Result<Vec<u8>,
     let unbound = UnboundKey::new(&AES_256_GCM, key).map_err(|_| StoreError::InvalidKey)?;
     let cipher = LessSafeKey::new(unbound);
     let nonce = Nonce::assume_unique_for_key(nonce_bytes);
-    cipher.seal_in_place_append_tag(nonce, Aad::from(AAD), &mut plaintext)
-        .map_err(|_| StoreError::StoreUnavailable)?;
+    if cipher.seal_in_place_append_tag(nonce, Aad::from(AAD), &mut plaintext).is_err() {
+        plaintext.zeroize();
+        return Err(StoreError::StoreUnavailable);
+    }
     let mut output = Vec::with_capacity(MAGIC.len() + NONCE_LEN + plaintext.len());
     output.extend_from_slice(MAGIC);
     output.extend_from_slice(&nonce_bytes);
