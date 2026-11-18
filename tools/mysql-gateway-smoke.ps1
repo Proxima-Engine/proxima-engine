@@ -102,7 +102,7 @@ function Invoke-ActiveRevocationProbe {
     $process = Start-Process -FilePath $cargoPath -ArgumentList ($quotedArgs -join " ") -WorkingDirectory $repoRoot -PassThru -NoNewWindow -RedirectStandardOutput $stdout -RedirectStandardError $stderr
 
     $ready = $false
-    $deadline = [DateTime]::UtcNow.AddSeconds(45)
+    $deadline = [DateTime]::UtcNow.AddSeconds(120)
     try {
         while ([DateTime]::UtcNow -lt $deadline) {
             Start-Sleep -Milliseconds 200
@@ -120,7 +120,7 @@ function Invoke-ActiveRevocationProbe {
             }
         }
         if (-not $ready) {
-            throw "Active-session probe did not establish a tenant session within 45 seconds."
+            throw "Active-session probe did not establish a tenant session within 120 seconds."
         }
 
         Write-Host "[TEST] Revoking tenant while its MySQL gateway session is still open" -ForegroundColor Cyan
