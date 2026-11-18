@@ -6,7 +6,6 @@ use proxima_mysql_gateway::{
 use std::{env, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
-use zeroize::Zeroizing;
 
 fn required(name: &str) -> Result<String, String> {
     env::var(name)
