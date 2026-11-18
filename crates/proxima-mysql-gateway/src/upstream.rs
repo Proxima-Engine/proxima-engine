@@ -199,7 +199,12 @@ pub async fn connect_upstream(
     match auth_packet.payload.as_slice() {
         [0x00, ..] => Ok(upstream),
         [0x01, 0x03] => {
-            let ok = read_packet(&mut upstream, config.max_packet_size).await?;
+            let ok = timeout(
+                config.handshake_timeout,
+                read_packet(&mut upstream, config.max_packet_size),
+            )
+            .await
+            .map_err(|_| UpstreamError::ConnectTimeout)??;
             verify_sequence(&ok, 4)?;
             ensure_ok(&ok)?;
             Ok(upstream)
@@ -213,7 +218,12 @@ pub async fn connect_upstream(
                 config.max_packet_size,
             )
             .await?;
-            let ok = read_packet(&mut upstream, config.max_packet_size).await?;
+            let ok = timeout(
+                config.handshake_timeout,
+                read_packet(&mut upstream, config.max_packet_size),
+            )
+            .await
+            .map_err(|_| UpstreamError::ConnectTimeout)??;
             verify_sequence(&ok, 5)?;
             ensure_ok(&ok)?;
             Ok(upstream)
