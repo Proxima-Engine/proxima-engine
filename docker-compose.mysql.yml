@@ -1,7 +1,6 @@
 services:
   mysql-test:
     image: mysql:8.4
-    container_name: proxima-mysql-test
     restart: unless-stopped
     environment:
       MYSQL_ROOT_PASSWORD: proxima-mysql-dev-only
@@ -32,7 +31,6 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.mysql-gateway
-    container_name: proxima-mysql-gateway
     restart: unless-stopped
     user: "0:0"
     entrypoint: ["/bin/sh", "-c"]
