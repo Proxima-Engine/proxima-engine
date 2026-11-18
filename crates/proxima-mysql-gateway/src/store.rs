@@ -149,6 +149,7 @@ impl fmt::Debug for EncryptedTenantStore {
             .field("account_count", &self.document.read().map(|d| d.accounts.len()).unwrap_or(0))
             .field("tenant_credential_count", &self.document.read().map(|d| d.upstream.len()).unwrap_or(0))
             .field("migration_credential_count", &self.document.read().map(|d| d.migration.len()).unwrap_or(0))
+            .field("assertion_key_count", &self.document.read().map(|d| d.assertion_keys.len()).unwrap_or(0))
             .finish()
     }
 }
@@ -744,6 +745,10 @@ mod tests {
         let migration = reopened.load_migration_credentials(tenant).unwrap().unwrap();
         assert_eq!(migration.username, MySqlTenantIdentity::for_tenant(tenant).migration_username);
         assert_eq!(migration.password, "d".repeat(64));
+        assert_eq!(
+            reopened.load_assertion_key(tenant).unwrap().unwrap(),
+            TEST_ASSERTION_KEY
+        );
     }
 
     #[test]
@@ -886,6 +891,7 @@ mod tests {
         assert!(store.find_account("gateway_c").unwrap().is_none());
         assert!(store.load_runtime_credentials(tenant).unwrap().is_none());
         assert!(store.load_migration_credentials(tenant).unwrap().is_none());
+        assert!(store.load_assertion_key(tenant).unwrap().is_none());
 
         let replacement = generate_gateway_credential().unwrap();
         let replacement_password = store.register_tenant(
