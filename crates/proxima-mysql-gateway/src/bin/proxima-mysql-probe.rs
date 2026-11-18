@@ -183,6 +183,18 @@ async fn run() -> ProbeResult<()> {
     }
     println!("[PASS] client session-option changes rejected");
 
+    let change_user = command(&mut tls, vec![0x11]).await?;
+    if change_user.payload.first() != Some(&0xff) {
+        return Err("COM_CHANGE_USER unexpectedly changed the authenticated account".into());
+    }
+    println!("[PASS] client authentication changes rejected");
+
+    let reset_connection = command(&mut tls, vec![0x1f]).await?;
+    if reset_connection.payload.first() != Some(&0xff) {
+        return Err("COM_RESET_CONNECTION unexpectedly reset the tenant-bound session".into());
+    }
+    println!("[PASS] client connection reset rejected");
+
     let final_ok = command(&mut tls, [vec![0x03], b"DO 1".to_vec()].concat()).await?;
     if final_ok.payload.first() != Some(&0x00) {
         return Err("tenant session did not remain usable after rejected commands".into());
