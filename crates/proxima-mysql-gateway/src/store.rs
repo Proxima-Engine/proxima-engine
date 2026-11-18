@@ -71,6 +71,29 @@ struct StoreDocument {
     assertion_keys: Vec<StoredTenantAssertionKey>,
 }
 
+#[derive(Deserialize)]
+struct GatewayStoreDocument {
+    version: u32,
+    accounts: Vec<StoredGatewayAccount>,
+    upstream: Vec<StoredUpstreamCredential>,
+    #[serde(default)]
+    assertion_keys: Vec<StoredTenantAssertionKey>,
+}
+impl Drop for GatewayStoreDocument {
+    fn drop(&mut self) {
+        for account in &mut self.accounts {
+            account.verifier_hex.zeroize();
+        }
+        for credential in &mut self.upstream {
+            credential.password.zeroize();
+        }
+        for key in &mut self.assertion_keys {
+            key.key_hex.zeroize();
+        }
+    }
+}
+
+
 impl Drop for StoreDocument {
     fn drop(&mut self) {
         for account in &mut self.accounts {
@@ -142,6 +165,7 @@ pub struct EncryptedTenantStore {
     document: RwLock<StoreDocument>,
     loaded_metadata: RwLock<Option<[u8; 32]>>,
     last_reload_check: Mutex<Instant>,
+    include_migration_credentials: bool,
 }
 
 impl fmt::Debug for EncryptedTenantStore {
@@ -162,14 +186,34 @@ impl EncryptedTenantStore {
     /// exactly 64 hexadecimal characters. On Unix it must be owner-only (0600).
     /// On Windows, place it in a directory whose ACL grants access only to the
     /// gateway service identity and administrators.
+    /// Open the encrypted registry for the administrative CLI. This mode may
+    /// deserialize migration credentials and is never used by the gateway process.
     pub fn open(path: impl Into<PathBuf>, key_file: impl AsRef<Path>) -> Result<Self, StoreError> {
-        let path = path.into();
-        let mut key = Zeroizing::new(load_key(key_file.as_ref())?);
+        Self::open_with_mode(path.into(), key_file.as_ref(), true)
+    }
+
+    /// Open a runtime-only view of the registry. The gateway parser deliberately
+    /// ignores the migration field, so migration passwords are never materialized
+    /// in the long-running data-plane process. Runtime mode is read-only.
+    pub fn open_gateway(path: impl Into<PathBuf>, key_file: impl AsRef<Path>) -> Result<Self, StoreError> {
+        Self::open_with_mode(path.into(), key_file.as_ref(), false)
+    }
+
+    fn open_with_mode(
+        path: PathBuf,
+        key_file: &Path,
+        include_migration_credentials: bool,
+    ) -> Result<Self, StoreError> {
+        let mut key = Zeroizing::new(load_key(key_file)?);
         reject_symlink_if_present(&path)?;
         let encrypted = read_bounded_optional(&path)?;
         let loaded_metadata = encrypted.as_ref().map(|bytes| content_fingerprint(bytes));
         let document = if let Some(encrypted) = encrypted.as_deref() {
-            decrypt_document(&key, encrypted)?
+            if include_migration_credentials {
+                decrypt_document(&key, encrypted)?
+            } else {
+                decrypt_gateway_document(&key, encrypted)?
+            }
         } else {
             StoreDocument { version: 1, ..StoreDocument::default() }
         };
@@ -183,6 +227,7 @@ impl EncryptedTenantStore {
             document: RwLock::new(document),
             loaded_metadata: RwLock::new(loaded_metadata),
             last_reload_check: Mutex::new(Instant::now() - Duration::from_secs(1)),
+            include_migration_credentials,
         })
     }
 
@@ -205,7 +250,11 @@ impl EncryptedTenantStore {
             return Ok(());
         }
         let document = if let Some(encrypted) = encrypted.as_deref() {
-            decrypt_document(&self.key, encrypted)?
+            if self.include_migration_credentials {
+                decrypt_document(&self.key, encrypted)?
+            } else {
+                decrypt_gateway_document(&self.key, encrypted)?
+            }
         } else {
             StoreDocument { version: 1, ..StoreDocument::default() }
         };
@@ -471,6 +520,9 @@ impl EncryptedTenantStore {
     }
 
     fn persist(&self, document: &StoreDocument) -> Result<(), StoreError> {
+        if !self.include_migration_credentials {
+            return Err(StoreError::StoreUnavailable);
+        }
         let encrypted = encrypt_document(&self.key, document)?;
         let parent = self.path.parent()
             .filter(|path| !path.as_os_str().is_empty())
@@ -691,7 +743,7 @@ fn encrypt_document(key: &[u8; 32], document: &StoreDocument) -> Result<Vec<u8>,
     Ok(output)
 }
 
-fn decrypt_document(key: &[u8; 32], encrypted: &[u8]) -> Result<StoreDocument, StoreError> {
+fn decrypt_plaintext(key: &[u8; 32], encrypted: &[u8]) -> Result<Zeroizing<Vec<u8>>, StoreError> {
     if encrypted.len() < MAGIC.len() + NONCE_LEN + 16
         || encrypted.len() > MAX_ENCRYPTED_STORE_BYTES
         || &encrypted[..MAGIC.len()] != MAGIC
@@ -706,9 +758,31 @@ fn decrypt_document(key: &[u8; 32], encrypted: &[u8]) -> Result<StoreDocument, S
     let nonce = Nonce::assume_unique_for_key(nonce_bytes);
     let plaintext = cipher.open_in_place(nonce, Aad::from(AAD), &mut ciphertext)
         .map_err(|_| StoreError::CorruptStore)?;
-    let parsed = serde_json::from_slice(plaintext);
+    let mut result = Zeroizing::new(plaintext.to_vec());
     ciphertext.zeroize();
-    let document: StoreDocument = parsed.map_err(|_| StoreError::CorruptStore)?;
+    Ok(std::mem::take(&mut *result).into())
+}
+
+fn decrypt_document(key: &[u8; 32], encrypted: &[u8]) -> Result<StoreDocument, StoreError> {
+    let plaintext = decrypt_plaintext(key, encrypted)?;
+    serde_json::from_slice::<StoreDocument>(&plaintext)
+        .map_err(|_| StoreError::CorruptStore)
+}
+
+fn decrypt_gateway_document(key: &[u8; 32], encrypted: &[u8]) -> Result<StoreDocument, StoreError> {
+    let plaintext = decrypt_plaintext(key, encrypted)?;
+    let mut parsed = serde_json::from_slice::<GatewayStoreDocument>(&plaintext)
+        .map_err(|_| StoreError::CorruptStore)?;
+    if parsed.version != 1 {
+        return Err(StoreError::CorruptStore);
+    }
+    let document = StoreDocument {
+        version: parsed.version,
+        accounts: std::mem::take(&mut parsed.accounts),
+        upstream: std::mem::take(&mut parsed.upstream),
+        migration: Vec::new(),
+        assertion_keys: std::mem::take(&mut parsed.assertion_keys),
+    };
     Ok(document)
 }
 
@@ -1015,6 +1089,36 @@ mod tests {
             ).err(),
             Some(StoreError::InvalidAccount)
         );
+    }
+
+    #[test]
+    fn gateway_registry_view_never_materializes_migration_credentials_or_writes() {
+        let directory = tempdir().unwrap();
+        let store_path = directory.path().join("tenants.enc");
+        let key_path = directory.path().join("key.txt");
+        fs::write(&key_path, "a".repeat(64)).unwrap();
+        let tenant = Uuid::new_v4();
+        let identity = MySqlTenantIdentity::for_tenant(tenant);
+        let admin = EncryptedTenantStore::open(&store_path, &key_path).unwrap();
+        let gateway = generate_gateway_credential().unwrap();
+        admin.register_tenant(
+            tenant,
+            "gateway_runtime_only",
+            gateway,
+            &identity.runtime_username,
+            &"b".repeat(64),
+            &identity.migration_username,
+            &"c".repeat(64),
+            TEST_ASSERTION_KEY,
+        ).unwrap();
+        drop(admin);
+
+        let runtime = EncryptedTenantStore::open_gateway(&store_path, &key_path).unwrap();
+        let document = runtime.document.read().unwrap();
+        assert!(document.migration.is_empty());
+        drop(document);
+        assert!(runtime.load_migration_credentials(tenant).unwrap().is_none());
+        assert!(runtime.revoke_tenant(tenant).is_err());
     }
 
     #[test]
