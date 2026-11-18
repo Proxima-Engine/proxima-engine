@@ -58,6 +58,7 @@ services:
       PROXIMA_MYSQL_SECRET_STORE_FILE: /var/lib/proxima-mysql/tenants.enc
       PROXIMA_MYSQL_SECRET_STORE_KEY_FILE: /tmp/mysql-store-key
       PROXIMA_MYSQL_MAX_CONNECTIONS: "128"
+      PROXIMA_MYSQL_IDLE_TIMEOUT_MS: "900000"
     ports:
       - "127.0.0.1:13306:13306"
     volumes:
