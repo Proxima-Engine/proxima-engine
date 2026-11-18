@@ -177,7 +177,9 @@ fn tenant_identity_matches_grant(statement: &str) -> bool {
     let Some((target_username, _)) = target.split_once("@'") else {
         return false;
     };
-    let Some(target_username) = target_username.strip_prefix('\'') else {
+    let Some(target_username) = target_username
+        .strip_prefix('\'')
+        .and_then(|value| value.strip_suffix('\'')) else {
         return false;
     };
     target_username == identity.runtime_username.to_ascii_uppercase()
