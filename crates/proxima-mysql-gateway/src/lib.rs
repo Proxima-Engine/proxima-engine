@@ -4,5 +4,6 @@
 //! implementation. Parsing is bounded and rejects malformed or unsupported
 //! packets before they can influence tenant routing.
 
+pub mod auth;
 pub mod protocol;
 pub mod tenant;
