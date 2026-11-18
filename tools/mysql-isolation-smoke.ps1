@@ -40,6 +40,10 @@ function Assert-MySqlDenied {
     Write-Host "[PASS] $Name (denied)" -ForegroundColor Green
 }
 
+$prepareScript = Join-Path $PSScriptRoot "prepare-mysql-dev-certs.ps1"
+& $prepareScript
+if ($LASTEXITCODE -ne 0) { throw "Local MySQL TLS certificate preparation failed." }
+
 Write-Host "--- Start disposable MySQL 8.4 ---" -ForegroundColor Cyan
 & docker compose -f $composeFile up -d --wait
 if ($LASTEXITCODE -ne 0) { throw "MySQL test container did not become healthy." }
