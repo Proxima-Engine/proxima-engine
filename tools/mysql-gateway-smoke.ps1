@@ -90,7 +90,7 @@ function New-LocalTenantAssertion {
         [int]$TtlSeconds = 3600
     )
     $expiresAt = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + $TtlSeconds
-    $message = "proxima-tenant-token:$TenantId:$expiresAt"
+    $message = "v1.$TenantId.$expiresAt"
     $keyBytes = [System.Text.Encoding]::UTF8.GetBytes($SigningKey)
     $messageBytes = [System.Text.Encoding]::UTF8.GetBytes($message)
     $hmac = [System.Security.Cryptography.HMACSHA256]::new($keyBytes)
