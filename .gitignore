@@ -2,3 +2,7 @@
 .env
 pgbouncer-userlist.txt
 pgbouncer-userlist.txt
+# Local MySQL development certificates, secrets and tenant data
+dev/mysql-certs/
+dev/mysql-secrets/
+dev/mysql-data/
