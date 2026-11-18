@@ -5,8 +5,8 @@
 //! that a failed network call means the server did not apply the statement.
 use crate::{
     isolation::{MySqlProvisioningPlan, MySqlTenantIdentity},
-    protocol::{Packet, ProtocolError},
-    upstream::{connect_admin, read_packet, write_packet, UpstreamTlsConfig, UpstreamError},
+    protocol::Packet,
+    upstream::{connect_admin, read_packet, write_packet, UpstreamTlsConfig},
 };
 use std::{fmt, future::Future, pin::Pin, time::Duration};
 use tokio::{net::TcpStream, time::timeout};
@@ -50,7 +50,7 @@ impl MySqlAdminExecutor {
         // The configured maximum is already validated by UpstreamTlsConfig.
         Ok(Self {
             stream,
-            max_packet_size: crate::protocol::MAX_PACKET_PAYLOAD - 1,
+            max_packet_size: config.max_packet_size(),
             statement_timeout,
             usable: true,
         })
