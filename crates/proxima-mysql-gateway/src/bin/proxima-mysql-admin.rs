@@ -22,7 +22,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tokio::runtime::Runtime;
-use zeroize::Zeroize;
+use zeroize::Zeroizing;
 
 fn required(name: &str) -> Result<String, String> {
     let value = env::var(name).map_err(|_| format!("required environment variable {name} is missing"))?;
@@ -132,11 +132,11 @@ async fn provision(tenant_value: String, gateway_username: String) -> Result<(),
 
     let account_host = required("PROXIMA_MYSQL_ACCOUNT_HOST")?;
     let admin_username = required("PROXIMA_MYSQL_PROVISIONING_USER")?;
-    let mut admin_password = required("PROXIMA_MYSQL_PROVISIONING_PASSWORD")?;
-    let mut runtime_password = generate_mysql_password()
-        .map_err(|_| "operating-system random source unavailable".to_owned())?;
-    let mut migration_password = generate_mysql_password()
-        .map_err(|_| "operating-system random source unavailable".to_owned())?;
+    let admin_password = Zeroizing::new(required("PROXIMA_MYSQL_PROVISIONING_PASSWORD")?);
+    let runtime_password = Zeroizing::new(generate_mysql_password()
+        .map_err(|_| "operating-system random source unavailable".to_owned())?);
+    let migration_password = Zeroizing::new(generate_mysql_password()
+        .map_err(|_| "operating-system random source unavailable".to_owned())?);
     let gateway_credential = generate_gateway_credential()
         .map_err(|_| "operating-system random source unavailable".to_owned())?;
 
@@ -155,7 +155,6 @@ async fn provision(tenant_value: String, gateway_username: String) -> Result<(),
         &admin_password,
         Duration::from_millis(number("PROXIMA_MYSQL_STATEMENT_TIMEOUT_MS", 30_000)?),
     ).await.map_err(|_| "could not authenticate to MySQL with the provisioning account over verified TLS".to_owned())?;
-    admin_password.zeroize();
 
     let store = open_store()?;
     let journal_path = PathBuf::from(required("PROXIMA_MYSQL_PROVISIONING_JOURNAL_FILE")?);
@@ -190,8 +189,6 @@ async fn provision(tenant_value: String, gateway_username: String) -> Result<(),
         },
     ).await.map_err(|error| error.to_string())?;
 
-    runtime_password.zeroize();
-    migration_password.zeroize();
 
     println!("MySQL tenant provisioning completed.");
     println!("Tenant ID: {}", created.tenant_id);
@@ -231,7 +228,7 @@ async fn revoke(tenant_value: String) -> Result<(), String> {
         .map_err(|_| "could not revoke the tenant in the encrypted gateway registry".to_owned())?;
 
     let account_host = required("PROXIMA_MYSQL_ACCOUNT_HOST")?;
-    let mut admin_password = required("PROXIMA_MYSQL_PROVISIONING_PASSWORD")?;
+    let admin_password = Zeroizing::new(required("PROXIMA_MYSQL_PROVISIONING_PASSWORD")?);
     let upstream = upstream_config()?;
     let mut executor = MySqlAdminExecutor::connect(
         &upstream,
@@ -239,7 +236,6 @@ async fn revoke(tenant_value: String) -> Result<(), String> {
         &admin_password,
         Duration::from_millis(number("PROXIMA_MYSQL_STATEMENT_TIMEOUT_MS", 30_000)?),
     ).await.map_err(|_| "tenant secrets are revoked locally, but MySQL administrator connection failed; upstream account cleanup needs reconciliation".to_owned())?;
-    admin_password.zeroize();
 
     let identity = MySqlTenantIdentity::for_tenant(tenant_id);
     let statements = build_revocation(&identity, &account_host)
@@ -264,10 +260,10 @@ async fn rotate(tenant_value: String, gateway_username: String) -> Result<(), St
         .ok_or_else(|| "tenant migration credentials are not registered".to_owned())?;
 
     let identity = MySqlTenantIdentity::for_tenant(tenant_id);
-    let new_runtime_password = generate_mysql_password()
-        .map_err(|_| "operating-system random source unavailable".to_owned())?;
-    let new_migration_password = generate_mysql_password()
-        .map_err(|_| "operating-system random source unavailable".to_owned())?;
+    let new_runtime_password = Zeroizing::new(generate_mysql_password()
+        .map_err(|_| "operating-system random source unavailable".to_owned())?);
+    let new_migration_password = Zeroizing::new(generate_mysql_password()
+        .map_err(|_| "operating-system random source unavailable".to_owned())?);
     let new_gateway_credential = generate_gateway_credential()
         .map_err(|_| "operating-system random source unavailable".to_owned())?;
 
@@ -278,7 +274,7 @@ async fn rotate(tenant_value: String, gateway_username: String) -> Result<(), St
         &new_migration_password,
     ).map_err(|_| "invalid MySQL tenant credential rotation plan".to_owned())?;
 
-    let mut admin_password = required("PROXIMA_MYSQL_PROVISIONING_PASSWORD")?;
+    let admin_password = Zeroizing::new(required("PROXIMA_MYSQL_PROVISIONING_PASSWORD")?);
     let upstream = upstream_config()?;
     let mut executor = MySqlAdminExecutor::connect(
         &upstream,
@@ -286,7 +282,6 @@ async fn rotate(tenant_value: String, gateway_username: String) -> Result<(), St
         &admin_password,
         Duration::from_millis(number("PROXIMA_MYSQL_STATEMENT_TIMEOUT_MS", 30_000)?),
     ).await.map_err(|_| "could not authenticate to MySQL with the provisioning account over verified TLS".to_owned())?;
-    admin_password.zeroize();
 
     for statement in &statements {
         if executor.execute(statement).await.is_err() {
