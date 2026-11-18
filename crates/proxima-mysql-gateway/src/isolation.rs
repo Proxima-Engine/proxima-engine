@@ -232,7 +232,7 @@ mod tests {
     #[test]
     fn provisioning_grants_are_database_scoped_and_accounts_are_separate() {
         let tenant = Uuid::parse_str("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa").unwrap();
-        let plan = build_provisioning_plan(tenant, "10.0.0.12", PASSWORD_A, PASSWORD_B).unwrap();
+        let plan = build_provisioning_plan(tenant, "10.0.0.12", "10.0.0.13", PASSWORD_A, PASSWORD_B).unwrap();
         assert_eq!(plan.statements().len(), 5);
         let sql = plan.statements().iter().map(|statement| statement.as_str()).collect::<Vec<_>>().join("\n");
         assert!(sql.contains("GRANT SELECT, INSERT, UPDATE, DELETE ON"));
@@ -255,21 +255,21 @@ mod tests {
 
     #[test]
     fn wildcard_and_injected_account_hosts_are_rejected() {
-        assert_eq!(build_provisioning_plan(Uuid::new_v4(), "%", PASSWORD_A, PASSWORD_B).unwrap_err(), MySqlIsolationError::InvalidHost);
-        assert_eq!(build_provisioning_plan(Uuid::new_v4(), "mysql.internal", PASSWORD_A, PASSWORD_B).unwrap_err(), MySqlIsolationError::InvalidHost);
-        assert_eq!(build_provisioning_plan(Uuid::new_v4(), "127.0.0.1' OR 1=1 --", PASSWORD_A, PASSWORD_B).unwrap_err(), MySqlIsolationError::InvalidHost);
+        assert_eq!(build_provisioning_plan(Uuid::new_v4(), "%", "10.0.0.13", PASSWORD_A, PASSWORD_B).unwrap_err(), MySqlIsolationError::InvalidHost);
+        assert_eq!(build_provisioning_plan(Uuid::new_v4(), "mysql.internal", "10.0.0.13", PASSWORD_A, PASSWORD_B).unwrap_err(), MySqlIsolationError::InvalidHost);
+        assert_eq!(build_provisioning_plan(Uuid::new_v4(), "127.0.0.1' OR 1=1 --", "10.0.0.13", PASSWORD_A, PASSWORD_B).unwrap_err(), MySqlIsolationError::InvalidHost);
     }
 
     #[test]
     fn weak_or_non_hex_passwords_are_rejected() {
-        assert_eq!(build_provisioning_plan(Uuid::new_v4(), "127.0.0.1", "password", PASSWORD_B).unwrap_err(), MySqlIsolationError::InvalidPassword);
-        assert_eq!(build_provisioning_plan(Uuid::new_v4(), "127.0.0.1", PASSWORD_A, PASSWORD_A).unwrap_err(), MySqlIsolationError::InvalidPassword);
+        assert_eq!(build_provisioning_plan(Uuid::new_v4(), "127.0.0.1", "10.0.0.13", "password", PASSWORD_B).unwrap_err(), MySqlIsolationError::InvalidPassword);
+        assert_eq!(build_provisioning_plan(Uuid::new_v4(), "127.0.0.1", "10.0.0.13", PASSWORD_A, PASSWORD_A).unwrap_err(), MySqlIsolationError::InvalidPassword);
     }
 
     #[test]
     fn revocation_locks_accounts_without_dropping_customer_database() {
         let tenant = MySqlTenantIdentity::for_tenant(Uuid::new_v4());
-        let sql = build_revocation(&tenant, "127.0.0.1").unwrap().join("\n");
+        let sql = build_revocation(&tenant, "127.0.0.1", "127.0.0.2").unwrap().join("\n");
         assert!(sql.contains("ACCOUNT LOCK"));
         assert!(sql.contains("REVOKE ALL PRIVILEGES"));
         assert!(!sql.contains("DROP DATABASE"));
@@ -279,7 +279,7 @@ mod tests {
     #[test]
     fn rotation_changes_only_credentials_for_the_tenant_accounts() {
         let tenant = MySqlTenantIdentity::for_tenant(Uuid::new_v4());
-        let sql = build_password_rotation(&tenant, "127.0.0.1", PASSWORD_A, PASSWORD_B).unwrap();
+        let sql = build_password_rotation(&tenant, "127.0.0.1", "127.0.0.2", PASSWORD_A, PASSWORD_B).unwrap();
         assert_eq!(sql.len(), 2);
         assert!(sql.iter().all(|statement| statement.starts_with("ALTER USER")));
     }
