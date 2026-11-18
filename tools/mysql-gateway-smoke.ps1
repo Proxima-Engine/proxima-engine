@@ -83,6 +83,68 @@ function Invoke-Probe {
     Write-Host ($output -join [Environment]::NewLine)
 }
 
+function Invoke-ActiveRevocationProbe {
+    param(
+        [Parameter(Mandatory)][string]$GatewayPassword,
+        [Parameter(Mandatory)][string]$Assertion
+    )
+    $stdout = Join-Path $dataDir "active-revocation.stdout.log"
+    $stderr = Join-Path $dataDir "active-revocation.stderr.log"
+    Remove-Item $stdout, $stderr -Force -ErrorAction SilentlyContinue
+    $probeArgs = @(
+        "run", "-p", "proxima-mysql-gateway", "--bin", "proxima-mysql-probe", "--",
+        "127.0.0.1", "13306", "localhost", $caFile,
+        $gatewayUsername, $GatewayPassword, $Assertion, $tenantDatabase, $otherDatabase,
+        "--expect-revoked-after-ms", "2500"
+    )
+    $quotedArgs = $probeArgs | ForEach-Object { '"' + $_.Replace('"', '\"') + '"' }
+    $cargoPath = (Get-Command cargo -ErrorAction Stop).Source
+    $process = Start-Process -FilePath $cargoPath -ArgumentList ($quotedArgs -join " ") -WorkingDirectory $repoRoot -PassThru -NoNewWindow -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+
+    $ready = $false
+    $deadline = [DateTime]::UtcNow.AddSeconds(45)
+    try {
+        while ([DateTime]::UtcNow -lt $deadline) {
+            Start-Sleep -Milliseconds 200
+            if (Test-Path $stdout) {
+                $output = Get-Content $stdout -Raw -ErrorAction SilentlyContinue
+                if ($output -match "ACTIVE_SESSION_READY") {
+                    $ready = $true
+                    break
+                }
+            }
+            $process.Refresh()
+            if ($process.HasExited) {
+                $stderrText = if (Test-Path $stderr) { Get-Content $stderr -Raw } else { "" }
+                throw "Active-session probe exited before becoming ready. $stderrText"
+            }
+        }
+        if (-not $ready) {
+            throw "Active-session probe did not establish a tenant session within 45 seconds."
+        }
+
+        Write-Host "[TEST] Revoking tenant while its MySQL gateway session is still open" -ForegroundColor Cyan
+        Invoke-AdminCli -Arguments @("revoke", $tenantId) | Out-Null
+        if (-not $process.WaitForExit(15000)) {
+            throw "Active-session probe did not finish after tenant revocation."
+        }
+        if ($process.ExitCode -ne 0) {
+            $stderrText = if (Test-Path $stderr) { Get-Content $stderr -Raw } else { "" }
+            throw "Active MySQL session was not closed after revocation. $stderrText"
+        }
+        if (Test-Path $stdout) {
+            Write-Host (Get-Content $stdout -Raw)
+        }
+    }
+    finally {
+        $process.Refresh()
+        if (-not $process.HasExited) {
+            $process.Kill()
+            $process.WaitForExit()
+        }
+    }
+}
+
 function New-LocalTenantAssertion {
     param(
         [Parameter(Mandatory)][string]$TenantId,
@@ -182,8 +244,8 @@ INSERT INTO $otherDatabase.records VALUES (1, 'tenant-b-secret') ON DUPLICATE KE
     Invoke-Probe -GatewayPassword $gatewayPassword -Assertion $rotatedAssertion
     $assertion = $rotatedAssertion
 
-    Write-Host "--- Revoke tenant and verify new connections are rejected ---" -ForegroundColor Cyan
-    Invoke-AdminCli -Arguments @("revoke", $tenantId) | Out-Null
+    Write-Host "--- Revoke tenant and verify existing and new sessions are rejected ---" -ForegroundColor Cyan
+    Invoke-ActiveRevocationProbe -GatewayPassword $gatewayPassword -Assertion $assertion
     Invoke-Probe -GatewayPassword $gatewayPassword -Assertion $assertion -ExpectDenied
 
     Write-Host "MySQL gateway end-to-end smoke test passed." -ForegroundColor Green
