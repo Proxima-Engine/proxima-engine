@@ -162,6 +162,17 @@ fn valid_tenant_account_username(statement: &str) -> bool {
     suffix.len() == 27 && suffix.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
+fn account_target_has_no_trailing_sql(statement: &str) -> bool {
+    let Some(marker) = statement.rfind("@'") else {
+        return false;
+    };
+    let host = &statement[marker + 2..];
+    let Some(end) = host.find(39 as char) else {
+        return false;
+    };
+    host[end + 1..].trim().is_empty()
+}
+
 fn is_allowed_admin_statement(statement: &str) -> bool {
     if statement.contains(';')
         || statement.contains('\n')
@@ -185,11 +196,19 @@ fn is_allowed_admin_statement(statement: &str) -> bool {
     let database_prefix = upper.starts_with("CREATE DATABASE `AP_T_")
         || upper.starts_with("DROP DATABASE `AP_T_")
         || upper.starts_with("DROP DATABASE AP_T_");
-    let scoped_grant = upper.starts_with("GRANT ")
-        && upper.contains(" ON `AP_T_")
-        && (upper.contains(".* TO 'AP_R_") || upper.contains(".* TO 'AP_M_"))
+    let tenant_schema_prefix = format!(" ON {}AP_T_", 96 as char);
+    let runtime_grant = upper.starts_with(
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON ",
+    ) && upper.contains(&tenant_schema_prefix)
+        && upper.contains(".* TO 'AP_R_");
+    let migration_grant = upper.starts_with(
+        "GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX, DROP, REFERENCES, CREATE VIEW, SHOW VIEW, TRIGGER, EVENT, CREATE ROUTINE, ALTER ROUTINE, EXECUTE ON ",
+    ) && upper.contains(&tenant_schema_prefix)
+        && upper.contains(".* TO 'AP_M_");
+    let scoped_grant = (runtime_grant || migration_grant)
         && !upper.contains(" ON *.*")
-        && !upper.contains("WITH GRANT OPTION");
+        && !upper.contains("WITH GRANT OPTION")
+        && account_target_has_no_trailing_sql(&upper);
     let account_host_is_ip = upper
         .rfind("@'")
         .and_then(|marker| {
@@ -770,4 +789,33 @@ mod tests {
         assert!(!message.contains(PASSWORD_A));
         assert!(!message.contains("CREATE USER"));
     }
+    #[test]
+    fn admin_executor_allows_only_exact_tenant_grant_profiles() {
+        let tenant_id = Uuid::new_v4();
+        let plan = build_provisioning_plan(tenant_id, "10.0.0.12", PASSWORD_A, PASSWORD_B).unwrap();
+        for statement in plan.statements() {
+            assert!(is_allowed_admin_statement(statement), "rejected generated statement: {}", statement);
+        }
+        let runtime_grant = plan.statements()[3].to_string();
+        let expanded_runtime_grant = runtime_grant.replace("DELETE ON", "DELETE, CREATE ON");
+        assert!(!is_allowed_admin_statement(&expanded_runtime_grant));
+        let backtick = 96 as char;
+        let global_grant = runtime_grant.replace(&format!("ON {backtick}ap_t_"), "ON *.* TO 'ap_r_");
+        assert!(!is_allowed_admin_statement(&global_grant));
+        let wrong_account_grant = runtime_grant.replace("ap_r_", "ap_m_");
+        assert!(!is_allowed_admin_statement(&wrong_account_grant));
+    }
+
+    #[test]
+    fn admin_executor_allows_tenant_rotation_and_revocation_statements() {
+        let tenant_id = Uuid::new_v4();
+        let identity = MySqlTenantIdentity::for_tenant(tenant_id);
+        for statement in build_password_rotation(&identity, "10.0.0.12", PASSWORD_B, PASSWORD_A).unwrap() {
+            assert!(is_allowed_admin_statement(&statement));
+        }
+        for statement in build_revocation(&identity, "10.0.0.12").unwrap() {
+            assert!(is_allowed_admin_statement(&statement));
+        }
+    }
+
 }
