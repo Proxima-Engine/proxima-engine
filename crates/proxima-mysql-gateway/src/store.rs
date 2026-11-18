@@ -698,7 +698,7 @@ mod tests {
         let identity = MySqlTenantIdentity::for_tenant(tenant);
         let runtime_password = "c".repeat(64);
         store.register_tenant(
-            tenant, "gateway_a", gateway, &identity.runtime_username, &runtime_password, &identity.migration_username, &"d".repeat(64), TEST_ASSERTION_KEY
+            tenant, "gateway_a", gateway, &identity.runtime_username, &runtime_password, TEST_ASSERTION_KEY
         ).unwrap();
 
         let encrypted = fs::read(dir.path().join("tenants.enc")).unwrap();
@@ -711,9 +711,6 @@ mod tests {
         assert_eq!(account.tenant_id, tenant);
         let upstream = reopened.load_runtime_credentials(tenant).unwrap().unwrap();
         assert_eq!(upstream.password, runtime_password);
-        let migration = reopened.load_migration_credentials(tenant).unwrap().unwrap();
-        assert_eq!(migration.username, MySqlTenantIdentity::for_tenant(tenant).migration_username);
-        assert_eq!(migration.password, "d".repeat(64));
         assert_eq!(
             reopened.load_assertion_key(tenant).unwrap().unwrap(),
             TEST_ASSERTION_KEY
@@ -731,7 +728,7 @@ mod tests {
         let gateway = generate_gateway_credential().unwrap();
         let identity = MySqlTenantIdentity::for_tenant(tenant);
         let gateway_password = store.register_tenant(
-            tenant, "gateway_auth_test", gateway, &identity.runtime_username, &"9".repeat(64), &identity.migration_username, &"8".repeat(64), TEST_ASSERTION_KEY
+            tenant, "gateway_auth_test", gateway, &identity.runtime_username, &"9".repeat(64), TEST_ASSERTION_KEY
         ).unwrap();
 
         let challenge = [0x5au8; 20];
@@ -760,7 +757,7 @@ mod tests {
     }
 
     #[test]
-    fn rotates_gateway_runtime_and_migration_credentials_atomically() {
+    fn rotates_gateway_and_runtime_credentials_without_storing_migration_secrets() {
         let (_dir, store) = test_store();
         let tenant = Uuid::new_v4();
         let identity = MySqlTenantIdentity::for_tenant(tenant);
@@ -771,8 +768,6 @@ mod tests {
             initial,
             &identity.runtime_username,
             &"a".repeat(64),
-            &identity.migration_username,
-            &"b".repeat(64),
             TEST_ASSERTION_KEY,
         ).unwrap();
 
@@ -783,14 +778,10 @@ mod tests {
             new_gateway,
             &identity.runtime_username,
             &"c".repeat(64),
-            &identity.migration_username,
-            &"d".repeat(64),
         ).unwrap();
 
         let runtime = store.load_runtime_credentials(tenant).unwrap().unwrap();
-        let migration = store.load_migration_credentials(tenant).unwrap().unwrap();
         assert_eq!(runtime.password, "c".repeat(64));
-        assert_eq!(migration.password, "d".repeat(64));
         let account = store.find_account("gateway_rotate").unwrap().unwrap();
         assert_eq!(account.tenant_id, tenant);
         assert_eq!(new_gateway_password.len(), 64);
@@ -818,8 +809,6 @@ mod tests {
             generate_gateway_credential().unwrap(),
             &identity.runtime_username,
             &"1".repeat(64),
-            &identity.migration_username,
-            &"2".repeat(64),
             TEST_ASSERTION_KEY,
         ).unwrap();
 
@@ -842,13 +831,11 @@ mod tests {
 
         store.register_tenant(
             tenant_a, "gateway_key_a", generate_gateway_credential().unwrap(),
-            &identity_a.runtime_username, &"1".repeat(64),
-            &identity_a.migration_username, &"2".repeat(64), key_a,
+            &identity_a.runtime_username, &"1".repeat(64), key_a,
         ).unwrap();
         store.register_tenant(
             tenant_b, "gateway_key_b", generate_gateway_credential().unwrap(),
-            &identity_b.runtime_username, &"3".repeat(64),
-            &identity_b.migration_username, &"4".repeat(64), key_b,
+            &identity_b.runtime_username, &"3".repeat(64), key_b,
         ).unwrap();
 
         assert_eq!(store.load_assertion_key(tenant_a).unwrap().unwrap().as_slice(), key_a.as_slice());
@@ -889,11 +876,10 @@ mod tests {
         let tenant = Uuid::new_v4();
         let gateway = generate_gateway_credential().unwrap();
         let identity = MySqlTenantIdentity::for_tenant(tenant);
-        store.register_tenant(tenant, "gateway_c", gateway, &identity.runtime_username, &"e".repeat(64), &identity.migration_username, &"f".repeat(64), TEST_ASSERTION_KEY).unwrap();
+        store.register_tenant(tenant, "gateway_c", gateway, &identity.runtime_username, &"e".repeat(64), TEST_ASSERTION_KEY).unwrap();
         store.revoke_tenant(tenant).unwrap();
         assert!(store.find_account("gateway_c").unwrap().is_none());
         assert!(store.load_runtime_credentials(tenant).unwrap().is_none());
-        assert!(store.load_migration_credentials(tenant).unwrap().is_none());
         assert!(store.load_assertion_key(tenant).unwrap().is_none());
 
         let replacement = generate_gateway_credential().unwrap();
@@ -903,8 +889,6 @@ mod tests {
             replacement,
             &identity.runtime_username,
             &"7".repeat(64),
-            &identity.migration_username,
-            &"8".repeat(64),
             TEST_ASSERTION_KEY,
         ).unwrap();
         assert_eq!(replacement_password.len(), 64);
@@ -934,42 +918,10 @@ mod tests {
                 generate_gateway_credential().unwrap(),
                 "invalid",
                 &"f".repeat(64),
-                "invalid_migrator",
-                &"g".repeat(64),
                 TEST_ASSERTION_KEY,
             ).err(),
             Some(StoreError::InvalidAccount)
         );
-    }
-
-    #[test]
-    fn gateway_registry_view_never_materializes_migration_credentials_or_writes() {
-        let directory = tempdir().unwrap();
-        let store_path = directory.path().join("tenants.enc");
-        let key_path = directory.path().join("key.txt");
-        fs::write(&key_path, "a".repeat(64)).unwrap();
-        let tenant = Uuid::new_v4();
-        let identity = MySqlTenantIdentity::for_tenant(tenant);
-        let admin = EncryptedTenantStore::open(&store_path, &key_path).unwrap();
-        let gateway = generate_gateway_credential().unwrap();
-        admin.register_tenant(
-            tenant,
-            "gateway_runtime_only",
-            gateway,
-            &identity.runtime_username,
-            &"b".repeat(64),
-            &identity.migration_username,
-            &"c".repeat(64),
-            TEST_ASSERTION_KEY,
-        ).unwrap();
-        drop(admin);
-
-        let runtime = EncryptedTenantStore::open_gateway(&store_path, &key_path).unwrap();
-        let document = runtime.document.read().unwrap();
-        assert!(document.migration.is_empty());
-        drop(document);
-        assert!(runtime.load_migration_credentials(tenant).unwrap().is_none());
-        assert!(runtime.revoke_tenant(tenant).is_err());
     }
 
     #[test]
