@@ -104,7 +104,15 @@ fn main() {
                 _ => Err("usage: proxima-mysql-admin rotate <tenant-uuid> <gateway-username>".into()),
             }
         }
-        _ => Err("usage: proxima-mysql-admin <provision|rotate|revoke> ...".into()),
+        Some("reconcile") => {
+            let tenant = args.next();
+            let note = args.collect::<Vec<_>>().join(" ");
+            match tenant {
+                Some(tenant) if !note.trim().is_empty() => reconcile(tenant, note),
+                _ => Err("usage: proxima-mysql-admin reconcile <tenant-uuid> <operator-note>".into()),
+            }
+        }
+        _ => Err("usage: proxima-mysql-admin <provision|rotate|revoke|reconcile> ...".into()),
     };
     if let Err(error) = result {
         eprintln!("MySQL provisioning failed: {error}");
@@ -338,6 +346,19 @@ async fn rotate(tenant_value: String, gateway_username: String) -> Result<(), St
     println!("Gateway username: {gateway_username}");
     println!("Gateway password (shown once): {gateway_password}");
     println!("Runtime and migration credentials were rotated and stored encrypted; their values were not printed.");
+    Ok(())
+}
+
+fn reconcile(tenant_value: String, note: String) -> Result<(), String> {
+    let tenant_id = uuid::Uuid::parse_str(&tenant_value)
+        .map_err(|_| "tenant ID must be a UUID".to_owned())?;
+    let journal_path = PathBuf::from(required("PROXIMA_MYSQL_PROVISIONING_JOURNAL_FILE")?);
+    let mut journal = FileProvisioningJournal::open(journal_path)
+        .map_err(|_| "cannot open MySQL provisioning journal".to_owned())?;
+    journal.acknowledge_reconciliation(&tenant_id.to_string(), &note)
+        .map_err(|_| "tenant is not blocked for reconciliation, or the operator note is invalid".to_owned())?;
+    println!("Provisioning journal reconciliation acknowledged for tenant {tenant_id}.");
+    println!("This command does not modify MySQL databases or accounts. The operator must inspect and reconcile the upstream state before acknowledging.");
     Ok(())
 }
 
