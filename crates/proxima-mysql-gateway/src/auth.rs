@@ -174,6 +174,7 @@ pub struct AuthenticatedTenantSession {
     pub tenant_id: Uuid,
     pub database_name: String,
     pub assertion_expires_at: u64,
+    pub tenant_assertion: String,
     pub upstream_username: String,
     pub upstream_password: String,
 }
@@ -183,6 +184,7 @@ impl fmt::Debug for AuthenticatedTenantSession {
             .field("tenant_id", &self.tenant_id)
             .field("database_name", &self.database_name)
             .field("assertion_expires_at", &self.assertion_expires_at)
+            .field("tenant_assertion", &"[REDACTED]")
             .field("upstream_username", &self.upstream_username)
             .field("upstream_password", &"[REDACTED]")
             .finish()
@@ -191,6 +193,7 @@ impl fmt::Debug for AuthenticatedTenantSession {
 impl Drop for AuthenticatedTenantSession {
     fn drop(&mut self) {
         self.upstream_password.zeroize();
+        self.tenant_assertion.zeroize();
     }
 }
 
@@ -230,6 +233,7 @@ pub fn authenticate_and_resolve<
         tenant_id,
         database_name: route.database_name,
         assertion_expires_at: route.assertion_expires_at,
+        tenant_assertion: token.to_owned(),
         upstream_username: std::mem::take(&mut credentials.username),
         upstream_password: std::mem::take(&mut credentials.password),
     })
