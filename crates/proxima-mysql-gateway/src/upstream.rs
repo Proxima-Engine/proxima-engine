@@ -8,6 +8,8 @@ use crate::protocol::{
     validate_client_capabilities, verify_sequence, Packet, ProtocolError, ServerHandshake,
     CLIENT_CONNECT_WITH_DB, CLIENT_PLUGIN_AUTH, CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA,
     CLIENT_PROTOCOL_41, CLIENT_SECURE_CONNECTION, CLIENT_SSL, MAX_PACKET_PAYLOAD,
+    CLIENT_LONG_PASSWORD, CLIENT_LONG_FLAG, CLIENT_TRANSACTIONS, CLIENT_MULTI_RESULTS,
+    CLIENT_PS_MULTI_RESULTS, CLIENT_SESSION_TRACK, CLIENT_DEPRECATE_EOF,
 };
 use rustls::pki_types::ServerName;
 use rustls::{ClientConfig, RootCertStore};
@@ -144,11 +146,18 @@ pub async fn connect_upstream(
         return Err(UpstreamError::UnsupportedAuthenticationPlugin);
     }
 
-    let client_flags = CLIENT_PROTOCOL_41
+    let client_flags = CLIENT_LONG_PASSWORD
+        | CLIENT_LONG_FLAG
+        | CLIENT_PROTOCOL_41
         | CLIENT_SSL
+        | CLIENT_TRANSACTIONS
         | CLIENT_SECURE_CONNECTION
+        | CLIENT_MULTI_RESULTS
+        | CLIENT_PS_MULTI_RESULTS
         | CLIENT_PLUGIN_AUTH
         | CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA
+        | CLIENT_SESSION_TRACK
+        | CLIENT_DEPRECATE_EOF
         | CLIENT_CONNECT_WITH_DB;
     validate_client_capabilities(client_flags, greeting.capability_flags)
         .map_err(|_| UpstreamError::UnsupportedServerCapabilities)?;
