@@ -19,7 +19,7 @@ use std::{
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
     net::TcpStream,
-    time::timeout,
+    time::{sleep, timeout},
 };
 use tokio_rustls::{client::TlsStream, TlsConnector};
 use zeroize::Zeroizing;
@@ -55,7 +55,17 @@ async fn run() -> ProbeResult<()> {
     };
 
     let address: SocketAddr = format!("{host}:{port}").parse()?;
-    let mut tcp = timeout(Duration::from_secs(5), TcpStream::connect(address)).await??;
+    let mut connected = None;
+    for _ in 0..40 {
+        match timeout(Duration::from_secs(2), TcpStream::connect(address)).await {
+            Ok(Ok(stream)) => {
+                connected = Some(stream);
+                break;
+            }
+            _ => sleep(Duration::from_millis(250)).await,
+        }
+    }
+    let mut tcp = connected.ok_or("MySQL gateway did not accept connections within 90 seconds")?;
     tcp.set_nodelay(true)?;
 
     let greeting = read_packet(&mut tcp).await?;
