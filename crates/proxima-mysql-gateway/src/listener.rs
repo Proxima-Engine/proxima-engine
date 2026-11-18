@@ -409,6 +409,9 @@ async fn relay_session(
     let (server_tx, mut server_rx) = mpsc::channel::<Packet>(32);
     let (local_tx, mut local_rx) = mpsc::channel::<Packet>(8);
     let (activity_tx, mut activity_rx) = mpsc::channel::<()>(8);
+    let command_account_directory = Arc::clone(&account_directory);
+    let command_credential_store = Arc::clone(&credential_store);
+    let command_gateway_username = gateway_username.clone();
     let log_gateway_username = gateway_username.clone();
 
     let server_reader = tokio::spawn(async move {
@@ -455,7 +458,7 @@ async fn relay_session(
                         break;
                     }
                     let assertion_valid = session_assertion_is_current(
-                        credential_store.as_ref(),
+                        command_credential_store.as_ref(),
                         &tenant_assertion,
                         tenant_id,
                         assertion_expires_at,
@@ -474,7 +477,7 @@ async fn relay_session(
                     // a revoked account cannot continue issuing new commands
                     // through an already-open client connection.
                     let still_authorized = matches!(
-                        account_directory.find_account(&gateway_username),
+                        command_account_directory.find_account(&command_gateway_username),
                         Ok(Some(account)) if account.tenant_id == tenant_id
                     );
                     if !still_authorized {
