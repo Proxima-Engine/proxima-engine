@@ -193,6 +193,15 @@ pub struct ClientHandshake {
     pub connection_attributes: Vec<(String, String)>,
 }
 
+impl Drop for ClientHandshake {
+    fn drop(&mut self) {
+        self.auth_response.zeroize();
+        for (_, value) in &mut self.connection_attributes {
+            value.zeroize();
+        }
+    }
+}
+
 impl ClientHandshake {
     pub fn parse(payload: &[u8], max_auth_bytes: usize, max_attributes_bytes: usize) -> Result<Self, ProtocolError> {
         let mut c = Cursor::new(payload);
