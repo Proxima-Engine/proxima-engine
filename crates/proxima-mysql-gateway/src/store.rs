@@ -460,6 +460,7 @@ mod tests {
     #[test]
     fn encrypted_registry_authenticates_gateway_password_with_mysql_scramble() {
         use crate::auth::{authenticate, CACHING_SHA2_PASSWORD};
+        use sha2::Digest;
         use crate::protocol::{ClientHandshake, CLIENT_CONNECT_ATTRS, CLIENT_PLUGIN_AUTH, CLIENT_PROTOCOL_41, CLIENT_SECURE_CONNECTION};
 
         let (_dir, store) = test_store();
