@@ -10,7 +10,7 @@ use crate::auth::{
 };
 use crate::protocol::{
     encode_server_handshake, is_ssl_request, server_capabilities, verify_sequence, Command,
-    CommandError, Packet, ProtocolError, CLIENT_PROTOCOL_41, CLIENT_SSL, MAX_PACKET_PAYLOAD,
+    CommandError, Packet, ProtocolError, CLIENT_SSL, MAX_PACKET_PAYLOAD,
 };
 use crate::upstream::{
     connect_upstream, read_packet, write_packet, UpstreamError, UpstreamTlsConfig,
@@ -26,7 +26,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, Semaphore};
 use tokio::time::timeout;
-use tokio_rustls::{TlsAcceptor, TlsStream};
+use tokio_rustls::{client::TlsStream as ClientTlsStream, server::TlsStream as ServerTlsStream, TlsAcceptor};
 
 static NEXT_CONNECTION_ID: AtomicU32 = AtomicU32::new(1);
 
@@ -333,8 +333,8 @@ async fn send_error<W: tokio::io::AsyncWrite + Unpin>(
 }
 
 async fn relay_session(
-    client: TlsStream<TcpStream>,
-    upstream: TlsStream<TcpStream>,
+    client: ServerTlsStream<TcpStream>,
+    upstream: ClientTlsStream<TcpStream>,
     max_packet_size: usize,
 ) -> Result<(), GatewayError> {
     let (mut client_reader, mut client_writer) = tokio::io::split(client);
