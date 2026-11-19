@@ -7,7 +7,7 @@
 <p align="center">Agata Proxima focuses on database access security and tenant isolation. Proxima Engine is its Rust PostgreSQL wire-protocol gateway, verifying signed tenant context and routing each database session to its tenant-specific PostgreSQL role. PostgreSQL is the current supported database integration.</p>
 
 <p align="center">
-  <a href="https://github.com/Agata-Proxima/proxima-engine/actions/workflows/ci.yml">Continuous integration</a> ·
+  <a href="https://github.com/Proxima-Engine/proxima-engine/actions/workflows/ci.yml">Continuous integration</a> ·
   <a href="LICENSE">MIT license for covered Engine source</a> ·
   <a href="https://agataproxima.com">Website</a> ·
   <a href="https://discord.gg/xsYSuDMzg">Discord</a> ·
@@ -86,12 +86,14 @@ flowchart LR
 
 Proxima Engine extends an existing PostgreSQL deployment: it verifies tenant context and selects the database role, while PostgreSQL privileges and RLS policies enforce which rows that role can read or modify. Application authentication and tenant authorization remain in the trusted application backend that issues signed tenant tokens.
 
+**Proxima is designed to complement RLS, not replace it.** Keep your existing PostgreSQL RLS policies, grants, and application authorization. Proxima adds an independent check at the connection boundary: it verifies signed tenant context before a database session is established and binds that session to the tenant's PostgreSQL role. PostgreSQL still makes the final row-access decision. This gives the system two distinct enforcement points rather than asking a new proxy to become your only security control.
+
 ## Get started
 
 Requirements: Git and Docker with Compose.
 
 ```bash
-git clone https://github.com/Agata-Proxima/proxima-engine.git
+git clone https://github.com/Proxima-Engine/proxima-engine.git
 cd proxima-engine
 docker compose -f compose.dev.yaml up --build -d
 ```
