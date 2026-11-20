@@ -98,6 +98,8 @@ Each database has its own implementation guide, setup sequence, configuration, c
 | **MongoDB 8** | [Restricted gateway guide](docs/MONGODB_TENANT_ISOLATION.md) | [MongoDB gateway source](crates/proxima-engine/src/mongodb_gateway.rs) · [Real MongoDB tenant-isolation acceptance test](crates/proxima-engine/tests/mongodb_tenant_isolation.rs) |
 | **Redis 7.4+ (preview)** | [Redis tenant gateway](docs/REDIS_TENANT_GATEWAY.md) | [RESP2 policy source](crates/proxima-engine/src/redis_protocol.rs) · [TLS gateway source](crates/proxima-engine/src/redis_gateway.rs) · [Real Redis acceptance script](scripts/test-redis-tenant-gateway-ci.sh) |
 | **SQL Server 2022 (native profile preview)** | [Native tenant isolation](docs/SQLSERVER_NATIVE_TENANCY.md) | [Two-tenant provisioning fixture](scripts/sqlserver-provision-two-tenants.sql) · [Real SQL Server acceptance script](scripts/test-sqlserver-tenant-isolation-ci.sh) · No Proxima TDS proxy |
+| **SQLite** | [Tenant isolation](docs/SQLITE_TENANCY.md) | Embedded database-file-per-tenant storage with path validation and owner-only permissions |
+| **Oracle Database** | [Tenant isolation](docs/ORACLE_TENANCY.md) | Schema-per-tenant with dedicated Oracle users, bounded quota and least-privilege grants |
 
 ### What is a database gateway?
 
