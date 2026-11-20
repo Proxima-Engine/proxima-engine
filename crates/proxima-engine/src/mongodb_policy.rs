@@ -147,7 +147,7 @@ impl MongoTenantPolicy {
                     if update.get_bool("upsert").unwrap_or(false) {
                         return Err(MongoPolicyError::InvalidCommand("upsert is denied until tenant-safe upsert semantics are enabled".into()));
                     }
-                    validate_update_value(update.get("u").ok_or_else(|| MongoPolicyError::InvalidCommand("update entry is missing u".into()))?)?;
+                    validate_update_value(update.get("u").ok_or_else(|| MongoPolicyError::InvalidCommand("update entry is missing u".into()))?, &self.database)?;
                 }
                 Ok(MongoCommandKind::Update)
             }
@@ -174,7 +174,7 @@ impl MongoTenantPolicy {
                 if command.get_bool("upsert").unwrap_or(false) {
                     return Err(MongoPolicyError::InvalidCommand("findAndModify upsert is denied".into()));
                 }
-                if let Some(update) = command.get("update") { validate_update_value(update)?; }
+                if let Some(update) = command.get("update") { validate_update_value(update, &self.database)?; }
                 Ok(MongoCommandKind::FindAndModify)
             }
             "getMore" => {
@@ -263,7 +263,7 @@ fn validate_nested_value(value: &Bson) -> Result<(), MongoPolicyError> {
     }
 }
 
-fn validate_update_value(value: &Bson) -> Result<(), MongoPolicyError> {
+fn validate_update_value(value: &Bson, tenant_database: &str) -> Result<(), MongoPolicyError> {
     match value {
         Bson::Document(document) => {
             for (operator, payload) in document {
@@ -282,7 +282,7 @@ fn validate_update_value(value: &Bson) -> Result<(), MongoPolicyError> {
             }
             Ok(())
         }
-        Bson::Array(pipeline) => validate_pipeline(pipeline, ""),
+        Bson::Array(pipeline) => validate_pipeline(pipeline, tenant_database),
         _ => Err(MongoPolicyError::InvalidCommand("update.u must be a document or aggregation pipeline".into())),
     }
 }
@@ -543,7 +543,8 @@ mod tests {
         policy().stamp_insert_document(&mut document).unwrap();
         assert_eq!(document.get_str(RESERVED_TENANT_FIELD).unwrap(), "tenant-a");
 
-        let mut spoofed = doc! { RESERVED_TENANT_FIELD: "tenant-b" };
+        let mut spoofed = Document::new();
+        spoofed.insert(RESERVED_TENANT_FIELD, "tenant-b");
         assert!(policy().stamp_insert_document(&mut spoofed).is_err());
     }
 
