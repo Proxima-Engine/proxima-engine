@@ -573,6 +573,9 @@ async fn pull_and_stage_database_config_once() -> Result<(), Box<dyn std::error:
     let ack_url = env::var("PROXIMA_NODE_CONFIG_ACK_URL").unwrap_or_else(|_| {
         heartbeat_url.replace("/api/v1/nodes/heartbeat", "/api/v1/nodes/config/ack")
     });
+    if !pull_url.contains("/api/v1/nodes/config/pull") || !ack_url.contains("/api/v1/nodes/config/ack") {
+        return Err("configure PROXIMA_NODE_CONFIG_PULL_URL and PROXIMA_NODE_CONFIG_ACK_URL or a canonical node heartbeat URL".into());
+    }
     if !attestation_ingest_url_allowed(&pull_url, false)
         || !attestation_ingest_url_allowed(&ack_url, false) {
         return Err("node configuration endpoints must use HTTPS (or loopback for local development)".into());
@@ -581,7 +584,7 @@ async fn pull_and_stage_database_config_once() -> Result<(), Box<dyn std::error:
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
     let nonce = uuid::Uuid::new_v4().to_string();
     let canonical = format!(
-        "proxima-node-config-pull-v1\\n{}\\n{}\\n{}\\n{}",
+        "proxima-node-config-pull-v1\n{}\n{}\n{}\n{}",
         node_id, organization_id, timestamp, nonce
     );
     let mut mac = hmac::Hmac::<Sha256>::new_from_slice(&signing_key)?;
@@ -601,14 +604,15 @@ async fn pull_and_stage_database_config_once() -> Result<(), Box<dyn std::error:
     }
     let bundle_bytes = bundle.to_string();
     let mut verify = hmac::Hmac::<Sha256>::new_from_slice(&signing_key)?;
-    verify.update(format!("proxima-node-config-bundle-v1\\n{bundle_bytes}").as_bytes());
+    verify.update(format!("proxima-node-config-bundle-v1\n{bundle_bytes}").as_bytes());
     verify.verify_slice(&hex::decode(bundle_signature)?)?;
 
     let mut derive = hmac::Hmac::<Sha256>::new_from_slice(&signing_key)?;
-    derive.update(format!("proxima-node-config-envelope-key-v1\\n{node_id}").as_bytes());
+    derive.update(format!("proxima-node-config-envelope-key-v1\n{node_id}").as_bytes());
     let envelope_key = derive.finalize().into_bytes();
     let decryptor = ring::aead::LessSafeKey::new(
-        ring::aead::UnboundKey::new(&ring::aead::AES_256_GCM, &envelope_key)?
+        ring::aead::UnboundKey::new(&ring::aead::AES_256_GCM, &envelope_key)
+            .map_err(|_| io::Error::other("invalid database configuration envelope key"))?
     );
     let mut staged = Vec::new();
     let records = bundle.get("assignments").and_then(serde_json::Value::as_array)
@@ -628,7 +632,7 @@ async fn pull_and_stage_database_config_once() -> Result<(), Box<dyn std::error:
             ring::aead::Nonce::assume_unique_for_key(nonce_bytes),
             ring::aead::Aad::from(aad.as_bytes()),
             &mut plaintext
-        )?;
+        ).map_err(|_| io::Error::other("database credential envelope authentication failed"))?;
         let credentials: serde_json::Value = serde_json::from_slice(credentials)?;
         let mut item = record.clone();
         item.as_object_mut().ok_or("assignment entry must be an object")?.remove("credential_envelope");
@@ -644,6 +648,9 @@ async fn pull_and_stage_database_config_once() -> Result<(), Box<dyn std::error:
         .unwrap_or_else(||PathBuf::from("data/database-targets.json"));
     let parent = output_path.parent().ok_or("invalid database config output path")?;
     fs::create_dir_all(parent)?;
+    if records.is_empty() && output_path.is_file() {
+        return Ok(());
+    }
     let document = serde_json::json!({
         "schema_version":1,
         "node_id":node_id,
@@ -678,7 +685,7 @@ async fn pull_and_stage_database_config_once() -> Result<(), Box<dyn std::error:
         let ack_timestamp=SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
         let ack_nonce=uuid::Uuid::new_v4().to_string();
         let ack_canonical=format!(
-            "proxima-node-config-ack-v1\\n{}\\n{}\\n{}\\n{}\\n{}\\n{}\\n{}\\nstaged\\nunhealthy\\n",
+            "proxima-node-config-ack-v1\n{}\n{}\n{}\n{}\n{}\n{}\n{}\nstaged\nunhealthy\n",
             node_id,organization_id,ack_nonce,assignment_id,target_id,revision,ack_timestamp
         );
         let mut ack_mac=hmac::Hmac::<Sha256>::new_from_slice(&signing_key)?;
