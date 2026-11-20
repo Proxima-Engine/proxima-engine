@@ -43,7 +43,7 @@ pub fn rewrite_keys(args: &mut [Vec<u8>], tenant_id: &str) -> Result<(), RespErr
     let cmd = std::str::from_utf8(&args[0]).map_err(|_| RespError::UnsupportedCommand)?.to_ascii_uppercase();
     let keys: Vec<usize> = match cmd.as_str() {
         "GET"|"SET"|"SETNX"|"GETSET"|"GETDEL"|"APPEND"|"STRLEN"|"INCR"|"DECR"|"INCRBY"|"DECRBY"|"EXPIRE"|"PEXPIRE"|"TTL"|"PTTL"|"PERSIST"|"TYPE"|"HGET"|"HSET"|"HSETNX"|"HMGET"|"HMSET"|"HDEL"|"HEXISTS"|"HLEN"|"HSTRLEN"|"HGETALL"|"LPUSH"|"RPUSH"|"LPOP"|"RPOP"|"LLEN"|"LRANGE"|"LINDEX"|"LSET"|"LREM"|"LTRIM"|"SADD"|"SREM"|"SISMEMBER"|"SMEMBERS"|"SCARD"|"SPOP"|"ZADD"|"ZREM"|"ZSCORE"|"ZRANGE"|"ZCARD"|"ZCOUNT"|"ZINCRBY"|"PFADD"|"GEOADD"|"XRANGE"|"XREVRANGE"|"XLEN"|"XADD"|"XDEL"|"XTRIM"|"XACK" => vec![1],
-        "MGET"|"DEL"|"UNLINK"|"EXISTS"|"TOUCH" => (1..args.len()).collect(),
+        "MGET"|"DEL"|"UNLINK"|"EXISTS"|"TOUCH" => { if args.len() < 2 { return Err(RespError::Malformed); } (1..args.len()).collect() },
         "MSET"|"MSETNX" => { if args.len() < 3 || args.len() % 2 == 0 { return Err(RespError::Malformed); } (1..args.len()).step_by(2).collect() },
         "RENAME"|"RENAMENX"|"RPOPLPUSH"|"BRPOPLPUSH"|"SMOVE"|"COPY" => { if args.len() < 3 { return Err(RespError::Malformed); } vec![1,2] },
         "BITOP" => { if args.len() < 4 { return Err(RespError::Malformed); } (2..args.len()).collect() },
