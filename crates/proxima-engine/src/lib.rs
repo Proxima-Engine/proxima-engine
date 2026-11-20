@@ -19,3 +19,5 @@ pub mod mysql_upstream;
 pub mod mysql_session;
 
 pub mod mysql_gateway;
+
+pub mod mongodb_policy;
