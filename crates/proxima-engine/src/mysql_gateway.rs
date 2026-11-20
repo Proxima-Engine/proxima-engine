@@ -774,7 +774,7 @@ mod tests {
     #[test]
     fn preserves_binary_payloads_byte_for_byte() {
         let bytes = vec![0xff, 0x00, 0x80, 0x41];
-        assert!(matches!(upstream_value_to_output(UpstreamValue::Bytes(value)) if value == bytes));
+        assert!(matches!(upstream_value_to_output(UpstreamValue::Bytes(bytes.clone())), Some(opensrv_mysql::Value::Bytes(value)) if value == bytes));
     }
 
     #[test]
