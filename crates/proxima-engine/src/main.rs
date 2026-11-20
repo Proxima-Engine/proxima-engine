@@ -559,6 +559,155 @@ async fn bootstrap_node_identity() -> Result<(), Box<dyn std::error::Error + Sen
     eprintln!("Engine node identity loaded successfully.");
     Ok(())
 }
+
+async fn pull_and_stage_database_config_once() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    use std::{env, fs, io::Write, path::PathBuf, time::{SystemTime, UNIX_EPOCH}};
+    let node_id = env::var("PROXIMA_NODE_ID")?;
+    let organization_id = env::var("PROXIMA_ORGANIZATION_ID")?;
+    let signing_key = hex::decode(env::var("PROXIMA_NODE_SIGNING_KEY_HEX")?)?;
+    if signing_key.len() != 32 { return Err("node signing key must be 32 bytes".into()); }
+    let heartbeat_url = env::var("PROXIMA_NODE_HEARTBEAT_URL")?;
+    let pull_url = env::var("PROXIMA_NODE_CONFIG_PULL_URL").unwrap_or_else(|_| {
+        heartbeat_url.replace("/api/v1/nodes/heartbeat", "/api/v1/nodes/config/pull")
+    });
+    let ack_url = env::var("PROXIMA_NODE_CONFIG_ACK_URL").unwrap_or_else(|_| {
+        heartbeat_url.replace("/api/v1/nodes/heartbeat", "/api/v1/nodes/config/ack")
+    });
+    if !attestation_ingest_url_allowed(&pull_url, false)
+        || !attestation_ingest_url_allowed(&ack_url, false) {
+        return Err("node configuration endpoints must use HTTPS (or loopback for local development)".into());
+    }
+
+    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
+    let nonce = uuid::Uuid::new_v4().to_string();
+    let canonical = format!(
+        "proxima-node-config-pull-v1\\n{}\\n{}\\n{}\\n{}",
+        node_id, organization_id, timestamp, nonce
+    );
+    let mut mac = hmac::Hmac::<Sha256>::new_from_slice(&signing_key)?;
+    mac.update(canonical.as_bytes());
+    let signature = hex::encode(mac.finalize().into_bytes());
+    let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(15)).build()?;
+    let response = client.post(&pull_url).json(&serde_json::json!({
+        "node_id":node_id,"timestamp":timestamp,"nonce":nonce,"signature":signature
+    })).send().await?.error_for_status()?;
+    let response: serde_json::Value = response.json().await?;
+    let bundle = response.get("bundle").cloned().ok_or("Control Plane response has no configuration bundle")?;
+    let bundle_signature = response.get("signature").and_then(serde_json::Value::as_str)
+        .ok_or("Control Plane response has no bundle signature")?;
+    if bundle.get("node_id").and_then(serde_json::Value::as_str) != Some(node_id.as_str())
+        || bundle.get("organization_id").and_then(serde_json::Value::as_str) != Some(organization_id.as_str()) {
+        return Err("configuration bundle identity does not match this enrolled node".into());
+    }
+    let bundle_bytes = bundle.to_string();
+    let mut verify = hmac::Hmac::<Sha256>::new_from_slice(&signing_key)?;
+    verify.update(format!("proxima-node-config-bundle-v1\\n{bundle_bytes}").as_bytes());
+    verify.verify_slice(&hex::decode(bundle_signature)?)?;
+
+    let mut derive = hmac::Hmac::<Sha256>::new_from_slice(&signing_key)?;
+    derive.update(format!("proxima-node-config-envelope-key-v1\\n{node_id}").as_bytes());
+    let envelope_key = derive.finalize().into_bytes();
+    let decryptor = ring::aead::LessSafeKey::new(
+        ring::aead::UnboundKey::new(&ring::aead::AES_256_GCM, &envelope_key)?
+    );
+    let mut staged = Vec::new();
+    let records = bundle.get("assignments").and_then(serde_json::Value::as_array)
+        .ok_or("configuration bundle assignments must be an array")?;
+    for record in records {
+        let envelope = record.get("credential_envelope").ok_or("credential envelope missing")?;
+        if envelope.get("algorithm").and_then(serde_json::Value::as_str) != Some("AES-256-GCM") {
+            return Err("unsupported database credential envelope algorithm".into());
+        }
+        let ciphertext = hex::decode(envelope.get("ciphertext").and_then(serde_json::Value::as_str)
+            .ok_or("credential envelope ciphertext missing")?)?;
+        let nonce_bytes: [u8; 12] = hex::decode(envelope.get("nonce").and_then(serde_json::Value::as_str)
+            .ok_or("credential envelope nonce missing")?)?.try_into().map_err(|_| "invalid credential envelope nonce")?;
+        let aad = envelope.get("aad").and_then(serde_json::Value::as_str).ok_or("credential envelope AAD missing")?;
+        let mut plaintext = ciphertext;
+        let credentials = decryptor.open_in_place(
+            ring::aead::Nonce::assume_unique_for_key(nonce_bytes),
+            ring::aead::Aad::from(aad.as_bytes()),
+            &mut plaintext
+        )?;
+        let credentials: serde_json::Value = serde_json::from_slice(credentials)?;
+        let mut item = record.clone();
+        item.as_object_mut().ok_or("assignment entry must be an object")?.remove("credential_envelope");
+        item.as_object_mut().unwrap().insert("credentials".into(), credentials);
+        staged.push(item);
+    }
+
+    let identity_path = env::var_os("PROXIMA_NODE_IDENTITY_PATH").map(PathBuf::from)
+        .or_else(|| env::var_os("LOCALAPPDATA").map(|base|PathBuf::from(base).join("AgataProxima").join("node-identity.json")))
+        .unwrap_or_else(||PathBuf::from("data/node-identity.json"));
+    let output_path = env::var_os("PROXIMA_NODE_DATABASE_CONFIG_PATH").map(PathBuf::from)
+        .or_else(||identity_path.parent().map(|parent|parent.join("database-targets.json")))
+        .unwrap_or_else(||PathBuf::from("data/database-targets.json"));
+    let parent = output_path.parent().ok_or("invalid database config output path")?;
+    fs::create_dir_all(parent)?;
+    let document = serde_json::json!({
+        "schema_version":1,
+        "node_id":node_id,
+        "organization_id":organization_id,
+        "generated_at":bundle.get("generated_at"),
+        "assignments":staged
+    });
+    let temporary = output_path.with_extension("json.tmp");
+    if temporary.exists() { fs::remove_file(&temporary)?; }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut file=fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&temporary)?;
+        file.write_all(serde_json::to_string_pretty(&document)?.as_bytes())?;
+        file.sync_all()?;
+    }
+    #[cfg(not(unix))]
+    fs::write(&temporary,serde_json::to_vec_pretty(&document)?)?;
+    #[cfg(windows)]
+    if output_path.exists(){fs::remove_file(&output_path)?;}
+    fs::rename(&temporary,&output_path)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&output_path,fs::Permissions::from_mode(0o600))?;
+    }
+
+    for record in records {
+        let assignment_id=record.get("assignment_id").and_then(serde_json::Value::as_str).ok_or("assignment ID missing")?;
+        let target_id=record.get("database_target_id").and_then(serde_json::Value::as_str).ok_or("target ID missing")?;
+        let revision=record.get("config_revision").and_then(serde_json::Value::as_i64).ok_or("config revision missing")?;
+        let ack_timestamp=SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
+        let ack_nonce=uuid::Uuid::new_v4().to_string();
+        let ack_canonical=format!(
+            "proxima-node-config-ack-v1\\n{}\\n{}\\n{}\\n{}\\n{}\\n{}\\n{}\\nstaged\\nunhealthy\\n",
+            node_id,organization_id,ack_nonce,assignment_id,target_id,revision,ack_timestamp
+        );
+        let mut ack_mac=hmac::Hmac::<Sha256>::new_from_slice(&signing_key)?;
+        ack_mac.update(ack_canonical.as_bytes());
+        let ack_signature=hex::encode(ack_mac.finalize().into_bytes());
+        client.post(&ack_url).json(&serde_json::json!({
+            "node_id":node_id,"nonce":ack_nonce,"assignment_id":assignment_id,
+            "database_target_id":target_id,"config_revision":revision,
+            "timestamp":ack_timestamp,"status":"staged","runtime_health_passed":false,
+            "error_code":null,"signature":ack_signature
+        })).send().await?.error_for_status()?;
+    }
+    info!(assignments=records.len(),path=%output_path.display(),"authenticated database configuration staged on node");
+    Ok(())
+}
+
+fn spawn_node_database_config_worker() {
+    tokio::spawn(async {
+        let mut interval=tokio::time::interval(std::time::Duration::from_secs(30));
+        loop {
+            interval.tick().await;
+            match pull_and_stage_database_config_once().await {
+                Ok(())=>{},
+                Err(error)=>tracing::warn!(%error,"database configuration pull/stage cycle failed; current gateway configuration is unchanged"),
+            }
+        }
+    });
+}
+
 #[tokio::main]
 async fn main() -> io::Result<()> {
     tracing_subscriber::fmt()
@@ -575,6 +724,9 @@ async fn main() -> io::Result<()> {
     if let Err(error) = bootstrap_node_identity().await {
         eprintln!("Engine node bootstrap failed: {error}");
         std::process::exit(1);
+    }
+    if std::env::var("PROXIMA_NODE_HEARTBEAT_URL").is_ok() {
+        spawn_node_database_config_worker();
     }
 
     let config = Config::from_env()?;
