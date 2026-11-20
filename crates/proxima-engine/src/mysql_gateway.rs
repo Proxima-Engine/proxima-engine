@@ -159,13 +159,18 @@ fn upstream_value_to_text(value: UpstreamValue) -> Option<String> {
     }
 }
 
-/// Metadata is deliberately exposed as VAR_STRING because result values
-/// are serialized by this gateway using the text-compatible representation.
+/// Preserve the upstream MySQL protocol type code. Both driver and server
+/// enums follow the MySQL wire-protocol numeric assignments; unknown future
+/// types fall back to VAR_STRING rather than emitting an invalid type code.
+fn output_column_type(column_type: mysql_async::consts::ColumnType) -> ColumnType {
+    ColumnType::try_from(column_type as u8).unwrap_or(ColumnType::MYSQL_TYPE_VAR_STRING)
+}
+
 fn output_column(column: &mysql_async::Column) -> Column {
     Column {
         table: column.table_str().into_owned(),
         column: column.name_str().into_owned(),
-        coltype: ColumnType::MYSQL_TYPE_VAR_STRING,
+        coltype: output_column_type(column.column_type()),
         colflags: ColumnFlags::empty(),
     }
 }
@@ -412,9 +417,9 @@ where
         let mut upstream_result = match session.connection.exec_iter(statement, values).await {
             Ok(result) => result,
             Err(error) => {
-                eprintln!(
-                    "[proxima-mysql-gateway] upstream prepared statement execution error: {}",
-                    error
+                tracing::warn!(
+                    error = %error,
+                    "MySQL upstream prepared statement execution failed"
                 );
 
                 return results
@@ -720,6 +725,22 @@ pub async fn run_mysql_gateway(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preserves_upstream_column_type_codes() {
+        assert_eq!(
+            output_column_type(mysql_async::consts::ColumnType::MYSQL_TYPE_LONG),
+            ColumnType::MYSQL_TYPE_LONG
+        );
+        assert_eq!(
+            output_column_type(mysql_async::consts::ColumnType::MYSQL_TYPE_NEWDECIMAL),
+            ColumnType::MYSQL_TYPE_NEWDECIMAL
+        );
+        assert_eq!(
+            output_column_type(mysql_async::consts::ColumnType::MYSQL_TYPE_BLOB),
+            ColumnType::MYSQL_TYPE_BLOB
+        );
+    }
 
     #[test]
     fn preserves_null_values() {
