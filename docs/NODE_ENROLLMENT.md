@@ -119,7 +119,7 @@ The Engine writes the decrypted, node-scoped configuration to `/var/lib/proxima/
 
 After the file is durably written, the Engine sends a signed `staged` acknowledgement. This confirms authenticated receipt and persistence only. It deliberately does not mark the Cloud target ready or claim the gateway has been reconfigured. The assignment remains `applying` until a runtime supervisor configures the matching provider gateway, verifies its listener and upstream health, and sends a separate signed `applied` acknowledgement. The current gateway processes remain single-upstream runtimes; use one enrolled node per active target.
 
-The polling loop retries delivery when a staged configuration remains un-applied. An empty pull response does not overwrite an existing staged configuration file.
+The polling loop retries delivery when a staged configuration remains un-applied. An authenticated empty assignment bundle replaces the staged document with an empty assignment set, clearing revoked credentials from disk. This cleanup does not terminate or reconfigure an already-running gateway; that requires the runtime supervisor.
 
 
 ## 6. Credential reference
