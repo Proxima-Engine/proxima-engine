@@ -24,7 +24,7 @@ docker run --detach --name "$CONTAINER" \
 
 ready=0
 for _ in $(seq 1 60); do
-  if docker exec "$CONTAINER" cockroach sql --insecure --host=127.0.0.1:26257 --execute='SELECT 1' >/dev/null 2>&1; then
+  if timeout 5s docker exec "$CONTAINER" cockroach sql --insecure --host=127.0.0.1:26257 --execute='SELECT 1' >/dev/null 2>&1; then
     ready=1
     break
   fi
@@ -36,7 +36,7 @@ if [[ "$ready" != "1" ]]; then
   exit 1
 fi
 
-docker exec "$CONTAINER" cockroach sql --insecure --host=127.0.0.1:26257 <<'SQL'
+timeout 90s docker exec "$CONTAINER" cockroach sql --insecure --host=127.0.0.1:26257 <<'SQL'
 CREATE DATABASE proxima_dev;
 CREATE USER proxima_tenant_cli_a WITH PASSWORD 'tenant-a-password';
 CREATE USER proxima_tenant_cli_b WITH PASSWORD 'tenant-b-password';
@@ -51,8 +51,6 @@ INSERT INTO proxima_dev.public.records VALUES ('cli_a', 'A-secret'), ('cli_b', '
 REVOKE ALL ON DATABASE proxima_dev FROM public;
 GRANT CONNECT ON DATABASE proxima_dev TO proxima_tenant_cli_a, proxima_tenant_cli_b;
 REVOKE ALL ON SCHEMA proxima_dev.public FROM public;
-GRANT USAGE ON SCHEMA proxima_dev.public TO proxima_tenant_cli_a, proxima_tenant_cli_b;
-
 ALTER TABLE proxima_dev.public.records ENABLE ROW LEVEL SECURITY, FORCE ROW LEVEL SECURITY;
 CREATE POLICY isolate_a ON proxima_dev.public.records
   TO proxima_tenant_cli_a
@@ -73,13 +71,14 @@ export PROXIMA_TENANT_SIGNING_KEY
 PROXIMA_TENANT_SIGNING_KEY="$(python3 -c 'import json; print(json.load(open(".proxima-dev/dev-config.json"))["tenant_signing_key"])')"
 export PROXIMA_LISTEN_ADDR="$LISTEN_ADDR"
 export PROXIMA_UPSTREAM_ADDR="$COCKROACH_ADDR"
+export PROXIMA_UPSTREAM_TLS_MODE=disable
 export PROXIMA_DASHBOARD_ENABLED=false
 export PROXIMA_METRICS_LISTEN_ADDR="$METRICS_ADDR"
 target/release/proxima-engine > /tmp/proxima-cockroach-e2e.log 2>&1 &
 engine_pid=$!
 
 for _ in $(seq 1 40); do
-  if curl -fsS "http://$METRICS_ADDR/healthz" >/dev/null 2>&1; then break; fi
+  if curl --max-time 2 -fsS "http://$METRICS_ADDR/healthz" >/dev/null 2>&1; then break; fi
   if ! kill -0 "$engine_pid" 2>/dev/null; then cat /tmp/proxima-cockroach-e2e.log; exit 1; fi
   sleep 1
 done
@@ -93,7 +92,7 @@ token_a="$(python3 scripts/agata.py token --tenant cli_a --ttl 300)"
 token_b="$(python3 scripts/agata.py token --tenant cli_b --ttl 300)"
 run_tenant() {
   local token="$1" password="$2" sql="$3"
-  PGPASSWORD="$password" PGOPTIONS="-c proxima_tenant_token=$token" psql -X -A -t -v ON_ERROR_STOP=1 \
+  timeout 20s env PGPASSWORD="$password" PGCONNECT_TIMEOUT=5 PGOPTIONS="-c statement_timeout=10000 -c proxima_tenant_token=$token" psql -X -A -t -v ON_ERROR_STOP=1 \
     "host=127.0.0.1 port=16433 dbname=proxima_dev user=client sslmode=disable" -c "$sql"
 }
 
