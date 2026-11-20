@@ -186,7 +186,9 @@ The verification path covers PostgreSQL 17, MySQL 8.0, MariaDB 11.4, CockroachDB
 5. Missing or invalid signed tenant context is rejected when enforcement is enabled.
 6. Five sequential connections per tenant reuse that tenant role's backend PID, while the two tenant roles use separate backend PIDs through PgBouncer transaction pooling.
 
-See [Tenant isolation](docs/TENANT_ISOLATION.md), [Verification](docs/VERIFICATION.md), and the [recorded PgBouncer transaction-pooling evidence](evidence/pgbouncer-transaction-pooling.txt).\n\nThe customer Compose definition includes separate opt-in `mysql` and `mongodb` gateway profiles. The MongoDB profile requires a TLS certificate/key, an upstream CA, a tenant identity registry and an upstream MongoDB address; see [MongoDB tenant isolation](docs/MONGODB_TENANT_ISOLATION.md) before enabling it.
+See [Tenant isolation](docs/TENANT_ISOLATION.md), [Verification](docs/VERIFICATION.md), and the [recorded PgBouncer transaction-pooling evidence](evidence/pgbouncer-transaction-pooling.txt).
+
+The customer Compose definition includes separate opt-in `mysql` and `mongodb` gateway profiles. The MongoDB profile requires a TLS certificate/key, an upstream CA, a tenant identity registry and an upstream MongoDB address; see [MongoDB tenant isolation](docs/MONGODB_TENANT_ISOLATION.md) before enabling it.
 
 ## Documentation
 
