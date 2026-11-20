@@ -25,12 +25,10 @@ uuid = { version = "1", features = ["v4"] }
 opensrv-mysql = { version = "0.7.0", default-features = false }
 sqlparser = { version = "0.63", features = ["visitor"] }
 sha1 = "0.10"
-mysql_async = "0.37.1"
+mysql_async = { version = "0.37.1", features = ["rustls-tls", "ring"] }
 futures-util = "0.3"
 [dev-dependencies]
 proptest = "1"
 tempfile = "3"
 serial_test = "3"
-
-sha1 = "0.10"
 
