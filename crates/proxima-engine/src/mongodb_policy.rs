@@ -220,7 +220,7 @@ impl MongoTenantPolicy {
 fn valid_database_name(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 63
-        && !value.chars().any(|c| matches!(c, '/' | '\\' | '.' | ' ' | '"' | '
+        && !value.chars().any(|c| matches!(c, '/' | '\\' | '.' | ' ' | '"' | '$' | '\0'))
         && value != "admin"
         && value != "local"
         && value != "config"
