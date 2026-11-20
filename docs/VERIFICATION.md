@@ -178,7 +178,7 @@ The gateway currently supports only its documented RESP2 command allowlist. RESP
 
 ## 9. Verify SQL Server native database-per-tenant isolation
 
-The SQL Server profile is a native SQL Server security pattern, not a Proxima TDS proxy. It requires a disposable SQL Server 2022 instance on 127.0.0.1:1433 and sqlcmd 18:
+The SQL Server profile is a native SQL Server security pattern, not a Proxima TDS proxy. The runner starts and removes a disposable SQL Server 2022 Docker container, binds it to 127.0.0.1:1433, and uses sqlcmd 18:
 
     bash scripts/test-sqlserver-tenant-isolation-ci.sh
 
