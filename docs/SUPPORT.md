@@ -11,7 +11,7 @@ Use the route that matches the request.
 
 ## Public Engine issues
 
-Use [GitHub Issues](https://github.com/Agata-Proxima/proxima-engine/issues) for reproducible Engine bugs, driver integration problems, documentation corrections, and feature requests.
+Use [GitHub Issues](https://github.com/Proxima-Engine/proxima-engine/issues) for reproducible Engine bugs, driver integration problems, documentation corrections, and feature requests.
 
 Include:
 
