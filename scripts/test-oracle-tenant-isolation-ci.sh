@@ -8,9 +8,27 @@ tenant_b_password="$(openssl rand -hex 24)"
 cleanup() { docker rm -f "$container" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 
+# Docker Hub token-service requests can reset independently of the runner's
+# other image pulls. Retry the explicit pull before starting the disposable DB.
+image="gvenzl/oracle-free:23-slim-faststart"
+pulled=0
+for attempt in 1 2 3 4 5; do
+  if docker pull "$image"; then
+    pulled=1
+    break
+  fi
+  if [[ "$attempt" -lt 5 ]]; then
+    sleep "$((attempt * 5))"
+  fi
+done
+if [[ "$pulled" != 1 ]]; then
+  echo "Unable to pull Oracle Free image after five attempts" >&2
+  exit 1
+fi
+
 docker run -d --name "$container" -p 127.0.0.1:1521:1521 \
   -e ORACLE_PASSWORD="$ORACLE_PASSWORD" \
-  gvenzl/oracle-free:23-slim-faststart >/dev/null
+  "$image" >/dev/null
 
 ready=0
 for _ in $(seq 1 90); do
