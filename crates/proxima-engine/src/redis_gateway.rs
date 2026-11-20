@@ -76,7 +76,7 @@ async fn session(socket:TcpStream,acceptor:TlsAcceptor,connector:TlsConnector,re
  let mut client:Io=Box::new(timeout(Duration::from_secs(10),acceptor.accept(socket)).await.map_err(|_|io::ErrorKind::TimedOut)??);
  let mut input=Vec::new();
  let principal=loop{
-  let args=read_command(&mut *client,&mut input).await?;
+  let args=timeout(Duration::from_secs(10),read_command(&mut *client,&mut input)).await.map_err(|_|io::Error::new(io::ErrorKind::TimedOut,"Redis authentication timed out"))??;
   let cmd=std::str::from_utf8(args.first().ok_or_else(||invalid("empty command"))?).map_err(invalid)?.to_ascii_uppercase();
   if cmd!="AUTH"{write_error(&mut *client,"authentication required").await?;continue;}
   let (user,password)=match args.as_slice(){[_,p]=>( "default",p.as_slice()),[_,u,p]=>(std::str::from_utf8(u).map_err(invalid)?,p.as_slice()),_=>{write_error(&mut *client,"invalid AUTH arguments").await?;continue;}};
@@ -88,11 +88,11 @@ async fn session(socket:TcpStream,acceptor:TlsAcceptor,connector:TlsConnector,re
  let mut upstream:Io=Box::new(timeout(Duration::from_secs(10),connector.connect(name,tcp)).await.map_err(|_|io::ErrorKind::TimedOut)??);
  let auth=vec![b"AUTH".to_vec(),principal.upstream_user.as_bytes().to_vec(),principal.upstream_password.as_bytes().to_vec()];
  upstream.write_all(&encode_command(&auth)).await?; upstream.flush().await?;
- let reply=read_resp_frame(&mut *upstream,0).await?;
+ let reply=timeout(Duration::from_secs(30),read_resp_frame(&mut *upstream,0)).await.map_err(|_|io::Error::new(io::ErrorKind::TimedOut,"Redis upstream response timed out"))??;
  if !reply.starts_with(b"+OK\r\n"){return Err(io::Error::new(io::ErrorKind::PermissionDenied,"upstream Redis ACL authentication failed"));}
  client.write_all(b"+OK\r\n").await?; client.flush().await?;
  loop{
-  let mut args=match read_command(&mut *client,&mut input).await{Ok(v)=>v,Err(e) if e.kind()==io::ErrorKind::UnexpectedEof=>return Ok(()),Err(e)=>return Err(e)};
+  let mut args=match timeout(Duration::from_secs(60),read_command(&mut *client,&mut input)).await{Ok(Ok(v))=>v,Ok(Err(e)) if e.kind()==io::ErrorKind::UnexpectedEof=>return Ok(()),Ok(Err(e))=>return Err(e),Err(_)=>return Err(io::Error::new(io::ErrorKind::TimedOut,"Redis client idle timeout"))};
   let cmd=std::str::from_utf8(&args[0]).map_err(invalid)?.to_ascii_uppercase();
   match cmd.as_str(){
    "PING"=>{if args.len()>2{write_error(&mut *client,"wrong number of arguments").await?;}else if args.len()==2{let mut out=b"$".to_vec();out.extend_from_slice(args[1].len().to_string().as_bytes());out.extend_from_slice(b"\r\n");out.extend_from_slice(&args[1]);out.extend_from_slice(b"\r\n");client.write_all(&out).await?;}else{client.write_all(b"+PONG\r\n").await?;}client.flush().await?;continue;},
@@ -102,7 +102,7 @@ async fn session(socket:TcpStream,acceptor:TlsAcceptor,connector:TlsConnector,re
   rewrite_keys(&mut args,&principal.tenant_id).map_err(|_|io::Error::new(io::ErrorKind::PermissionDenied,"Redis command is not in the tenant-safe command allowlist"))?;
   let frame=encode_command(&args);
   if frame.len()>MAX_FRAME_BYTES{return Err(invalid("rewritten Redis frame exceeds limit"));}
-  upstream.write_all(&frame).await?;upstream.flush().await?;
+  timeout(Duration::from_secs(10),upstream.write_all(&frame)).await.map_err(|_|io::Error::new(io::ErrorKind::TimedOut,"Redis upstream write timed out"))??;upstream.flush().await?;
   let reply=read_resp_frame(&mut *upstream,0).await?;
   client.write_all(&reply).await?;client.flush().await?;
  }
