@@ -614,6 +614,17 @@ mod tests {
     }
 
     #[test]
+    fn ending_sessions_is_idempotent_but_never_cross_tenant() {
+        let registry = MongoSessionRegistry::default();
+        let lsid = doc! { "id": bson::Binary { subtype: bson::spec::BinarySubtype::Uuid, bytes: Uuid::new_v4().as_bytes().to_vec() } };
+        registry.bind("tenant-a", &lsid).unwrap();
+        assert_eq!(registry.release_if_owned("tenant-b", &lsid), Err(MongoPolicyError::CrossTenantSession));
+        registry.release_if_owned("tenant-a", &lsid).unwrap();
+        registry.release_if_owned("tenant-a", &lsid).unwrap();
+        assert_eq!(registry.authorize("tenant-a", &lsid), Err(MongoPolicyError::UnknownSession));
+    }
+
+    #[test]
     fn cursor_ids_are_opaque_and_tenant_bound() {
         let registry = MongoCursorRegistry::default();
         let client_id = registry.register("tenant-a", "tenant_a_db", "records", 991).unwrap();
