@@ -192,6 +192,8 @@ The verification path covers PostgreSQL 17, MySQL 8.0, MariaDB 11.4, CockroachDB
 
 See [Tenant isolation](docs/TENANT_ISOLATION.md), [Verification](docs/VERIFICATION.md), and the [recorded PgBouncer transaction-pooling evidence](evidence/pgbouncer-transaction-pooling.txt).
 
+The customer Compose definition includes separate opt-in `mysql`, `mongodb` and `redis` gateway profiles. The MongoDB profile requires a TLS certificate/key, an upstream CA, a tenant identity registry and an upstream MongoDB address; see [MongoDB tenant isolation](docs/MONGODB_TENANT_ISOLATION.md) before enabling it.
+
 ## Documentation
 
 | Guide | Purpose |
