@@ -90,13 +90,17 @@ SQL
 docker exec -i "$container" bash -lc 'sqlplus -L -s system/"$ORACLE_PASSWORD"@//localhost:1521/FREEPDB1' <<'SQL'
 WHENEVER SQLERROR EXIT FAILURE
 SELECT grantee, privilege FROM dba_sys_privs
- WHERE grantee IN ('PROXIMA_TENANT_A_OWNER','PROXIMA_TENANT_B_OWNER','PUBLIC')
-   AND privilege IN ('SELECT ANY TABLE','READ ANY TABLE','INSERT ANY TABLE','UPDATE ANY TABLE','DELETE ANY TABLE');
+ WHERE grantee IN ('PROXIMA_TENANT_A_OWNER','PROXIMA_TENANT_B_OWNER','PUBLIC');
+SELECT grantee, granted_role, default_role FROM dba_role_privs
+ WHERE grantee IN ('PROXIMA_TENANT_A_OWNER','PROXIMA_TENANT_B_OWNER','PUBLIC');
 SELECT grantee, owner, table_name, privilege FROM dba_tab_privs
- WHERE (owner='PROXIMA_TENANT_B_OWNER' AND table_name='RECORDS'
-        AND grantee IN ('PROXIMA_TENANT_A_OWNER','PUBLIC'))
-    OR (owner='PROXIMA_TENANT_A_OWNER' AND table_name='RECORDS'
-        AND grantee IN ('PROXIMA_TENANT_B_OWNER','PUBLIC'));
+ WHERE owner IN ('PROXIMA_TENANT_A_OWNER','PROXIMA_TENANT_B_OWNER')
+   AND table_name='RECORDS';
+SELECT grantee, schema, privilege FROM dba_schema_privs
+ WHERE grantee IN ('PROXIMA_TENANT_A_OWNER','PROXIMA_TENANT_B_OWNER','PUBLIC');
+SELECT owner, table_name FROM dba_tables
+ WHERE owner IN ('PROXIMA_TENANT_A_OWNER','PROXIMA_TENANT_B_OWNER')
+   AND table_name='RECORDS';
 EXIT
 SQL
 grep -q 'tenant-a-only' <<<"$a_output"
