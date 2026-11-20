@@ -5,34 +5,24 @@ set -euo pipefail
 CONTAINER="proxima-cockroach-ci"
 LISTEN_ADDR="127.0.0.1:16433"
 METRICS_ADDR="127.0.0.1:19091"
-COCKROACH_ADDR="127.0.0.1:26257"
-DEV_DIR="$(mktemp -d)"
-CERT_DIR="$(mktemp -d)"
-DOCKER_USER="$(id -u):$(id -g)"
-
-cleanup() {
-  if [[ -n "${engine_pid:-}" ]]; then
-    kill "$engine_pid" 2>/dev/null || true
-    wait "$engine_pid" 2>/dev/null || true
-  fi
-  docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
-  rm -rf "$DEV_DIR" "$CERT_DIR"
-}
-trap cleanup EXIT
-
-docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
-
 # Generate short-lived CA, node, and root client certificates for a secure test cluster.
-docker run --rm --user "$DOCKER_USER" -v "$CERT_DIR:/certs" cockroachdb/cockroach:v25.2.0 \
-  cert create-ca --certs-dir=/certs --ca-key=/certs/ca.key
-docker run --rm --user "$DOCKER_USER" -v "$CERT_DIR:/certs" cockroachdb/cockroach:v25.2.0 \
-  cert create-node localhost 127.0.0.1 --certs-dir=/certs --ca-key=/certs/ca.key
-docker run --rm --user "$DOCKER_USER" -v "$CERT_DIR:/certs" cockroachdb/cockroach:v25.2.0 \
-  cert create-client root --certs-dir=/certs --ca-key=/certs/ca.key
+# Bypass the image entrypoint: it creates FIFOs and a data directory in its
+# working directory, which is not writable when the CI runner UID is used.
+# Running the Cockroach binary directly keeps all generated files runner-owned.
+cockroach_cli() {
+  docker run --rm --user "$DOCKER_USER" --workdir /tmp --entrypoint cockroach \
+    -v "$CERT_DIR:/certs" cockroachdb/cockroach:v25.2.0 "$@"
+}
 
-docker run --detach --name "$CONTAINER" --network host --user "$DOCKER_USER" -v "$CERT_DIR:/certs" \
+cockroach_cli cert create-ca --certs-dir=/certs --ca-key=/certs/ca.key
+cockroach_cli cert create-node localhost 127.0.0.1 --certs-dir=/certs --ca-key=/certs/ca.key
+cockroach_cli cert create-client root --certs-dir=/certs --ca-key=/certs/ca.key
+
+docker run --detach --name "$CONTAINER" --network host --user "$DOCKER_USER" \
+  --workdir /tmp --entrypoint cockroach -v "$CERT_DIR:/certs" \
   cockroachdb/cockroach:v25.2.0 \
-  start-single-node --certs-dir=/certs --listen-addr=127.0.0.1:26257 --http-addr=127.0.0.1:8080 >/dev/null
+  start-single-node --certs-dir=/certs --store=/tmp/cockroach-data \
+  --listen-addr=127.0.0.1:26257 --http-addr=127.0.0.1:8080 >/dev/null
 
 ready=0
 for _ in $(seq 1 60); do
