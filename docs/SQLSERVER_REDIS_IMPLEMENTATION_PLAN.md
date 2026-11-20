@@ -1,114 +1,91 @@
-# SQL Server and Redis Tenant Gateway Implementation Plan
+# SQL Server and Redis integration contract
 
-## Objective
+## Purpose and current status
 
-Add SQL Server and Redis as two independent Proxima Engine integrations. They must share the product's tenant-isolation contract and verification standards, but must not share protocol assumptions or enforcement code.
+This document defines the security boundary and verification scope for the SQL Server and Redis integrations. The integrations are intentionally different: SQL Server uses its native database and principal permissions, while Redis uses a protocol-aware RESP2 gateway and tenant key namespaces.
 
-This document is an implementation contract, not a claim that either integration is already implemented or production-certified.
+The implementation is in a review branch and is not production-certified until the full Rust CI workflow, real-server acceptance suites, and packaged-image checks pass. The README labels both integrations as preview.
 
-## Existing baseline to preserve
+## SQL Server: native database-per-tenant profile
 
-The current main branch has passing CI coverage for PostgreSQL, CockroachDB 25.2, MySQL 8, MariaDB, and the restricted MongoDB 8 gateway. Work on this branch must preserve those paths and must not change billing, hosted control-plane behavior, or existing customer defaults.
+### Architectural decision
 
-## Integration A: Microsoft SQL Server
+SQL Server speaks TDS. The Rust protocol ecosystem reviewed for this implementation did not provide a maintained, production-ready TDS server that Proxima could safely embed. Tiberius is a client, while protocol parsers and mock servers are not production TDS servers. Proxima therefore does not claim to implement a SQL Server TDS proxy.
 
-### Security and protocol model
+The supported preview profile is native SQL Server database-per-tenant isolation:
 
-SQL Server speaks Tabular Data Stream (TDS), not PostgreSQL wire protocol. It has its own PRELOGIN negotiation, TLS transition, LOGIN7 authentication, packet framing, SQL batches, RPC calls, prepared statements, and session semantics. A PostgreSQL or MySQL gateway cannot be reused as a SQL Server listener.
+- Every tenant receives a dedicated SQL Server database and dedicated SQL login.
+- The login's default database is its tenant database.
+- The tenant login receives only SELECT, INSERT, UPDATE, and DELETE on the tenant's application schema.
+- Tenant logins receive no server roles, db_owner, db_datareader, db_datawriter, schema ownership, or login-management permissions.
+- VIEW ANY DATABASE and ALTER ANY LOGIN are denied to tenant logins.
+- TRUSTWORTHY and cross-database ownership chaining remain disabled.
+- Application connection pools are partitioned by tenant credential. A physical connection is never reused across tenant credentials.
+- Applications do not add tenant IDs to SQL statements; the tenant-specific credential selects the database boundary.
 
-**Decision:** do not implement or advertise a Proxima TDS gateway with the currently available Rust server-side ecosystem. The SQL Server deliverable is a native database-per-tenant security profile: each tenant receives a dedicated SQL Server database and least-privilege SQL login, with the login's default database set to that tenant database. This removes tenant predicates from application SQL and makes SQL Server's native database permissions the enforcement boundary. It is not a Proxima protocol gateway, does not provide gateway-side identity binding or shared-database RLS, and must be positioned separately from the gateway integrations.
+The database and login provisioning identity is trusted infrastructure. Credential issuance and rotation must be performed by a trusted provisioning service and secrets manager. SQL Server TLS certificate validation is required for application connections.
 
-SQL Server's native security remains authoritative:
-- Tenant-specific SQL principals and database permissions.
-- Row-Level Security (RLS) predicates for shared tables where row isolation is required.
-- SESSION_CONTEXT only when set by a trusted, non-spoofable connection bootstrap path; applications must not be allowed to overwrite the trusted tenant key.
-- Deny cross-tenant reads, writes, schema changes, impersonation, and privilege escalation.
-- Do not treat a client-supplied tenant ID or arbitrary SESSION_CONTEXT value as proof of identity.
+This profile does not provide a Proxima TDS listener, Proxima gateway-side identity routing, shared-database RLS enforcement, or Proxima protocol telemetry. Customers requiring any of those capabilities need a separately designed and validated TDS gateway. Do not present this native profile as a wire-protocol proxy.
 
-### TDS gateway feasibility outcome
+### Real-server verification
 
-1. Evaluate the TDS protocol and Rust ecosystem for a maintained, production-usable server-side implementation. The Rust Tiberius project describes itself as a native SQL Server client, so it must not be mistaken for a TDS server. Microsoft’s mssql-rs project and the tds_protocol crate are protocol-layer candidates to audit; the existence of packet/token parsing or a mock TDS server does not itself establish production server support.
-2. Prove PRELOGIN/TLS negotiation, LOGIN7 parsing, authentication failure handling, packet framing, and clean disconnect behavior in a minimal protocol spike.
-3. Decide whether the gateway will terminate client TLS and re-encrypt upstream TLS. Certificate validation must be enabled for upstream SQL Server connections. No plaintext credentials or TLS downgrade.
-4. Define the supported TDS version, SQL Server edition/version, authentication mode, and explicitly unsupported protocol features before exposing a customer endpoint.
-5. If a safe TDS server cannot be implemented with a maintainable dependency and adequate test coverage, stop and document a native SQL Server enforcement integration as a separate, explicitly scoped alternative. Do not ship an incomplete or falsely advertised TDS gateway.
+The SQL Server 2022 CI fixture provisions two isolated databases and two least-privilege logins. Its shell runner verifies per-tenant CRUD, cross-database read denial, database-switch denial, schema-creation denial, impersonation denial, and invalid credentials.
 
-Protocol research starting points: [Microsoft mssql-rs](https://github.com/microsoft/mssql-rs), [tds-protocol crate](https://docs.rs/tds-protocol/latest/tds_protocol/), and [Tiberius](https://github.com/tiberius-rs/tiberius). These are client/protocol-layer candidates, not a declaration that a ready-made server gateway exists. The implementation must not proceed to a customer-facing TDS listener until a complete server-side design has been proven with real SQL Server clients and TLS.
+- Provisioning fixture: scripts/sqlserver-provision-two-tenants.sql
+- Acceptance runner: scripts/test-sqlserver-tenant-isolation-ci.sh
+- Customer deployment guide: docs/SQLSERVER_NATIVE_TENANCY.md
 
-### Minimum SQL Server acceptance matrix
+The fixture drops and recreates only its named CI databases and logins. It is for disposable test instances, not production provisioning.
 
-- Two independent tenants, each with its own login/principal and test data.
-- Tenant A can read and write only Tenant A data; Tenant B can read and write only Tenant B data.
-- Cross-tenant SELECT, INSERT, UPDATE, DELETE, schema access, database switching, impersonation, and unauthorized stored procedure execution are denied.
-- Invalid credentials, unknown identities, disabled principals, expired/revoked identity records, malformed TDS packets, and TLS verification failures are rejected.
-- Prepared statements, parameterized queries, RPC execution, transactions, rollback, and connection reset behavior are tested within the declared compatibility scope.
-- A connection cannot change tenant after authentication; pooled/reused connections cannot leak identity or session state.
-- RLS is tested directly against SQL Server with adversarial policies and least-privilege grants; gateway checks are not the only isolation layer.
-- Resource limits, timeouts, cancellation, concurrent sessions, and gateway restart/recovery are measured.
+## Redis: restricted RESP2 tenant gateway
 
-## Integration B: Redis
+### Architecture
 
-### Security and protocol model
+The Redis integration is a dedicated gateway with a separate binary, listener, configuration namespace, identity registry, and upstream connection per authenticated client session.
 
-Redis uses RESP2/RESP3 and a command-oriented data model. Tenant isolation must be based on authenticated identity and an enforced key namespace, backed by Redis ACLs. Logical database numbers alone are not a tenant-security boundary. The official RESP specification documents binary-safe framing, pipelining, and RESP3; Redis command key specifications are the authoritative starting point for command key extraction. Redis ACLs constrain both commands and key patterns, but key patterns do not restrict keyless administrative commands, so the gateway must also maintain an explicit command policy.
+1. Client connects using TLS.
+2. Client authenticates with AUTH against the protected Proxima identity registry.
+3. The gateway binds the connection to one immutable tenant principal.
+4. The gateway derives an opaque tenant prefix from the trusted tenant identifier.
+5. Every supported key-bearing command is parsed and every key argument is rewritten into that tenant namespace.
+6. The gateway opens an upstream TLS connection, validates the upstream certificate, and authenticates as the tenant's dedicated Redis ACL user.
+7. The upstream ACL independently restricts that user to the tenant key pattern and explicitly granted commands.
 
-The target design is a dedicated RESP gateway:
-- Authenticate the client against a protected identity registry or supported Redis ACL identity.
-- Bind the connection to one immutable tenant principal.
-- Derive the tenant key namespace inside the gateway; never trust a client-provided tenant prefix.
-- Rewrite/validate every key-bearing command and every key in multi-key commands.
-- Use a dedicated upstream Redis ACL user per tenant with the narrowest possible command and key-pattern permissions.
-- Deny commands whose semantics cannot be safely inspected or scoped until they have explicit, tested support.
+Logical Redis database numbers are not a tenant security boundary. Client-supplied prefixes are not trusted. Repeated AUTH, tenant switching, unknown commands, unsupported protocol frames, and malformed requests fail closed.
 
-### Initial restricted command surface
+### Protocol and command surface
 
-Support must be explicit and versioned. Start with common string, hash, list, set, sorted-set, and expiry operations only after command metadata and key positions are validated. Multi-key commands must prove every key belongs to the same tenant. Keyless administrative commands are denied by default.
+The initial implementation supports RESP2 arrays of bulk strings and a restricted allowlist of common string, hash, list, set, sorted-set, expiry, selected stream, and multi-key commands. The command key positions are encoded in redis_protocol.rs. The gateway handles PING, QUIT, and the narrow CLIENT SETINFO metadata handshake locally.
 
-The first release should deny or tightly gate:
-- CONFIG, ACL, MODULE, SHUTDOWN, FLUSHALL, FLUSHDB, DEBUG, REPLICAOF/SLAVEOF, MIGRATE, RESTORE, and other administrative commands.
-- EVAL/EVALSHA and Functions until script key declarations and runtime key access are proven tenant-safe.
-- MONITOR, arbitrary Pub/Sub, client tracking, replication, cluster administration, and commands that expose server-wide metadata.
-- Transactions until MULTI/EXEC/DISCARD state is bound to the same authenticated tenant and all queued commands are validated before execution.
-- Commands with dynamic/ambiguous key positions until covered by a tested command specification.
+RESP3, inline commands, transactions, Lua/functions, Pub/Sub, blocking commands, cluster administration, keyspace scans, server administration, and unknown commands are not supported. Do not add a command without validating all key positions, including optional and variadic arguments, against the Redis command specification and adding negative tests.
 
-Protocol and security references: [Redis RESP specification](https://redis.io/docs/latest/develop/reference/protocol-spec/), [Redis ACL documentation](https://redis.io/docs/latest/operate/oss_and_stack/management/security/acl/), and [command key specifications](https://redis.io/docs/latest/develop/reference/key-specs/).
+The client identity registry stores a SHA-256 verifier for a high-entropy client password and the tenant's upstream ACL username/password. The registry is loaded at process startup; credential rotation requires updating the protected secret and restarting the gateway. Each tenant must map to a unique upstream Redis ACL user. Upstream TLS is mandatory and certificate validation is enabled.
 
-### Minimum Redis acceptance matrix
+### Real-server verification
 
-- Two independent tenants with overlapping logical key names; each sees only its own namespace.
-- Cross-tenant GET/SET/DEL and cross-tenant multi-key operations are denied.
-- Validate all supported command key positions, including variadic and optional-key forms.
-- Unknown commands, malformed RESP frames, oversized frames, unsupported RESP3 attributes/push messages, and denied administrative commands fail closed.
-- Test authentication failure, identity revocation, immutable session binding, connection reuse, pipelining, timeout, cancellation, and concurrent clients.
-- Test transactions only if explicitly supported; queued commands cannot escape the tenant namespace.
-- Validate ACL key patterns and command categories against the actual Redis server version.
-- Test persistence/restart and reconnect behavior without cross-tenant state leakage.
+The Redis 7.4 CI fixture creates a disposable TLS-enabled Redis server, provisions two upstream ACL users with separate tenant key patterns, and starts the Proxima gateway with two client identities. It verifies overlapping key names, MGET/MSET rewriting, BITOP key rewriting, attempts to inject another tenant's raw prefix, denied FLUSHALL, and invalid credentials.
 
-## Shared implementation contracts
+- Protocol policy and framing: crates/proxima-engine/src/redis_protocol.rs
+- Gateway runtime: crates/proxima-engine/src/redis_gateway.rs
+- Binary: crates/proxima-engine/src/bin/proxima-redis-gateway.rs
+- Acceptance runner: scripts/test-redis-tenant-gateway-ci.sh
+- Customer deployment guide: docs/REDIS_TENANT_GATEWAY.md
+- Customer Compose profile: redis in compose.customer.yaml
 
-Both gateways must:
-- Have separate binaries, modules, configuration namespaces, listeners, health reporting, and integration suites.
-- Default to loopback-only binds; require explicit configuration for externally reachable listeners.
-- Require TLS for production client and upstream connections, with certificate verification.
-- Keep credentials in protected files or secret providers; never log passwords, tokens, or raw authentication packets.
-- Enforce immutable per-connection tenant identity and least-privilege upstream credentials.
-- Fail closed on unknown commands, unsupported protocol features, malformed input, and ambiguous identity.
-- Apply connection caps, read/write limits, idle and query timeouts, cancellation, and graceful shutdown.
-- Emit structured, tenant-safe audit events without leaking SQL values, Redis values, or secrets.
-- Document driver compatibility, protocol limitations, deployment, rotation, and recovery.
+The Redis gateway is a restricted preview, not a drop-in replacement for an unrestricted Redis endpoint. Validate client-library startup commands and workload command requirements against the documented allowlist before adoption.
 
-## Delivery sequence
+## Build, packaging, and CI requirements
 
-1. **SQL Server protocol feasibility spike**: protocol/TLS/authentication proof, dependency review, threat model, and explicit support boundary. No production gateway claim until this passes.
-2. **SQL Server native security fixture**: provision two tenants, principals, RLS policies, grants, and adversarial SQL tests against a real SQL Server container.
-3. **SQL Server gateway implementation**: only after the feasibility gate; add binary, config, listener, identity registry, upstream TLS, integration suite, docs, and CI.
-4. **Redis command model and threat model**: command metadata table, RESP framing/parser tests, key extraction and namespace rewriting, explicit deny list.
-5. **Redis gateway implementation**: binary, ACL provisioning, identity binding, RESP2 baseline then RESP3 only where supported, integration tests, docs, and CI.
-6. **Unified verification harness**: one terminal entry point to start disposable services, wait for health, run all six database suites, collect logs and emit JSON/Markdown evidence. Also support per-database selection.
-7. **Mainline acceptance**: all existing database suites plus SQL Server and Redis pass in the same clean CI run; image packaging and customer install checks pass; docs accurately describe limitations.
+The branch adds the Redis binary to the release Docker image and an opt-in customer Compose profile. CI is configured to:
 
-## Definition of done
+- Compile and test the full Rust engine.
+- Build the Redis gateway binary.
+- Run SQL Server 2022 native database-per-tenant acceptance tests.
+- Run Redis 7.4 TLS gateway acceptance tests.
+- Preserve PostgreSQL, MySQL 8, MariaDB 11.4, CockroachDB 25.2, MongoDB 8, PgBouncer, installer, and packaged-image checks.
 
-A database is not marked complete merely because the crate compiles or unit tests pass. Completion requires a real server integration test, adversarial two-tenant isolation tests, authentication and protocol negative tests, resource/lifecycle tests, repeatable local terminal execution, CI execution, packaged runtime verification, and accurate customer documentation.
+Do not merge this branch unless the current PR's complete CI run passes. A cancelled, queued, or partially completed workflow is not a passing result. If either new acceptance suite fails, correct the implementation and rerun the complete workflow.
 
-Production readiness is evidence-based and scoped to the tested database versions, protocol features, TLS/authentication modes, deployment topologies, and workload envelope. A green CI run is necessary but is not a blanket certification of every possible customer environment.
+## Production-readiness boundary
+
+Passing CI establishes only the tested versions, protocol features, command surface, TLS setup, and deployment topology. It does not certify every SQL Server edition, Redis client library, cluster topology, or customer workload. The SQL Server native profile and Redis RESP2 gateway must remain separately described in product documentation so customers understand which component enforces tenant identity.
