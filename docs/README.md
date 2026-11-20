@@ -27,7 +27,7 @@ The Proxima Engine documentation covers the Rust data plane, database protocol g
 | MySQL | [Dedicated guide](MYSQL.md), [authentication](MYSQL_GATEWAY_AUTH.md) | proxima-mysql-gateway; MySQL 8.0 integration suite in CI |
 | MariaDB | [Dedicated guide](MARIADB.md), [authentication](MYSQL_GATEWAY_AUTH.md) | MySQL-compatible client protocol gateway |
 | CockroachDB 25.2+ | [Compatibility profile](COCKROACHDB_COMPATIBILITY.md) | PostgreSQL wire gateway with CockroachDB-native forced RLS and tenant-role acceptance test |
-| MongoDB 8 | [Restricted gateway guide](MONGODB_TENANT_ISOLATION.md) | Separate OP_MSG gateway; SCRAM-SHA-256, TLS, database-per-tenant isolation; restricted preview, not full feature parity |
+| MongoDB 8 | [Restricted gateway guide](MONGODB_TENANT_ISOLATION.md) | Separate OP_MSG gateway; SCRAM-SHA-256, TLS, database-per-tenant isolation; opt-in customer Compose profile `--profile mongodb`; restricted preview, not full feature parity |
 
 ## Developer tools
 
