@@ -8,6 +8,7 @@ services:
     environment:
       PROXIMA_NODE_ID: ${PROXIMA_NODE_ID:?Set PROXIMA_NODE_ID in .env}
       PROXIMA_NODE_IDENTITY_PATH: /var/lib/proxima/node-identity.json
+      PROXIMA_NODE_DATABASE_CONFIG_PATH: /var/lib/proxima/database-targets.json
       PROXIMA_NODE_ENROLLMENT_URL: ${PROXIMA_NODE_ENROLLMENT_URL:-https://api.agataproxima.com/api/v1/nodes/enroll}
       PROXIMA_NODE_HEARTBEAT_URL: ${PROXIMA_NODE_HEARTBEAT_URL:-https://api.agataproxima.com/api/v1/nodes/heartbeat}
       PROXIMA_NODE_ENROLLMENT_TOKEN_FILE: /run/secrets/node_enrollment_token
