@@ -4,7 +4,7 @@
 
 <h1 align="center">Agata Proxima · Proxima Engine</h1>
 <p align="center"><strong>Multi-database tenant isolation, enforced at the database connection boundary.</strong></p>
-<p align="center">Proxima Engine is the open-source Rust data plane for PostgreSQL, MySQL and MariaDB. It authenticates database clients, binds sessions to tenant-specific upstream identities, applies protocol-aware admission controls and works with native database privileges.</p>
+<p align="center">Proxima Engine is the open-source Rust data plane for PostgreSQL, CockroachDB 25.2+, MySQL, MariaDB, and a restricted MongoDB 8 gateway. It authenticates database clients, binds sessions to tenant-specific upstream identities, applies protocol-aware admission controls and works with native database privileges.</p>
 
 <p align="center">
   <a href="https://github.com/Proxima-Engine/proxima-engine/actions/workflows/ci.yml">Continuous integration</a> ·
@@ -37,13 +37,13 @@ https://github.com/user-attachments/assets/bca488eb-829c-4672-bbe9-b25878e5401c
 
 ## What is Agata Proxima?
 
-Agata Proxima provides multi-database security infrastructure for applications that serve multiple customers from shared database environments. Proxima Engine enforces tenant identity in the database connection path. PostgreSQL uses signed tenant context and tenant-specific PostgreSQL roles; MySQL and MariaDB use authenticated client identities bound to tenant-specific upstream accounts and databases.
+Agata Proxima provides multi-database security infrastructure for applications that serve multiple customers from shared database environments. Proxima Engine enforces tenant identity in the database connection path. PostgreSQL and CockroachDB use the PostgreSQL wire gateway with database-native roles and row-level security; MySQL and MariaDB use authenticated client identities bound to tenant-specific upstream accounts and databases; MongoDB uses a restricted OP_MSG gateway with database-per-tenant isolation.
 
 The product has two cooperating components:
 
 ### Proxima Engine — public, open-source data plane
 
-Proxima Engine is a Rust service that sits between an application's existing database driver and its database server. It provides a PostgreSQL protocol listener and a separate MySQL-compatible protocol listener. Applications keep their existing database drivers and connect to the matching Engine endpoint.
+Proxima Engine is a Rust service that sits between an application's existing database driver and its database server. It provides a PostgreSQL protocol listener, a separate MySQL-compatible protocol listener, and a restricted MongoDB OP_MSG listener. CockroachDB 25.2+ uses the PostgreSQL wire listener. Applications keep their existing database drivers and connect to the matching Engine endpoint.
 
 The Engine provides:
 
@@ -51,10 +51,12 @@ The Engine provides:
 - **PostgreSQL role routing.** Maps the verified tenant identity to its dedicated upstream PostgreSQL role and relies on PostgreSQL grants and Row-Level Security (RLS).
 - **MySQL and MariaDB session binding.** Authenticates the client against a protected identity registry, binds the session to one tenant principal, validates the assigned upstream database and uses a dedicated least-privilege upstream account.
 - **MySQL and MariaDB enforcement.** Authenticates the client against a protected identity registry, binds the session to one tenant principal, validates the assigned upstream database, and uses a dedicated least-privilege upstream account. The MySQL-compatible gateway has separate MySQL and MariaDB integration suites.
+- **CockroachDB compatibility.** Reuses the PostgreSQL wire gateway and requires CockroachDB-native forced row-level security, tenant-scoped roles, and least-privilege grants. The compatibility profile is verified against CockroachDB 25.2.
+- **MongoDB restricted gateway.** Provides a separate OP_MSG gateway with SCRAM-SHA-256 authentication, TLS, database-per-tenant identity mapping, a narrow command allowlist, and tenant-bound sessions. Unsupported commands, transactions, sharded topologies, compression, and full MongoDB feature parity are not claimed.
 - **Protocol and connection controls.** Applies protocol-specific startup handling, connection limits, upstream timeouts and configured TLS requirements.
 - **PostgreSQL security operations.** Includes the peer-scoped violation breaker, short-lived break-glass tokens with replay protection and the local signed attestation ledger.
 - **PostgreSQL operational visibility.** Exposes the Engine's local health/status routes and Prometheus metrics.
-- **Developer tooling.** Includes a Python local-development CLI, local identity bootstrap, signed PostgreSQL tenant-token generation, PostgreSQL driver examples, separate MySQL and MariaDB guides, customer installers and database-specific integration tests.
+- **Developer tooling.** Includes a Python local-development CLI, local identity bootstrap, signed PostgreSQL tenant-token generation, PostgreSQL driver examples, separate PostgreSQL, MySQL, MariaDB, CockroachDB and MongoDB guides, customer installers and database-specific integration tests.
 
 ### Agata Proxima Cloud — hosted management product
 
@@ -77,23 +79,25 @@ flowchart LR
   Cloud["Agata Proxima Cloud · hosted control plane"] -.->|"Authorized enrollment and management"| Engine
 ```
 
-Proxima Engine works alongside existing database deployments and drivers. PostgreSQL sessions carry signed tenant context and are mapped to dedicated database roles; PostgreSQL grants and RLS provide the database-native authorization layer. MySQL and MariaDB sessions authenticate through the MySQL-compatible listener and remain bound to the tenant's assigned database and least-privilege upstream account. Application authentication and organization membership checks remain in the trusted application backend.
+Proxima Engine works alongside existing database deployments and drivers. PostgreSQL and CockroachDB sessions use the PostgreSQL wire listener, tenant-scoped roles and database-native RLS. MySQL and MariaDB sessions authenticate through the MySQL-compatible listener and remain bound to the tenant's assigned database and least-privilege upstream account. MongoDB sessions use the restricted OP_MSG gateway and a tenant-specific database identity. Application authentication and organization membership checks remain in the trusted application backend.
 
 ## Database guides — separate setup for each engine
 
-Each database has its own implementation guide, setup sequence, configuration, compatibility notes and verification instructions. The MySQL and MariaDB guides are intentionally separate because their upstream server versions, service provisioning and integration suites are distinct—even though both accept the same MySQL client protocol and use the same gateway executable.
+Each database has its own implementation guide, setup sequence, configuration, compatibility notes and verification instructions. PostgreSQL is the reference integration; CockroachDB reuses its PostgreSQL wire protocol with a distinct native RLS profile. MySQL and MariaDB have separate guides and acceptance suites. MongoDB has a restricted gateway profile with explicitly documented feature limits.
 
 | Database | Start here | Deep-dive documentation |
 |---|---|---|
 | **PostgreSQL** | [PostgreSQL quickstart](docs/QUICKSTART.md) | [PostgreSQL documentation hub](docs/POSTGRESQL.md) · [Tenant isolation and RLS](docs/TENANT_ISOLATION.md) · [Driver integrations](docs/INTEGRATIONS.md) · [PgBouncer and verification](docs/VERIFICATION.md) |
 | **MySQL** | [MySQL gateway guide](docs/MYSQL.md) | [Client authentication](docs/MYSQL_GATEWAY_AUTH.md) · [MySQL integration test](crates/proxima-engine/tests/mysql_gateway_integration.rs) |
 | **MariaDB** | [MariaDB gateway guide](docs/MARIADB.md) | [Client authentication](docs/MYSQL_GATEWAY_AUTH.md) · [MariaDB integration test](crates/proxima-engine/tests/mariadb_gateway_integration.rs) |
+| **CockroachDB 25.2+** | [Compatibility profile](docs/COCKROACHDB_COMPATIBILITY.md) | [Real CockroachDB tenant-isolation acceptance script](scripts/test-cockroachdb-tenant-isolation-ci.sh) |
+| **MongoDB 8** | [Restricted gateway guide](docs/MONGODB_TENANT_ISOLATION.md) | [MongoDB gateway source](crates/proxima-engine/src/mongodb_gateway.rs) · [Real MongoDB tenant-isolation acceptance test](crates/proxima-engine/tests/mongodb_tenant_isolation.rs) |
 
 ### What is a database gateway?
 
 A database gateway is a protocol-aware network service between an application and its database. The application continues using its normal database driver. The driver connects to the matching Proxima listener; Proxima authenticates the connection, binds it to one tenant identity and forwards it to the assigned upstream database using that tenant's credentials.
 
-The gateway does not replace PostgreSQL, MySQL or MariaDB. It does not turn the databases into one database engine, and it does not make their security features interchangeable. PostgreSQL uses its own wire-protocol listener and native roles/RLS. MySQL and MariaDB use the MySQL-compatible listener, tenant-specific upstream accounts, database grants and SQL admission controls.
+The gateway does not replace PostgreSQL, CockroachDB, MySQL, MariaDB or MongoDB. It does not turn the databases into one database engine, and it does not make their security features interchangeable. PostgreSQL and CockroachDB use the PostgreSQL wire listener with their own native roles and RLS behavior. MySQL and MariaDB use the MySQL-compatible listener, tenant-specific upstream accounts, database grants and SQL admission controls. MongoDB uses a separate restricted OP_MSG gateway and MongoDB RBAC.
 
 ### PostgreSQL
 
@@ -112,6 +116,14 @@ Start with [the dedicated MySQL guide](docs/MYSQL.md). The repository's CI curre
 The MariaDB guide covers the MariaDB upstream service, tenant database and account provisioning, client authentication, identity registry, SQL admission, prepared statements, troubleshooting and its own integration suite.
 
 Start with [the dedicated MariaDB guide](docs/MARIADB.md). The repository's CI currently tests against MariaDB 11.4. MariaDB is documented and tested independently from MySQL even though both use the same MySQL-compatible client listener.
+
+### CockroachDB
+
+CockroachDB 25.2+ uses the PostgreSQL wire-protocol gateway. Tenant isolation depends on CockroachDB-native forced RLS, tenant-scoped roles and least-privilege grants; PostgreSQL-specific assumptions are not silently carried over. The CI acceptance test provisions CockroachDB 25.2 and verifies cross-tenant read and write denial. See the [CockroachDB compatibility profile](docs/COCKROACHDB_COMPATIBILITY.md).
+
+### MongoDB
+
+MongoDB 8 is supported through a separate, restricted OP_MSG gateway. The profile uses SCRAM-SHA-256, client TLS, database-per-tenant identity mapping and least-privilege MongoDB RBAC. The gateway denies commands and features outside its documented allowlist; transactions, sharded topologies, compression and general MongoDB feature parity are not supported. See [MongoDB tenant isolation](docs/MONGODB_TENANT_ISOLATION.md).
 
 ## Developer tools, SDKs and downloads
 
@@ -165,7 +177,7 @@ Then follow the [Quickstart](docs/QUICKSTART.md) to create a table, send a real 
 
 The repository includes PostgreSQL-backed tenant tests and a dedicated [PgBouncer tenant-pool integration test](scripts/test-pgbouncer-pooling.sh), which is run by GitHub Actions.
 
-The verification path covers:
+The verification path covers PostgreSQL 17, MySQL 8.0, MariaDB 11.4, CockroachDB 25.2, MongoDB 8, the Docker image build, and PgBouncer tenant-pool isolation:
 
 1. Tenant A authenticates and reads only Tenant A's row.
 2. Tenant B authenticates and reads only Tenant B's row.
@@ -189,6 +201,8 @@ See [Tenant isolation](docs/TENANT_ISOLATION.md), [Verification](docs/VERIFICATI
 | [Driver integrations](docs/INTEGRATIONS.md) | PostgreSQL connection examples for psql, Node.js, Python, and Rust |
 | [MySQL gateway](docs/MYSQL.md) | Dedicated MySQL upstream setup, identity registry, tenant accounts, client authentication and integration verification |
 | [MariaDB gateway](docs/MARIADB.md) | Dedicated MariaDB upstream setup, identity registry, tenant accounts, client authentication and integration verification |
+| [CockroachDB compatibility](docs/COCKROACHDB_COMPATIBILITY.md) | PostgreSQL-wire integration, CockroachDB 25.2+ RLS, tenant roles and retry semantics |
+| [MongoDB tenant isolation](docs/MONGODB_TENANT_ISOLATION.md) | Restricted MongoDB 8 OP_MSG gateway, SCRAM-SHA-256, database-per-tenant isolation and unsupported features |
 | [MySQL client authentication](docs/MYSQL_GATEWAY_AUTH.md) | Supported MySQL-compatible client verifier formats and authentication behavior |
 | [Database gateways in Cloud](docs/CLOUD_CONTROL_PLANE.md) | Current PostgreSQL Cloud boundary and the planned multi-database resource model |
 | [API reference](docs/API.md) | PostgreSQL endpoint, health/status routes, and Prometheus metrics |
