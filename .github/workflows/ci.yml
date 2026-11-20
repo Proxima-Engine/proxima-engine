@@ -115,6 +115,8 @@ jobs:
         run: cargo build -p proxima-engine --bin proxima-mysql-gateway
       - name: Build MongoDB wire gateway
         run: cargo build -p proxima-engine --bin proxima-mongodb-gateway
+      - name: Build Redis RESP2 gateway
+        run: cargo build -p proxima-engine --bin proxima-redis-gateway
       - name: Install database clients for acceptance tests
         run: |
           sudo apt-get update
@@ -133,6 +135,12 @@ jobs:
         run: bash scripts/test-two-tenants.sh
       - name: Verify two-tenant isolation against CockroachDB 25.2
         run: bash scripts/test-cockroachdb-tenant-isolation-ci.sh
+      - name: Verify SQL Server native tenant database isolation
+        env:
+          MSSQL_SA_PASSWORD: CI-only-NotASecret-2026!
+        run: bash scripts/test-sqlserver-tenant-isolation-ci.sh
+      - name: Verify Redis RESP2 gateway tenant isolation
+        run: bash scripts/test-redis-tenant-gateway-ci.sh
       - name: Verify MongoDB tenant database isolation
         env:
           PROXIMA_MONGODB_TEST_URI: mongodb://root:proxima-mongo-ci@127.0.0.1:27017/admin?authSource=admin&directConnection=true
