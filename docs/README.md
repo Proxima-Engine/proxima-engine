@@ -21,7 +21,7 @@ The Proxima Engine documentation covers the Rust data plane, database protocol g
 | PostgreSQL | [Quickstart](QUICKSTART.md), [tenant isolation](TENANT_ISOLATION.md), [driver integrations](INTEGRATIONS.md) | PostgreSQL wire-protocol Engine |
 | MySQL 8 | [Gateway setup](MYSQL_MARIADB.md), [authentication](MYSQL_GATEWAY_AUTH.md) | proxima-mysql-gateway |
 | MariaDB | [Gateway setup](MYSQL_MARIADB.md), [authentication](MYSQL_GATEWAY_AUTH.md) | MySQL-compatible client protocol gateway |
-| MongoDB | [MongoDB tenant isolation workstream](MONGODB_TENANT_ISOLATION.md) | Separate development track; not part of the supported gateway matrix |
+| MongoDB | [MongoDB development pull request](https://github.com/Proxima-Engine/proxima-engine/pull/34) | Separate development track; not part of the supported gateway matrix |
 
 ## Integrate and operate
 
