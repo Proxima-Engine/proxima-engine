@@ -108,7 +108,7 @@ jobs:
       - name: Build MongoDB wire gateway
         run: cargo build -p proxima-engine --bin proxima-mongodb-gateway
       - name: Install database clients for acceptance tests
-        run: sudo apt-get update && sudo apt-get install -y postgresql-client default-mysql-client netcat-openbsd
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client default-mysql-client netcat-openbsd redis-tools
       - name: Verify MySQL 8 and MariaDB tenant isolation
         env:
           MYSQL_ROOT_PASSWORD: proxima-mysql-ci
@@ -125,7 +125,7 @@ jobs:
       - name: Build container image
         run: docker build -t proxima-engine:ci .
       - name: Verify packaged gateway executables
-        run: docker run --rm --entrypoint /bin/sh proxima-engine:ci -c 'test -x /usr/local/bin/proxima-engine && test -x /usr/local/bin/proxima-mysql-gateway && test -x /usr/local/bin/proxima-mongodb-gateway'
+        run: docker run --rm --entrypoint /bin/sh proxima-engine:ci -c 'test -x /usr/local/bin/proxima-engine && test -x /usr/local/bin/proxima-mysql-gateway && test -x /usr/local/bin/proxima-mongodb-gateway && test -x /usr/local/bin/proxima-redis-gateway'
       - name: Verify PgBouncer tenant-pool isolation
         run: bash scripts/test-pgbouncer-pooling.sh
 
