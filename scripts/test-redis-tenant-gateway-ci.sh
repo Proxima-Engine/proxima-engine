@@ -7,7 +7,7 @@ gateway_pid=""
 cleanup(){ [[ -n "$gateway_pid" ]] && kill "$gateway_pid" 2>/dev/null || true; docker rm -f "$redis_id" >/dev/null 2>&1 || true; rm -rf "$tmp"; }
 trap cleanup EXIT
 mkdir -p "$tmp/tls"
-openssl req -x509 -newkey rsa:2048 -nodes -keyout "$tmp/tls/ca.key" -out "$tmp/tls/ca.crt" -subj "/CN=Proxima Redis CI CA" -days 1 >/dev/null 2>&1
+openssl req -x509 -newkey rsa:2048 -nodes -keyout "$tmp/tls/ca.key" -out "$tmp/tls/ca.crt" -subj "/CN=Proxima Redis CI CA" -days 1 -addext "basicConstraints=critical,CA:TRUE" -addext "keyUsage=critical,keyCertSign,cRLSign" >/dev/null 2>&1
 openssl req -newkey rsa:2048 -nodes -keyout "$tmp/tls/server.key" -out "$tmp/tls/server.csr" -subj "/CN=localhost" >/dev/null 2>&1
 printf 'subjectAltName=DNS:localhost,IP:127.0.0.1\nextendedKeyUsage=serverAuth\n' > "$tmp/tls/ext.cnf"
 openssl x509 -req -in "$tmp/tls/server.csr" -CA "$tmp/tls/ca.crt" -CAkey "$tmp/tls/ca.key" -CAcreateserial -out "$tmp/tls/server.crt" -days 1 -extfile "$tmp/tls/ext.cnf" >/dev/null 2>&1
