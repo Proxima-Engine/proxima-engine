@@ -39,8 +39,8 @@ fi
 
 timeout 90s docker exec "$CONTAINER" cockroach sql --insecure --host=127.0.0.1 --port=26257 <<'SQL'
 CREATE DATABASE proxima_dev;
-CREATE USER proxima_tenant_cli_a WITH LOGIN;
-CREATE USER proxima_tenant_cli_b WITH LOGIN;
+CREATE USER proxima_tenant_cli_a WITH LOGIN PASSWORD 'tenant-a-password';
+CREATE USER proxima_tenant_cli_b WITH LOGIN PASSWORD 'tenant-b-password';
 
 CREATE TABLE proxima_dev.public.records (
   tenant_id STRING NOT NULL,
@@ -69,10 +69,10 @@ SQL
 
 # Prove the disposable CockroachDB role and password before involving Proxima.
 # This separates fixture credential failures from proxy authentication failures.
-env -u PGPASSWORD PGCONNECT_TIMEOUT=5 psql -X -A -t -v ON_ERROR_STOP=1 \
+PGPASSWORD=tenant-a-password PGCONNECT_TIMEOUT=5 psql -X -A -t -v ON_ERROR_STOP=1 \
   "host=127.0.0.1 port=26257 dbname=proxima_dev user=proxima_tenant_cli_a sslmode=disable" \
   -c 'SELECT current_user' | grep -Fx 'proxima_tenant_cli_a'
-env -u PGPASSWORD PGCONNECT_TIMEOUT=5 psql -X -A -t -v ON_ERROR_STOP=1 \
+PGPASSWORD=tenant-b-password PGCONNECT_TIMEOUT=5 psql -X -A -t -v ON_ERROR_STOP=1 \
   "host=127.0.0.1 port=26257 dbname=proxima_dev user=proxima_tenant_cli_b sslmode=disable" \
   -c 'SELECT current_user' | grep -Fx 'proxima_tenant_cli_b'
 
@@ -101,24 +101,24 @@ fi
 token_a="$(python3 scripts/agata.py token --config "$DEV_DIR/dev-config.json" --tenant cli_a --ttl 300)"
 token_b="$(python3 scripts/agata.py token --config "$DEV_DIR/dev-config.json" --tenant cli_b --ttl 300)"
 run_tenant() {
-  local token="$1" username="$2" sql="$3"
-  timeout 20s env -u PGPASSWORD PGCONNECT_TIMEOUT=5 PGOPTIONS="-c statement_timeout=10000 -c proxima_tenant_token=$token" \
+  local token="$1" username="$2" password="$3" sql="$4"
+  timeout 20s env PGPASSWORD="$password" PGCONNECT_TIMEOUT=5 PGOPTIONS="-c statement_timeout=10000 -c proxima_tenant_token=$token" \
     psql -X -A -t -v ON_ERROR_STOP=1 \
     "host=127.0.0.1 port=16433 dbname=proxima_dev user=$username sslmode=disable" -c "$sql"
 }
 
-test "$(run_tenant "$token_a" proxima_tenant_cli_a 'SELECT secret FROM public.records')" = "A-secret"
-test "$(run_tenant "$token_b" proxima_tenant_cli_b 'SELECT secret FROM public.records')" = "B-secret"
-test "$(run_tenant "$token_a" proxima_tenant_cli_a "SELECT count(*) FROM public.records WHERE tenant_id='cli_b'")" = "0"
-if run_tenant "$token_a" proxima_tenant_cli_a "INSERT INTO public.records VALUES ('cli_b','forbidden')" >/dev/null 2>&1; then
+test "$(run_tenant "$token_a" proxima_tenant_cli_a tenant-a-password 'SELECT secret FROM public.records')" = "A-secret"
+test "$(run_tenant "$token_b" proxima_tenant_cli_b tenant-b-password 'SELECT secret FROM public.records')" = "B-secret"
+test "$(run_tenant "$token_a" proxima_tenant_cli_a tenant-a-password "SELECT count(*) FROM public.records WHERE tenant_id='cli_b'")" = "0"
+if run_tenant "$token_a" proxima_tenant_cli_a tenant-a-password "INSERT INTO public.records VALUES ('cli_b','forbidden')" >/dev/null 2>&1; then
   echo "FAIL: CockroachDB accepted a cross-tenant insert" >&2
   exit 1
 fi
-if run_tenant "$token_a" proxima_tenant_cli_a "UPDATE public.records SET tenant_id='cli_b' WHERE tenant_id='cli_a'" >/dev/null 2>&1; then
+if run_tenant "$token_a" proxima_tenant_cli_a tenant-a-password "UPDATE public.records SET tenant_id='cli_b' WHERE tenant_id='cli_a'" >/dev/null 2>&1; then
   echo "FAIL: CockroachDB accepted a cross-tenant update" >&2
   exit 1
 fi
-if run_tenant "invalid-token" proxima_tenant_cli_a 'SELECT 1' >/dev/null 2>&1; then
+if run_tenant "invalid-token" proxima_tenant_cli_a tenant-a-password 'SELECT 1' >/dev/null 2>&1; then
   echo "FAIL: invalid tenant token unexpectedly accepted" >&2
   exit 1
 fi
