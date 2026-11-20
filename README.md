@@ -47,14 +47,14 @@ Proxima Engine is a Rust service that sits between an application's existing dat
 
 The Engine provides:
 
-- **Signed tenant-context verification.** Validates tenant tokens using HMAC-SHA256, including token format, tenant identifier, expiry, and signature. Missing or invalid context is rejected when tenant enforcement is enabled.
-- **Tenant-to-role routing.** Maps the verified tenant identity to a configured PostgreSQL role and establishes a tenant-bound upstream database session.
-- **PostgreSQL enforcement.** Verifies signed tenant context, maps the tenant to a dedicated PostgreSQL role, and relies on PostgreSQL grants and Row-Level Security (RLS).
+- **PostgreSQL signed-context enforcement.** Validates tenant tokens using HMAC-SHA256, including token format, tenant identifier, expiry and signature. Missing or invalid context is rejected when tenant enforcement is enabled.
+- **PostgreSQL role routing.** Maps the verified tenant identity to its dedicated upstream PostgreSQL role and relies on PostgreSQL grants and Row-Level Security (RLS).
+- **MySQL and MariaDB session binding.** Authenticates the client against a protected identity registry, binds the session to one tenant principal, validates the assigned upstream database and uses a dedicated least-privilege upstream account.
 - **MySQL and MariaDB enforcement.** Authenticates the client against a protected identity registry, binds the session to one tenant principal, validates the assigned upstream database, and uses a dedicated least-privilege upstream account. The MySQL-compatible gateway has separate MySQL and MariaDB integration suites.
-- **Protocol and connection controls.** Handles PostgreSQL startup and authentication negotiation, connection limits, upstream timeouts, and configurable client/upstream TLS.
-- **Security operations.** Includes a peer-scoped violation breaker, short-lived break-glass tokens with replay protection, and a local signed attestation ledger.
-- **Operational visibility.** Exposes local health and status routes plus Prometheus metrics.
-- **Developer tooling.** Includes a Python local-development CLI, local identity bootstrap, signed tenant-token generation, driver integration examples, database-specific guides, customer installers, and repeatable integration tests.
+- **Protocol and connection controls.** Applies protocol-specific startup handling, connection limits, upstream timeouts and configured TLS requirements.
+- **PostgreSQL security operations.** Includes the peer-scoped violation breaker, short-lived break-glass tokens with replay protection and the local signed attestation ledger.
+- **PostgreSQL operational visibility.** Exposes the Engine's local health/status routes and Prometheus metrics.
+- **Developer tooling.** Includes a Python local-development CLI, local identity bootstrap, signed PostgreSQL tenant-token generation, PostgreSQL driver examples, separate MySQL and MariaDB guides, customer installers and database-specific integration tests.
 
 ### Agata Proxima Cloud — hosted management product
 
