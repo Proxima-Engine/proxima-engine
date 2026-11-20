@@ -10,6 +10,7 @@ trap cleanup EXIT
 docker run -d --name "$container" -p 127.0.0.1:19042:9042 \
   -e CASSANDRA_AUTHENTICATOR=org.apache.cassandra.auth.PasswordAuthenticator \
   -e CASSANDRA_AUTHORIZER=org.apache.cassandra.auth.CassandraAuthorizer \
+  -e CASSANDRA_ROLE_MANAGER=org.apache.cassandra.auth.CassandraRoleManager \
   cassandra:5.0 >/dev/null
 
 ready=0
