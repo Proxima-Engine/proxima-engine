@@ -664,6 +664,23 @@ async fn pull_and_stage_database_config_once() -> Result<(), Box<dyn std::error:
             &mut plaintext
         ).map_err(|_| io::Error::other("database credential envelope authentication failed"))?;
         let credentials: serde_json::Value = serde_json::from_slice(credentials)?;
+        let username = credentials.get("username").and_then(serde_json::Value::as_str)
+            .filter(|value| !value.trim().is_empty()).ok_or("database target username is missing")?;
+        let password = credentials.get("password").and_then(serde_json::Value::as_str)
+            .filter(|value| !value.is_empty()).ok_or("database target password is missing")?;
+        if username.len() > 128 || password.len() > 4096 {
+            return Err("database target credentials exceed supported limits".into());
+        }
+        let endpoint = record.get("endpoint").ok_or("database target endpoint is missing")?;
+        let host = endpoint.get("host").and_then(serde_json::Value::as_str)
+            .filter(|value| !value.trim().is_empty()).ok_or("database target host is missing")?;
+        let port = endpoint.get("port").and_then(serde_json::Value::as_u64)
+            .filter(|value| (1..=65535).contains(value)).ok_or("database target port is invalid")?;
+        let database_name = record.get("database_name").and_then(serde_json::Value::as_str)
+            .filter(|value| !value.trim().is_empty()).ok_or("database target database name is missing")?;
+        if host.len() > 255 || database_name.len() > 255 || port == 0 {
+            return Err("database target endpoint exceeds supported limits".into());
+        }
         let mut item = record.clone();
         item.as_object_mut().ok_or("assignment entry must be an object")?.remove("credential_envelope");
         item.as_object_mut().unwrap().insert("credentials".into(), credentials);
