@@ -623,6 +623,9 @@ async fn pull_and_stage_database_config_once() -> Result<(), Box<dyn std::error:
     let executable = env::current_exe()?;
     let executable_dir = executable.parent().ok_or("Engine executable directory is unavailable")?;
     for record in records {
+        if record.get("tls_mode").and_then(serde_json::Value::as_str) != Some("verify-full") {
+            return Err("assigned database target does not require full upstream TLS verification".into());
+        }
         let gateway_runtime = record.get("gateway_runtime").and_then(serde_json::Value::as_str)
             .ok_or("gateway runtime is missing")?;
         let runtime_available = match gateway_runtime {
