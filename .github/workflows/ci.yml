@@ -104,6 +104,8 @@ jobs:
         run: cargo build -p proxima-engine --release
       - name: Build MySQL protocol gateway
         run: cargo build -p proxima-engine --bin proxima-mysql-gateway
+      - name: Build MongoDB wire gateway
+        run: cargo build -p proxima-engine --bin proxima-mongodb-gateway
       - name: Install database clients for acceptance tests
         run: sudo apt-get update && sudo apt-get install -y postgresql-client default-mysql-client netcat-openbsd
       - name: Verify MySQL 8 and MariaDB tenant isolation
