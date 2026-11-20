@@ -314,6 +314,10 @@ fn validate_pipeline(pipeline: &[Bson], tenant_database: &str) -> Result<(), Mon
             "$lookup" => {
                 let lookup = value.as_document().ok_or_else(|| MongoPolicyError::InvalidCommand("$lookup must be a document".into()))?;
                 validate_foreign_namespace(lookup.get("from"), tenant_database)?;
+                if let Some(variables) = lookup.get("let") {
+                    let variables = variables.as_document().ok_or_else(|| MongoPolicyError::InvalidCommand("$lookup.let must be a document".into()))?;
+                    validate_nested_value(&Bson::Document(variables.clone()))?;
+                }
                 if let Some(pipeline) = lookup.get("pipeline") {
                     let pipeline = pipeline.as_array().ok_or_else(|| MongoPolicyError::InvalidCommand("$lookup.pipeline must be an array".into()))?;
                     validate_pipeline(pipeline, tenant_database)?;
@@ -335,10 +339,17 @@ fn validate_pipeline(pipeline: &[Bson], tenant_database: &str) -> Result<(), Mon
             "$graphLookup" => {
                 let graph = value.as_document().ok_or_else(|| MongoPolicyError::InvalidCommand("$graphLookup must be a document".into()))?;
                 validate_foreign_namespace(graph.get("from"), tenant_database)?;
+                if let Some(filter) = graph.get("restrictSearchWithMatch") {
+                    let filter = filter.as_document().ok_or_else(|| MongoPolicyError::InvalidCommand("$graphLookup.restrictSearchWithMatch must be a document".into()))?;
+                    validate_query_document(filter)?;
+                }
             }
             "$geoNear" => {
                 let geo = value.as_document().ok_or_else(|| MongoPolicyError::InvalidCommand("$geoNear must be a document".into()))?;
-                if let Some(query) = geo.get_document("query").ok() { validate_query_document(query)?; }
+                if let Some(query) = geo.get("query") {
+                    let query = query.as_document().ok_or_else(|| MongoPolicyError::InvalidCommand("$geoNear.query must be a document".into()))?;
+                    validate_query_document(query)?;
+                }
             }
             "$out" | "$merge" | "$changeStream" | "$currentOp" | "$indexStats" | "$collStats"
             | "$planCacheStats" | "$listSessions" | "$listLocalSessions" | "$search" | "$vectorSearch"
@@ -570,6 +581,43 @@ mod tests {
         let mut cross_db = command("aggregate", Bson::String("records".into()));
         cross_db.insert("pipeline", vec![doc! { "$lookup": { "from": { "db": "tenant_b_db", "coll": "records" }, "pipeline": [], "as": "joined" } }]);
         assert_eq!(policy().authorize(&cross_db), Err(MongoPolicyError::CrossDatabaseStage));
+    }
+
+    #[test]
+    fn aggregate_validates_nested_lookup_and_graph_filters() {
+        let mut lookup = command("aggregate", Bson::String("records".into()));
+        lookup.insert("pipeline", vec![doc! {
+            "$lookup": {
+                "from": "records",
+                "let": { "unsafe_value": { "$function": {
+                    "body": "function() { return true; }",
+                    "args": [],
+                    "lang": "js"
+                } } },
+                "pipeline": [],
+                "as": "joined"
+            }
+        }]);
+        assert!(matches!(policy().authorize(&lookup), Err(MongoPolicyError::UnsafeOperator(_))));
+
+        let mut graph = command("aggregate", Bson::String("records".into()));
+        graph.insert("pipeline", vec![doc! {
+            "$graphLookup": {
+                "from": "records",
+                "startWith": "$parent",
+                "connectFromField": "parent",
+                "connectToField": "_id",
+                "as": "graph",
+                "restrictSearchWithMatch": { "$where": "return true" }
+            }
+        }]);
+        assert!(matches!(policy().authorize(&graph), Err(MongoPolicyError::UnsafeOperator(_))));
+
+        let mut malformed_geo = command("aggregate", Bson::String("records".into()));
+        malformed_geo.insert("pipeline", vec![doc! {
+            "$geoNear": { "near": {}, "distanceField": "distance", "query": "not-a-document" }
+        }]);
+        assert!(matches!(policy().authorize(&malformed_geo), Err(MongoPolicyError::InvalidCommand(_))));
     }
 
     #[test]
