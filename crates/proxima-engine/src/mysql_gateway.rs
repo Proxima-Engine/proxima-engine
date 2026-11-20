@@ -67,11 +67,13 @@ impl MysqlGatewaySession {
             identity: MysqlConnectionIdentity::new(),
             upstream: Mutex::new(None),
             salt: {
-                let first = Uuid::new_v4().simple().to_string();
-                let second = Uuid::new_v4().simple().to_string();
-                let combined = format!("{first}{second}");
+                // Use raw UUID bytes rather than hexadecimal text so the
+                // 20-byte MySQL nonce retains 160 bits of random material.
+                let first = Uuid::new_v4();
+                let second = Uuid::new_v4();
                 let mut salt = [0u8; 20];
-                salt.copy_from_slice(&combined.as_bytes()[..20]);
+                salt[..16].copy_from_slice(first.as_bytes());
+                salt[16..].copy_from_slice(&second.as_bytes()[..4]);
                 salt
             },
         }
