@@ -14,7 +14,7 @@ docker run -d --name "$container" -p 127.0.0.1:1521:1521 \
 
 ready=0
 for _ in $(seq 1 90); do
-  if docker exec "$container" bash -lc 'echo "SELECT 1 FROM dual; EXIT" | sqlplus -L -s system/"$ORACLE_PASSWORD"@//localhost:1521/FREEPDB1' >/dev/null 2>&1; then
+  if docker exec "$container" bash -lc 'printf "SELECT 1 FROM dual;\\nEXIT\\n" | sqlplus -L -s system/"$ORACLE_PASSWORD"@//localhost:1521/FREEPDB1' >/dev/null 2>&1; then
     ready=1; break
   fi
   sleep 5
@@ -22,15 +22,15 @@ done
 if [[ "$ready" != 1 ]]; then docker logs "$container"; echo "Oracle Free did not become ready" >&2; exit 1; fi
 
 admin_sql() {
-  docker exec -i -e SQL_A_PASSWORD="$tenant_a_password" -e SQL_B_PASSWORD="$tenant_b_password" "$container" bash -lc \
+  docker exec -i "$container" bash -lc \
     'sqlplus -L -s system/"$ORACLE_PASSWORD"@//localhost:1521/FREEPDB1'
 }
-admin_sql <<'SQL'
+admin_sql <<SQL
 WHENEVER SQLERROR EXIT SQL.SQLCODE
-CREATE USER PROXIMA_TENANT_A_OWNER IDENTIFIED BY "&SQL_A_PASSWORD" DEFAULT TABLESPACE USERS TEMPORARY TABLESPACE TEMP QUOTA 100M ON USERS;
+CREATE USER PROXIMA_TENANT_A_OWNER IDENTIFIED BY "$tenant_a_password" DEFAULT TABLESPACE USERS TEMPORARY TABLESPACE TEMP QUOTA 100M ON USERS;
 GRANT CREATE SESSION, CREATE TABLE, CREATE SEQUENCE, CREATE VIEW, CREATE PROCEDURE, CREATE TRIGGER TO PROXIMA_TENANT_A_OWNER;
 ALTER USER PROXIMA_TENANT_A_OWNER DEFAULT ROLE NONE;
-CREATE USER PROXIMA_TENANT_B_OWNER IDENTIFIED BY "&SQL_B_PASSWORD" DEFAULT TABLESPACE USERS TEMPORARY TABLESPACE TEMP QUOTA 100M ON USERS;
+CREATE USER PROXIMA_TENANT_B_OWNER IDENTIFIED BY "$tenant_b_password" DEFAULT TABLESPACE USERS TEMPORARY TABLESPACE TEMP QUOTA 100M ON USERS;
 GRANT CREATE SESSION, CREATE TABLE, CREATE SEQUENCE, CREATE VIEW, CREATE PROCEDURE, CREATE TRIGGER TO PROXIMA_TENANT_B_OWNER;
 ALTER USER PROXIMA_TENANT_B_OWNER DEFAULT ROLE NONE;
 EXIT
@@ -76,7 +76,11 @@ SQL
 }
 expect_denied PROXIMA_TENANT_A_OWNER "$tenant_a_password" "SELECT payload FROM PROXIMA_TENANT_B_OWNER.RECORDS"
 expect_denied PROXIMA_TENANT_B_OWNER "$tenant_b_password" "SELECT payload FROM PROXIMA_TENANT_A_OWNER.RECORDS"
-expect_denied PROXIMA_TENANT_A_OWNER "$tenant_a_password" "ALTER SESSION SET CURRENT_SCHEMA=PROXIMA_TENANT_B_OWNER; SELECT payload FROM RECORDS"
+expect_denied PROXIMA_TENANT_A_OWNER "$tenant_a_password" 
+expect_denied PROXIMA_TENANT_B_OWNER "$tenant_b_password" "SET ROLE DBA"
+
+echo "Oracle schema-per-tenant isolation: PASS"
+ALTER SESSION SET CURRENT_SCHEMA=PROXIMA_TENANT_B_OWNER\nSELECT payload FROM RECORDS'
 expect_denied PROXIMA_TENANT_B_OWNER "$tenant_b_password" "SET ROLE DBA"
 
 echo "Oracle schema-per-tenant isolation: PASS"
