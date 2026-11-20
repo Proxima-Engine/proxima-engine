@@ -110,19 +110,21 @@ grep -q 'PROXIMA_TENANT_B_OWNER' <<<"$b_output"
 printf 'Oracle tenant A session diagnostics:\n%s\n' "$a_output"
 printf 'Oracle tenant B session diagnostics:\n%s\n' "$b_output"
 
-expect_denied() {
-  local user="$1" password="$2" statement="$3"
-  local output
-  if output="$(tenant_sql "$user" "$password" <<SQL
+expect_no_dba_role_activation() {
+  local user="$1" password="$2" output
+  if output="$(tenant_sql "$user" "$password" <<'SQL'
 WHENEVER SQLERROR EXIT FAILURE
-SELECT USER, SYS_CONTEXT('USERENV','SESSION_USER'), SYS_CONTEXT('USERENV','CURRENT_SCHEMA'), SYS_CONTEXT('USERENV','ISDBA') FROM dual;
-$statement
+SET ROLE DBA;
+SELECT CASE WHEN COUNT(*)=0 THEN 'NO_DBA_ROLE_ACTIVE' ELSE 'DBA_ROLE_ACTIVE' END
+FROM SESSION_ROLES WHERE ROLE='DBA';
 EXIT
 SQL
 )"; then
-    echo "Oracle tenant isolation failure: statement unexpectedly succeeded for $user: $statement" >&2
-    printf '%s\n' "$output" >&2
-    exit 1
+    if ! grep -q 'NO_DBA_ROLE_ACTIVE' <<<"$output"; then
+      echo "Oracle tenant isolation failure: DBA role became active for $user" >&2
+      printf '%s\\n' "$output" >&2
+      exit 1
+    fi
   fi
 }
 expect_no_cross_tenant_data() {
@@ -144,6 +146,6 @@ SQL
 }
 expect_no_cross_tenant_data PROXIMA_TENANT_A_OWNER "$tenant_a_password" "SELECT payload FROM PROXIMA_TENANT_B_OWNER.RECORDS" "tenant-b-only"
 expect_no_cross_tenant_data PROXIMA_TENANT_B_OWNER "$tenant_b_password" "SELECT payload FROM PROXIMA_TENANT_A_OWNER.RECORDS" "tenant-a-only"
-expect_denied PROXIMA_TENANT_A_OWNER "$tenant_a_password" "SET ROLE DBA"
+expect_no_dba_role_activation PROXIMA_TENANT_A_OWNER "$tenant_a_password"
 
 echo "Oracle schema-per-tenant data isolation: PASS"
