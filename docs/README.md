@@ -6,7 +6,9 @@ The Proxima Engine documentation covers the Rust data plane, database protocol g
 
 - **[Repository README](../README.md)** — product scope, database gateway matrix, architecture, clone instructions and quickstarts.
 - **[PostgreSQL quickstart](QUICKSTART.md)** — launch PostgreSQL and Proxima Engine, run SQL and inspect health and metrics.
-- **[MySQL 8 and MariaDB gateway](MYSQL_MARIADB.md)** — provision tenant databases, configure client verifiers, start the gateway, connect clients and verify isolation.
+- **[MySQL gateway](MYSQL.md)** — provision MySQL tenant databases, configure client verifiers, connect clients and run the MySQL 8.0 integration suite.
+- **[MariaDB gateway](MARIADB.md)** — provision MariaDB tenant databases, configure client identities, connect clients and run the MariaDB 11.4 integration suite.
+- [Shared MySQL protocol authentication](MYSQL_GATEWAY_AUTH.md) — verifier formats and authentication behavior.
 - [Architecture](ARCHITECTURE.md) — request lifecycle, tenant identity, role routing and system boundaries.
 - [Tenant isolation](TENANT_ISOLATION.md) — tenant roles, RLS, signed context and positive/negative access tests.
 - [Engineering case study](ENGINEERING_CASE_STUDY.md) — PgBouncer, RLS, 1,000-identity, signed-token and recovery validation.
@@ -19,7 +21,7 @@ The Proxima Engine documentation covers the Rust data plane, database protocol g
 | Database | Guide | Implementation |
 |---|---|---|
 | PostgreSQL | [Quickstart](QUICKSTART.md), [tenant isolation](TENANT_ISOLATION.md), [driver integrations](INTEGRATIONS.md) | PostgreSQL wire-protocol Engine |
-| MySQL 8 | [Gateway setup](MYSQL_MARIADB.md), [authentication](MYSQL_GATEWAY_AUTH.md) | proxima-mysql-gateway |
+| MySQL | [Dedicated guide](MYSQL.md), [authentication](MYSQL_GATEWAY_AUTH.md) | proxima-mysql-gateway; MySQL 8.0 integration suite in CI |
 | MariaDB | [Gateway setup](MYSQL_MARIADB.md), [authentication](MYSQL_GATEWAY_AUTH.md) | MySQL-compatible client protocol gateway |
 | MongoDB | [MongoDB development pull request](https://github.com/Proxima-Engine/proxima-engine/pull/34) | Separate development track; not part of the supported gateway matrix |
 
@@ -31,7 +33,7 @@ The Proxima Engine documentation covers the Rust data plane, database protocol g
 - [Node identity and enrollment](NODE_ENROLLMENT.md) — node identity persistence and enrollment contract.
 - [Container deployment](DEPLOYMENT.md) — image build, networking, TLS, persistence and deployment checklist.
 - [Operations](OPERATIONS.md) — health checks, logs, monitoring, restart and recovery.
-- [Verification](VERIFICATION.md) — automated tests, PostgreSQL integration, MySQL 8 and MariaDB CI, and evidence verification.
+- [Verification](VERIFICATION.md) — automated tests, PostgreSQL integration, MySQL and MariaDB CI, and evidence verification.
 - [Engineering validation evidence](../evidence/engineering-validation-2026-11-09.md) — recorded validation outputs.
 
 ## Security and hosted product
