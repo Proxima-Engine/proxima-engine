@@ -31,7 +31,10 @@ impl DynamoTenant {
                 "Effect": "Allow",
                 "Action": ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem", "dynamodb:DeleteItem", "dynamodb:Query"],
                 "Resource": self.table_arn,
-                "Condition": { "ForAllValues:StringEquals": { "dynamodb:LeadingKeys": [self.tenant_id] } }
+                "Condition": {
+                    "Null": { "dynamodb:LeadingKeys": "false" },
+                    "ForAllValues:StringEquals": { "dynamodb:LeadingKeys": [self.tenant_id] }
+                }
             }]
         })
     }
@@ -61,6 +64,7 @@ mod tests {
         let s = &p["Statement"][0];
         assert_eq!(s["Resource"], ARN);
         assert_eq!(s["Condition"]["ForAllValues:StringEquals"]["dynamodb:LeadingKeys"][0], "tenant-a");
+        assert_eq!(s["Condition"]["Null"]["dynamodb:LeadingKeys"], "false");
         let a = s["Action"].as_array().unwrap();
         assert!(a.iter().any(|v| v == "dynamodb:Query"));
         assert!(!a.iter().any(|v| v == "dynamodb:Scan"));
