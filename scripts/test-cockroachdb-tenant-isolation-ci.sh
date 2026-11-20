@@ -67,6 +67,15 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE proxima_dev.public.records
   TO proxima_tenant_cli_a, proxima_tenant_cli_b;
 SQL
 
+# Prove the disposable CockroachDB role and password before involving Proxima.
+# This separates fixture credential failures from proxy authentication failures.
+PGCONNECT_TIMEOUT=5 psql -X -A -t -v ON_ERROR_STOP=1 \
+  "host=127.0.0.1 port=26257 dbname=proxima_dev user=proxima_tenant_cli_a sslmode=disable" \
+  -c 'SELECT current_user' | grep -Fx 'proxima_tenant_cli_a'
+PGCONNECT_TIMEOUT=5 psql -X -A -t -v ON_ERROR_STOP=1 \
+  "host=127.0.0.1 port=26257 dbname=proxima_dev user=proxima_tenant_cli_b sslmode=disable" \
+  -c 'SELECT current_user' | grep -Fx 'proxima_tenant_cli_b'
+
 python3 scripts/agata.py init --directory "$DEV_DIR"
 export PROXIMA_TENANT_SIGNING_KEY
 PROXIMA_TENANT_SIGNING_KEY="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["tenant_signing_key"])' "$DEV_DIR/dev-config.json")"
