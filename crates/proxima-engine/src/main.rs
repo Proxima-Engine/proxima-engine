@@ -644,7 +644,7 @@ async fn pull_and_stage_database_config_once() -> Result<(), Box<dyn std::error:
             .ok_or("configuration revision missing")?;
         let credential_revision = record.get("credential_revision").and_then(serde_json::Value::as_i64)
             .ok_or("credential revision missing")?;
-        let expected_aad = format!("{node_id}\\n{target_id}\\n{config_revision}\\n{credential_revision}");
+        let expected_aad = format!("{node_id}\n{target_id}\n{config_revision}\n{credential_revision}");
         let envelope = record.get("credential_envelope").ok_or("credential envelope missing")?;
         if envelope.get("algorithm").and_then(serde_json::Value::as_str) != Some("AES-256-GCM") {
             return Err("unsupported database credential envelope algorithm".into());
