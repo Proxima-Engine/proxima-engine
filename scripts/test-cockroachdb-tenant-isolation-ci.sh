@@ -92,25 +92,24 @@ fi
 token_a="$(python3 scripts/agata.py token --config "$DEV_DIR/dev-config.json" --tenant cli_a --ttl 300)"
 token_b="$(python3 scripts/agata.py token --config "$DEV_DIR/dev-config.json" --tenant cli_b --ttl 300)"
 run_tenant() {
-  local token="$1" sql="$2"
-  local token="$1" password="$2" sql="$3"
+  local token="$1" username="$2" password="$3" sql="$4"
   timeout 20s env PGPASSWORD="$password" PGCONNECT_TIMEOUT=5 PGOPTIONS="-c statement_timeout=10000 -c proxima_tenant_token=$token" \
     psql -X -A -t -v ON_ERROR_STOP=1 \
-    "host=127.0.0.1 port=16433 dbname=proxima_dev user=client sslmode=disable" -c "$sql"
+    "host=127.0.0.1 port=16433 dbname=proxima_dev user=$username sslmode=disable" -c "$sql"
 }
 
-test "$(run_tenant "$token_a" tenant-a-password 'SELECT secret FROM public.records')" = "A-secret"
-test "$(run_tenant "$token_b" tenant-b-password 'SELECT secret FROM public.records')" = "B-secret"
-test "$(run_tenant "$token_a" tenant-a-password "SELECT count(*) FROM public.records WHERE tenant_id='cli_b'")" = "0"
-if run_tenant "$token_a" tenant-a-password "INSERT INTO public.records VALUES ('cli_b','forbidden')" >/dev/null 2>&1; then
+test "$(run_tenant "$token_a" proxima_tenant_cli_a tenant-a-password 'SELECT secret FROM public.records')" = "A-secret"
+test "$(run_tenant "$token_b" proxima_tenant_cli_b tenant-b-password 'SELECT secret FROM public.records')" = "B-secret"
+test "$(run_tenant "$token_a" proxima_tenant_cli_a tenant-a-password "SELECT count(*) FROM public.records WHERE tenant_id='cli_b'")" = "0"
+if run_tenant "$token_a" proxima_tenant_cli_a tenant-a-password "INSERT INTO public.records VALUES ('cli_b','forbidden')" >/dev/null 2>&1; then
   echo "FAIL: CockroachDB accepted a cross-tenant insert" >&2
   exit 1
 fi
-if run_tenant "$token_a" tenant-a-password "UPDATE public.records SET tenant_id='cli_b' WHERE tenant_id='cli_a'" >/dev/null 2>&1; then
+if run_tenant "$token_a" proxima_tenant_cli_a tenant-a-password "UPDATE public.records SET tenant_id='cli_b' WHERE tenant_id='cli_a'" >/dev/null 2>&1; then
   echo "FAIL: CockroachDB accepted a cross-tenant update" >&2
   exit 1
 fi
-if run_tenant "invalid-token" tenant-a-password 'SELECT 1' >/dev/null 2>&1; then
+if run_tenant "invalid-token" proxima_tenant_cli_a tenant-a-password 'SELECT 1' >/dev/null 2>&1; then
   echo "FAIL: invalid tenant token unexpectedly accepted" >&2
   exit 1
 fi
