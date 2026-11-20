@@ -88,9 +88,8 @@ impl MysqlGatewaySession {
 
 /// Convert a protocol parameter into an owned mysql_async value.
 ///
-/// Date/time binary parameter payloads are deliberately rejected until
-/// their complete binary encodings are explicitly validated and decoded.
-/// Treating binary date/time payloads as ordinary strings would be unsafe.
+/// Date/time binary parameter payloads are decoded according to the MySQL
+/// binary protocol and rejected when their lengths or component ranges are invalid.
 fn decode_date_payload(bytes: &[u8]) -> Result<(u16, u8, u8), ()> {
     if bytes.is_empty() { return Ok((0, 0, 0)); }
     if bytes.len() != 4 { return Err(()); }
@@ -928,8 +927,11 @@ mod tests {
     }
 
     #[test]
-    fn rejects_unvalidated_date_parameter_encoding() {
-        assert!(convert_parameter(ValueInner::Date(&[4, 0, 0, 0])).is_err());
+    fn decodes_binary_date_parameter_into_upstream_value() {
+        assert_eq!(
+            convert_parameter(ValueInner::Date(&[0xe8, 0x07, 11, 19])),
+            Ok(UpstreamValue::Date(2024, 11, 19, 0, 0, 0, 0))
+        );
     }
 }
 
