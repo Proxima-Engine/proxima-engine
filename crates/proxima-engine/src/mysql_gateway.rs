@@ -10,11 +10,11 @@ use mysql_async::{Conn, Row, Statement, Value as UpstreamValue};
 use opensrv_mysql::{
     AsyncMysqlIntermediary, AsyncMysqlShim, Column, ColumnFlags, ColumnType, ErrorKind, InitWriter,
     IntermediaryOptions, OkResponse, ParamParser, QueryResultWriter, StatementMetaWriter,
-    StatusFlags, ValueInner,
+    StatusFlags, ToMysqlValue, ValueInner,
 };
 
 use std::collections::HashMap;
-use std::io;
+use std::io::{self, Write};
 use std::net::SocketAddr;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::Arc;
@@ -155,21 +155,107 @@ fn decode_parameters(params: ParamParser<'_>) -> Result<Vec<UpstreamValue>, ()> 
     .unwrap_or(Err(()))
 }
 
-/// Preserve the upstream value's native MySQL representation. This keeps
-/// binary payloads byte-exact and lets opensrv-mysql encode numeric and
-/// temporal values according to the result column's protocol type.
-fn upstream_value_to_output(value: UpstreamValue) -> Option<opensrv_mysql::Value> {
+/// A typed row value that implements opensrv-mysql's output encoder.
+/// This avoids converting BLOBs to UTF-8 or hex text and emits the proper
+/// MySQL binary representation for temporal values in prepared results.
+#[derive(Debug, PartialEq)]
+enum MysqlOutputValue {
+    Bytes(Vec<u8>),
+    Int(i64),
+    UInt(u64),
+    Float(f32),
+    Double(f64),
+    Date(u16, u8, u8, u8, u8, u8, u32),
+    Time(bool, u32, u8, u8, u8, u32),
+}
+
+impl ToMysqlValue for MysqlOutputValue {
+    fn to_mysql_text<W: Write>(&self, writer: &mut W) -> io::Result<()> {
+        match self {
+            Self::Bytes(value) => value.to_mysql_text(writer),
+            Self::Int(value) => value.to_mysql_text(writer),
+            Self::UInt(value) => value.to_mysql_text(writer),
+            Self::Float(value) => value.to_mysql_text(writer),
+            Self::Double(value) => value.to_mysql_text(writer),
+            Self::Date(y, m, d, h, min, sec, micros) => {
+                let text = if *micros == 0 {
+                    format!("{y:04}-{m:02}-{d:02} {h:02}:{min:02}:{sec:02}")
+                } else {
+                    format!("{y:04}-{m:02}-{d:02} {h:02}:{min:02}:{sec:02}.{micros:06}")
+                };
+                writer.write_all(text.as_bytes())
+            }
+            Self::Time(negative, days, hours, minutes, seconds, micros) => {
+                let total_hours = u64::from(*days) * 24 + u64::from(*hours);
+                let sign = if *negative { "-" } else { "" };
+                let text = if *micros == 0 {
+                    format!("{sign}{total_hours:02}:{minutes:02}:{seconds:02}")
+                } else {
+                    format!("{sign}{total_hours:02}:{minutes:02}:{seconds:02}.{micros:06}")
+                };
+                writer.write_all(text.as_bytes())
+            }
+        }
+    }
+
+    fn to_mysql_bin<W: Write>(&self, writer: &mut W, column: &Column) -> io::Result<()> {
+        match self {
+            Self::Bytes(value) => value.to_mysql_bin(writer, column),
+            Self::Int(value) => value.to_mysql_bin(writer, column),
+            Self::UInt(value) => value.to_mysql_bin(writer, column),
+            Self::Float(value) => value.to_mysql_bin(writer, column),
+            Self::Double(value) => value.to_mysql_bin(writer, column),
+            Self::Date(year, month, day, hour, minute, second, micros) => {
+                match column.coltype {
+                    ColumnType::MYSQL_TYPE_DATE | ColumnType::MYSQL_TYPE_NEWDATE => {
+                        writer.write_all(&[4])?;
+                        writer.write_all(&year.to_le_bytes())?;
+                        writer.write_all(&[*month, *day])
+                    }
+                    ColumnType::MYSQL_TYPE_DATETIME | ColumnType::MYSQL_TYPE_TIMESTAMP
+                    | ColumnType::MYSQL_TYPE_DATETIME2 | ColumnType::MYSQL_TYPE_TIMESTAMP2 => {
+                        let len = if *micros != 0 { 11 } else if *hour != 0 || *minute != 0 || *second != 0 { 7 } else { 4 };
+                        writer.write_all(&[len])?;
+                        writer.write_all(&year.to_le_bytes())?;
+                        writer.write_all(&[*month, *day])?;
+                        if len >= 7 { writer.write_all(&[*hour, *minute, *second])?; }
+                        if len == 11 { writer.write_all(&micros.to_le_bytes())?; }
+                        Ok(())
+                    }
+                    _ => Err(io::Error::new(io::ErrorKind::InvalidInput, "temporal value does not match result column type")),
+                }
+            }
+            Self::Time(negative, days, hours, minutes, seconds, micros) => {
+                if !matches!(column.coltype, ColumnType::MYSQL_TYPE_TIME | ColumnType::MYSQL_TYPE_TIME2) {
+                    return Err(io::Error::new(io::ErrorKind::InvalidInput, "time value does not match result column type"));
+                }
+                let len = if *days == 0 && *hours == 0 && *minutes == 0 && *seconds == 0 && *micros == 0 {
+                    0
+                } else if *micros == 0 { 8 } else { 12 };
+                writer.write_all(&[len])?;
+                if len == 0 { return Ok(()); }
+                writer.write_all(&[u8::from(*negative)])?;
+                writer.write_all(&days.to_le_bytes())?;
+                writer.write_all(&[*hours, *minutes, *seconds])?;
+                if len == 12 { writer.write_all(&micros.to_le_bytes())?; }
+                Ok(())
+            }
+        }
+    }
+}
+
+fn upstream_value_to_output(value: UpstreamValue) -> Option<MysqlOutputValue> {
     Some(match value {
         UpstreamValue::NULL => return None,
-        UpstreamValue::Bytes(bytes) => opensrv_mysql::Value::Bytes(bytes),
-        UpstreamValue::Int(value) => opensrv_mysql::Value::Int(value),
-        UpstreamValue::UInt(value) => opensrv_mysql::Value::UInt(value),
-        UpstreamValue::Float(value) => opensrv_mysql::Value::Float(value),
-        UpstreamValue::Double(value) => opensrv_mysql::Value::Double(value),
+        UpstreamValue::Bytes(bytes) => MysqlOutputValue::Bytes(bytes),
+        UpstreamValue::Int(value) => MysqlOutputValue::Int(value),
+        UpstreamValue::UInt(value) => MysqlOutputValue::UInt(value),
+        UpstreamValue::Float(value) => MysqlOutputValue::Float(value),
+        UpstreamValue::Double(value) => MysqlOutputValue::Double(value),
         UpstreamValue::Date(year, month, day, hour, minute, second, micros) =>
-            opensrv_mysql::Value::Date(year, month, day, hour, minute, second, micros),
+            MysqlOutputValue::Date(year, month, day, hour, minute, second, micros),
         UpstreamValue::Time(negative, days, hours, minutes, seconds, micros) =>
-            opensrv_mysql::Value::Time(negative, days, hours, minutes, seconds, micros),
+            MysqlOutputValue::Time(negative, days, hours, minutes, seconds, micros),
     })
 }
 
@@ -651,7 +737,7 @@ where
             let values: Vec<Option<String>> = row
                 .unwrap()
                 .into_iter()
-                .map(upstream_value_to_text)
+                .map(upstream_value_to_output)
                 .collect();
 
             output.write_row(values).await?;
@@ -763,25 +849,25 @@ mod tests {
 
     #[test]
     fn preserves_signed_integer_values() {
-        assert!(matches!(upstream_value_to_output(UpstreamValue::Int(-42)), Some(opensrv_mysql::Value::Int(-42))));
+        assert!(matches!(upstream_value_to_output(UpstreamValue::Int(-42)), Some(MysqlOutputValue::Int(-42))));
     }
 
     #[test]
     fn preserves_unsigned_integer_values() {
-        assert!(matches!(upstream_value_to_output(UpstreamValue::UInt(42)), Some(opensrv_mysql::Value::UInt(42))));
+        assert!(matches!(upstream_value_to_output(UpstreamValue::UInt(42)), Some(MysqlOutputValue::UInt(42))));
     }
 
     #[test]
     fn preserves_binary_payloads_byte_for_byte() {
         let bytes = vec![0xff, 0x00, 0x80, 0x41];
-        assert!(matches!(upstream_value_to_output(UpstreamValue::Bytes(bytes.clone())), Some(opensrv_mysql::Value::Bytes(value)) if value == bytes));
+        assert!(matches!(upstream_value_to_output(UpstreamValue::Bytes(bytes.clone())), Some(MysqlOutputValue::Bytes(value)) if value == bytes));
     }
 
     #[test]
     fn preserves_datetime_values_as_typed_values() {
         assert!(matches!(
             upstream_value_to_output(UpstreamValue::Date(2026, 11, 19, 12, 30, 45, 123456)),
-            Some(opensrv_mysql::Value::Date(2026, 11, 19, 12, 30, 45, 123456))
+            Some(MysqlOutputValue::Date(2026, 11, 19, 12, 30, 45, 123456))
         ));
     }
 
