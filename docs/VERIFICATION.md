@@ -1,6 +1,6 @@
 # Verification and test guide
 
-Use this guide to run the Engine test suite, exercise PostgreSQL tenant isolation, verify PgBouncer transaction-pool separation, inspect runtime endpoints, and validate signed local evidence. Record the exact source commit and toolchain with each result.
+Use this guide to run the Engine test suite, exercise tenant isolation across PostgreSQL, MySQL, MariaDB, CockroachDB and MongoDB, verify the Docker image build and PgBouncer transaction-pool separation, inspect runtime endpoints, and validate signed local evidence. Record the exact source commit and toolchain with each result.
 
 ## Verification workflow
 
@@ -146,7 +146,7 @@ The maximum lifetime is 900 seconds (15 minutes). The Engine records used nonces
 
 ## 8. CI workflow
 
-The [Rust CI workflow](https://github.com/Proxima-Engine/proxima-engine/actions/workflows/ci.yml) runs on pushes to `main` and pull requests targeting `main`. It provisions PostgreSQL 17, runs the Python CLI tests, executes `cargo test -p proxima-engine`, builds the release binary, runs the two-tenant acceptance script, builds the Docker image, and runs the PgBouncer tenant-pool integration test.
+The [Rust CI workflow](https://github.com/Proxima-Engine/proxima-engine/actions/workflows/ci.yml) runs on pushes to `main` and pull requests targeting `main`. It provisions PostgreSQL 17, MySQL 8.0, MariaDB 11.4 and MongoDB 8; runs the Rust and CLI test suites; builds the release engine, MySQL gateway and MongoDB gateway; and executes real two-tenant acceptance tests for MySQL, MariaDB, PostgreSQL, CockroachDB 25.2 and MongoDB 8. It then builds the runtime Docker image and verifies PgBouncer tenant-pool isolation. The MongoDB gateway is a restricted profile, and CockroachDB uses its own native RLS compatibility profile.
 
 A green workflow run is direct evidence that those configured checks passed for its commit. For deployment acceptance, also verify the target environment's TLS, database roles/RLS, network policy, persistence, and recovery procedures.
 
