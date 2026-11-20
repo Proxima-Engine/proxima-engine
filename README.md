@@ -2,271 +2,214 @@
   <img src="frontend/src/assets/agata-proxima-orbit.svg" alt="Agata Proxima orbit logo" width="112">
 </p>
 
-<h1 align="center">Agata Proxima</h1>
-<p align="center"><strong>Database security and tenant isolation for multi-tenant applications.</strong></p>
-<p align="center">Agata Proxima focuses on database access security and tenant isolation. Proxima Engine is its Rust PostgreSQL wire-protocol gateway, verifying signed tenant context and routing each database session to its tenant-specific PostgreSQL role. PostgreSQL is the current supported database integration.</p>
-
+<h1 align="center">Agata Proxima · Proxima Engine</h1>
+<p align="center"><strong>Database protocol gateways and tenant isolation enforced at the connection boundary.</strong></p>
 <p align="center">
-  <a href="https://github.com/Agata-Proxima/proxima-engine/actions/workflows/ci.yml">Continuous integration</a> ·
-  <a href="LICENSE">MIT license for covered Engine source</a> ·
-  <a href="https://agataproxima.com">Website</a> ·
-  <a href="https://discord.gg/xsYSuDMzg">Discord</a> ·
-  <a href="https://x.com/Worldtwins25">X</a> ·
-  <a href="https://www.linkedin.com/company/agata-proxima/">LinkedIn</a>
+  <a href="https://github.com/Proxima-Engine/proxima-engine/actions/workflows/ci.yml"><img alt="Rust CI" src="https://github.com/Proxima-Engine/proxima-engine/actions/workflows/ci.yml/badge.svg?branch=main"></a>
+  <a href="https://github.com/Proxima-Engine/proxima-engine/actions/workflows/tenant-evidence.yml"><img alt="Tenant evidence" src="https://github.com/Proxima-Engine/proxima-engine/actions/workflows/tenant-evidence.yml/badge.svg?branch=main"></a>
+  <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
 </p>
+<p align="center"><a href="https://agataproxima.com">Website</a> · <a href="docs/README.md">Documentation</a> · <a href="https://github.com/Proxima-Engine/proxima-engine/issues">Issues</a> · <a href="https://discord.gg/xsYSuDMzg">Discord</a></p>
 
-**Start:** [What is Agata Proxima?](#what-is-agata-proxima) · [Customer Docker install](docs/NODE_ENROLLMENT.md#2-one-command-docker-installation-hosted-cloud) · [Guided customer install (Windows/Linux)](docs/CUSTOMER_DEPLOYMENT_EXECUTOR.md#install-the-engine-customer-node) · [Deployment executor](docs/CUSTOMER_DEPLOYMENT_EXECUTOR.md) · [Launch evaluation](docs/LAUNCH.md) · [Quickstart](docs/QUICKSTART.md) · [Local developer mode](docs/LOCAL_DEVELOPMENT.md) · [Engine CLI](docs/CLI.md) · [Documentation index](docs/README.md)
+Proxima Engine is the open-source Rust data plane in Agata Proxima. It provides protocol-aware database gateways, immutable tenant-to-session binding, upstream identity validation, conservative SQL admission, connection controls and repeatable integration tests. It places tenant enforcement between an application and its database—not inside application conventions alone.
 
-**Technical guides:** [Architecture](docs/ARCHITECTURE.md) · [Tenant isolation](docs/TENANT_ISOLATION.md) · [Driver integrations](docs/INTEGRATIONS.md) · [API and metrics](docs/API.md) · [Security](docs/SECURITY.md) · [Deployment](docs/DEPLOYMENT.md) · [Verification](docs/VERIFICATION.md)
+## Database gateway status
 
+| Database | Implementation | Verification |
+|---|---|---|
+| PostgreSQL | PostgreSQL wire-protocol Engine | PostgreSQL integration and tenant-isolation tests; PgBouncer transaction-pooling evidence |
+| MySQL 8 | MySQL-compatible protocol gateway | Real MySQL 8 integration test in CI: tenant separation, prepared statements and invalid-password rejection |
+| MariaDB | Same MySQL-compatible protocol gateway | Real MariaDB integration test in CI: tenant separation, prepared statements and invalid-password rejection |
+| MongoDB | Separate development workstream | Policy and RBAC foundations; not part of the supported gateway matrix |
 
+MySQL 8 and MariaDB are independently exercised by the integration workflow. The MySQL gateway has its own listener, identity registry and tenant-specific upstream connection path; it is not enabled by the PostgreSQL Compose profile.
 
-## Watch: Zero-Trust Tenant Isolation in Action
+**Scope:** PostgreSQL and MySQL-compatible gateways are separate protocol implementations. Their configuration, authentication, database controls and integration tests are database-specific. One database's test results do not verify another database.
 
-**Proxima Engine enforces tenant identity at the PostgreSQL proxy boundary.** This recorded engineering demonstration shows the Engine under real database and connection-pooling conditions.
+## Architecture
 
-The walkthrough covers PgBouncer transaction pooling, deliberately misconfigured Row-Level Security scenarios, 1,000 distinct tenant identities with up to 50 concurrent clients, signed-token validation, and Engine recovery.
-
-**Watch the full demonstration:**
-
-https://github.com/user-attachments/assets/bca488eb-829c-4672-bbe9-b25878e5401c
-
-**Read the engineering case study:** [Tenant isolation, PgBouncer pooling, 1,000-identity validation, RLS scenarios, and Engine recovery](docs/ENGINEERING_CASE_STUDY.md) · [Recorded validation evidence](evidence/engineering-validation-2026-11-09.md)
-
----
-
-## What is Agata Proxima?
-
-Agata Proxima provides database security infrastructure for applications that serve multiple customers and need enforceable tenant isolation. Its core job is to make tenant identity part of the database connection boundary. PostgreSQL is the current supported integration: Proxima Engine verifies each tenant session and routes it to a dedicated PostgreSQL role, where PostgreSQL privileges and Row-Level Security (RLS) enforce data access.
-
-The product has two cooperating components:
-
-### Proxima Engine — public, open-source data plane
-
-Proxima Engine is a Rust service that sits between an application's existing PostgreSQL driver and PostgreSQL. It speaks the PostgreSQL wire protocol, so applications keep their existing database drivers and connect to the Engine endpoint.
-
-The Engine provides:
-
-- **Signed tenant-context verification.** Validates tenant tokens using HMAC-SHA256, including token format, tenant identifier, expiry, and signature. Missing or invalid context is rejected when tenant enforcement is enabled.
-- **Tenant-to-role routing.** Maps the verified tenant identity to a configured PostgreSQL role and establishes a tenant-bound upstream database session.
-- **PostgreSQL-native enforcement.** Works with database roles, grants, and Row-Level Security (RLS), keeping data authorization inside PostgreSQL.
-- **Protocol and connection controls.** Handles PostgreSQL startup and authentication negotiation, connection limits, upstream timeouts, and configurable client/upstream TLS.
-- **Security operations.** Includes a peer-scoped violation breaker, short-lived break-glass tokens with replay protection, and a local signed attestation ledger.
-- **Operational visibility.** Exposes local health and status routes plus Prometheus metrics.
-- **Developer tooling.** Includes a Python standard-library CLI, local identity bootstrap, tenant-token generation, integration examples, and repeatable PostgreSQL tests.
-
-### Agata Proxima Cloud — hosted management product
-
-Agata Proxima Cloud is the separate hosted control plane for organization workflows, teams, plans, billing, registered nodes, and hosted management. It coordinates authorized Engine nodes while database traffic remains in the customer environment.
-
-The Cloud application and its private source are separate from this public Engine repository. The MIT license in this repository applies to the material covered by its license; it does not grant access to the hosted application's source code or hosted account features.
-
-## Database integration status
-
-Agata Proxima is being developed with a protocol-specific approach to database security. It does **not** claim universal database compatibility or production support for every database engine.
-
-- **PostgreSQL — supported.** The current Proxima Engine gateway implements the PostgreSQL wire protocol, signed tenant-context verification, tenant-to-role routing, and PostgreSQL-native grants and Row-Level Security (RLS). The repository includes PostgreSQL integration and tenant-isolation verification.
-- **MySQL — experimental development.** A separate MySQL gateway is under development. It is not a production-supported integration and must not be used for customer production traffic.
-- **MongoDB — early development.** Protocol and tenant-isolation foundations are being explored separately. MongoDB is not currently a supported production integration.
-- **Other database systems — not currently supported.** Each integration requires its own protocol-aware implementation, security model, and independent verification.
-
-These capabilities address database security, database tenant isolation, multi-tenant database security, PostgreSQL security proxy deployments, Rust database gateways, signed tenant context, database access control, and PostgreSQL Row-Level Security (RLS).
-
-## How the request path works
-
-```mermaid
+~~~mermaid
 flowchart LR
-  App["Application + existing PostgreSQL driver"] -->|"PostgreSQL protocol + signed tenant context"| Engine["Proxima Engine · Rust"]
-  Engine -->|"Tenant-specific PostgreSQL role"| Pool["PgBouncer transaction pool (optional)"]
-  Pool --> PG[("PostgreSQL · grants + RLS")]
-  Engine --> Health["Health / status"]
-  Engine --> Metrics["Prometheus metrics"]
-  Cloud["Agata Proxima Cloud · hosted control plane"] -.->|"Authorized enrollment and management"| Engine
-```
+  A["Application"] -->|"native database protocol"| G["Proxima gateway"]
+  G --> I["Client authentication"]
+  I --> T["Immutable tenant session"]
+  T --> P["Protocol and SQL admission"]
+  P --> U["Tenant-specific upstream credentials"]
+  U --> D[("PostgreSQL / MySQL / MariaDB")]
+  D --> R["Database-native grants"]
+  G --> M["Metrics and operational signals"]
+~~~
 
-Proxima Engine extends an existing PostgreSQL deployment: it verifies tenant context and selects the database role, while PostgreSQL privileges and RLS policies enforce which rows that role can read or modify. Application authentication and tenant authorization remain in the trusted application backend that issues signed tenant tokens.
+Database-native privileges remain mandatory. Each tenant must use a dedicated least-privilege upstream identity. SQL admission narrows accepted operations; it does not replace database authorization.
 
-## Get started
+## Quickstart: clone and run PostgreSQL
 
-Requirements: Git and Docker with Compose.
+### Requirements
+- Git
+- Docker Desktop with Docker Compose v2, or Docker Engine and the Compose plugin
+- curl for health checks
+- Optional: stable Rust/Cargo and psql
 
-```bash
-git clone https://github.com/Agata-Proxima/proxima-engine.git
+### 1. Clone
+
+~~~bash
+git clone https://github.com/Proxima-Engine/proxima-engine.git
 cd proxima-engine
+~~~
+
+### 2. Start the local stack
+
+~~~bash
 docker compose -f compose.dev.yaml up --build -d
-```
+~~~
 
-The local profile starts PostgreSQL, PgBouncer in transaction-pooling mode, and Proxima Engine. Check the local listeners:
+The development profile starts PostgreSQL, PgBouncer in transaction-pooling mode and Proxima Engine. Published ports bind to host loopback:
 
-```bash
+| Service | Host address | Purpose |
+|---|---|---|
+| PostgreSQL gateway | 127.0.0.1:6432 | Application connections |
+| Status dashboard | 127.0.0.1:9080 | Local status |
+| Health and Prometheus metrics | 127.0.0.1:9090 | Health and metrics |
+| PostgreSQL | 127.0.0.1:5432 | Development database |
+| PgBouncer | 127.0.0.1:16432 | Transaction-pooling path |
+
+### 3. Verify health and query through Proxima
+
+~~~bash
 curl -fsS http://127.0.0.1:9090/healthz
 curl -fsS http://127.0.0.1:9080/api/status
-```
+docker compose -f compose.dev.yaml exec postgres psql "host=engine port=6432 dbname=appdb user=proxima password=local-only-change-me sslmode=disable" -c "SELECT current_user, current_database();"
+~~~
 
-Windows PowerShell:
+PowerShell:
 
-```powershell
+~~~powershell
 Invoke-RestMethod http://127.0.0.1:9090/healthz
 Invoke-RestMethod http://127.0.0.1:9080/api/status
-```
+~~~
 
-Then follow the [Quickstart](docs/QUICKSTART.md) to create a table, send a real SQL query through the Engine and PgBouncer, inspect metrics, and stop the local stack. The Compose profile uses disposable local credentials and synthetic data.
+The local credentials are disposable development credentials. Replace them before using any non-disposable environment.
 
-## Verify tenant isolation
+### 4. Inspect metrics and stop
 
-The repository includes PostgreSQL-backed tenant tests and a dedicated [PgBouncer tenant-pool integration test](scripts/test-pgbouncer-pooling.sh), which is run by GitHub Actions.
+~~~bash
+curl -fsS http://127.0.0.1:9090/metrics
+docker compose -f compose.dev.yaml down
+~~~
 
-The verification path covers:
+Delete local database data only when intended:
 
-1. Tenant A authenticates and reads only Tenant A's row.
-2. Tenant B authenticates and reads only Tenant B's row.
-3. Cross-tenant reads return zero visible rows.
-4. Cross-tenant writes are rejected by PostgreSQL RLS.
-5. Missing or invalid signed tenant context is rejected when enforcement is enabled.
-6. Five sequential connections per tenant reuse that tenant role's backend PID, while the two tenant roles use separate backend PIDs through PgBouncer transaction pooling.
+~~~bash
+docker compose -f compose.dev.yaml down -v
+~~~
 
-See [Tenant isolation](docs/TENANT_ISOLATION.md), [Verification](docs/VERIFICATION.md), and the [recorded PgBouncer transaction-pooling evidence](evidence/pgbouncer-transaction-pooling.txt).
+Continue with [Tenant isolation](docs/TENANT_ISOLATION.md) for tenant roles, signed context, PostgreSQL grants and Row-Level Security.
 
-## Documentation
+## MySQL 8 and MariaDB gateway
 
-| Guide | Purpose |
+The MySQL-compatible gateway is a separate executable. Its default listener is 127.0.0.1:3307. It loads client identities from a JSON registry. Each authenticated client is bound to one immutable tenant principal and one dedicated upstream connection. Before accepting the session, the gateway validates that the live upstream database matches the registry assignment.
+
+~~~mermaid
+flowchart TD
+  C["MySQL or MariaDB client"] --> L["Proxima MySQL listener"]
+  L --> A["Authenticate client"]
+  A --> B["Resolve tenant principal"]
+  B --> S["Bind immutable session"]
+  S --> Q["SQL AST admission"]
+  Q --> U["Tenant-specific upstream"]
+  U --> DB[("MySQL 8 or MariaDB")]
+~~~
+
+The initial admission policy accepts one parsed statement at a time: SELECT, INSERT, UPDATE or DELETE. It rejects unsupported statements, multi-statements, database switching, cross-database qualified relations, system-schema references and selected privileged or resource-intensive functions. Database grants remain the authorization boundary.
+
+Build and start the gateway:
+
+~~~bash
+cargo build --release -p proxima-engine --bin proxima-mysql-gateway
+export PROXIMA_MYSQL_IDENTITY_REGISTRY=./secrets/mysql-identities.json
+export PROXIMA_MYSQL_LISTEN_ADDR=127.0.0.1:3307
+RUST_LOG=info ./target/release/proxima-mysql-gateway
+~~~
+
+PowerShell:
+
+~~~powershell
+cargo build --release -p proxima-engine --bin proxima-mysql-gateway
+$env:PROXIMA_MYSQL_IDENTITY_REGISTRY = ".\secrets\mysql-identities.json"
+$env:PROXIMA_MYSQL_LISTEN_ADDR = "127.0.0.1:3307"
+$env:RUST_LOG = "info"
+.\target\release\proxima-mysql-gateway.exe
+~~~
+
+The registry contains client password verifiers and tenant-specific upstream URLs. Keep it outside version control, restrict file permissions and inject it through a secret-management process. Never commit it or package it into a public image.
+
+Follow the complete [MySQL 8 and MariaDB gateway guide](docs/MYSQL_MARIADB.md) for database provisioning, verifier generation, least-privilege grants, registry configuration, client connection examples, TLS and integration verification.
+
+## Security model
+
+- **Immutable tenant binding:** each authenticated client session is bound once to its configured tenant principal.
+- **Separate upstream identities:** every tenant uses its own upstream database account and selected database.
+- **Live upstream validation:** the selected database is checked against the registry before authentication succeeds.
+- **Client authentication:** caching_sha2_password with a double-SHA-256 verifier; legacy mysql_native_password with a SHA-1 verifier.
+- **Constant-time verifier comparison:** fixed-size verifier bytes are compared without early-exit byte comparison.
+- **Fail-closed SQL admission:** malformed, multi-statement, unsupported and prohibited SQL is rejected before upstream execution.
+- **Bounded resources:** connection limits and upstream connection/query deadlines.
+- **Remote TLS requirement:** non-loopback MySQL upstreams must use verified TLS.
+- **Database-native authorization:** provision least-privilege grants for each tenant. Never share privileged upstream accounts.
+
+Read [Security](docs/SECURITY.md), [MySQL authentication](docs/MYSQL_GATEWAY_AUTH.md) and [Deployment](docs/DEPLOYMENT.md) before connecting sensitive workloads.
+
+## Build and verify
+
+~~~bash
+cargo fmt --all -- --check
+cargo check --workspace --all-targets
+cargo test --workspace --all-targets
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+~~~
+
+The real MySQL 8 and MariaDB integration suites require disposable database services, client utilities, fixtures and a running gateway. GitHub Actions provisions those dependencies and runs both suites. The ignored test targets are:
+
+~~~bash
+cargo test -p proxima-engine --test mysql_gateway_integration -- --ignored --test-threads=1
+cargo test -p proxima-engine --test mariadb_gateway_integration -- --ignored --test-threads=1
+~~~
+
+See [MySQL and MariaDB integration verification](docs/MYSQL_MARIADB.md#integration-verification) for the required fixture lifecycle.
+
+## Repository map
+
+| Path | Responsibility |
 |---|---|
-| [Quickstart](docs/QUICKSTART.md) | Start the local stack and query PostgreSQL through the Engine |
-| [Local developer mode](docs/LOCAL_DEVELOPMENT.md) | Generate local node identity and signed tenant test tokens |
-| [Engine CLI](docs/CLI.md) | Bootstrap, token generation, diagnostics, and local status commands |
-| [Architecture](docs/ARCHITECTURE.md) | Request lifecycle, tenant context, source map, and control-plane boundary |
-| [Configuration](docs/CONFIGURATION.md) | Environment variables, defaults, and validation |
-| [Tenant isolation](docs/TENANT_ISOLATION.md) | PostgreSQL roles, RLS policies, signed context, and test results |
-| [Driver integrations](docs/INTEGRATIONS.md) | psql, Node.js, Python, and Rust connection examples |
-| [API reference](docs/API.md) | PostgreSQL endpoint, health/status routes, and Prometheus metrics |
-| [Node enrollment](docs/NODE_ENROLLMENT.md) | Customer Docker installation, one-time enrollment, signed heartbeat, and identity persistence |
-| [Customer deployment executor](docs/CUSTOMER_DEPLOYMENT_EXECUTOR.md) | Install and operate the customer-managed, signed Docker Compose deployment executor |
-| [Deployment](docs/DEPLOYMENT.md) | Container build, TLS, networking, persistence, and deployment configuration |
-| [Operations](docs/OPERATIONS.md) | Health checks, logs, monitoring, recovery, and troubleshooting |
-| [Engineering case study](docs/ENGINEERING_CASE_STUDY.md) | Executed tenant-isolation, RLS, PgBouncer, concurrency, authentication, and recovery results |
-| [Verification](docs/VERIFICATION.md) | Rust tests, PostgreSQL integration tests, CI, and evidence verification |
-| [Security model](docs/SECURITY.md) | Implemented controls and the configuration required to operate them |
-| [Developer security walkthrough](docs/DEVELOPER_SECURITY_DEMO.md) | Reproduce positive and negative tenant-access scenarios |
-| [Cloud control plane](docs/CLOUD_CONTROL_PLANE.md) | Hosted product and self-managed Engine responsibilities |
-| [Plans and billing](docs/BILLING.md) | Hosted plan and checkout information |
-| [Support](docs/SUPPORT.md) | Technical support, issue reporting, and contact routes |
-| [Contributing](CONTRIBUTING.md) | Development setup and pull-request process |
-| [Security policy](SECURITY.md) | Private vulnerability reporting |
-| [Code of Conduct](CODE_OF_CONDUCT.md) | Community participation standards |
-| [Copyright and brand](COPYRIGHT.md) | Source-license and brand-asset boundaries |
-| [Open-source scope](docs/OPEN_SOURCE_SCOPE.md) | MIT-licensed source, self-managed use, and support boundaries |
-
-## Hosted product and contact
-
-- **Website and hosted account:** [agataproxima.com](https://agataproxima.com)
-- **Plans and billing:** [Hosted plan information](docs/BILLING.md)
-- **Support:** [support@agataproxima.com](mailto:support@agataproxima.com)
-- **Security reports:** [Private vulnerability reporting instructions](SECURITY.md)
-- **Community:** [Discord](https://discord.gg/xsYSuDMzg)
-
-## Open-source scope
-
-The Proxima Engine source and covered documentation are distributed under the [MIT License](LICENSE). The hosted Cloud application, hosted account workflows, and private management source are separate products and are not included in this repository's license. The Agata Proxima name, orbit logo, and designated brand artwork are reserved brand assets; see [Copyright and brand](COPYRIGHT.md).
+| crates/proxima-engine/src/ | Rust engine, protocol gateways, identity, policy and session logic |
+| crates/proxima-engine/src/bin/ | Standalone gateway executables |
+| crates/proxima-engine/tests/ | Real-database integration tests |
+| dashboard/ | Local Engine dashboard |
+| compose.dev.yaml | Disposable PostgreSQL development stack |
+| scripts/ | Integration and CI helpers |
+| docs/ | Architecture, configuration, deployment, security and database guides |
+| vendor/opensrv-mysql/ | Vendored MySQL protocol implementation and license notices |
 
 ## Contribute
 
-Use [GitHub Issues](https://github.com/Proxima-Engine/proxima-engine/issues) for reproducible Engine bugs and feature requests. Read [Contributing](CONTRIBUTING.md) before submitting a pull request. For vulnerabilities, use the private reporting process in [SECURITY.md](SECURITY.md).
+1. Create a focused feature branch.
+2. Add tests for both permitted and denied behavior.
+3. Run formatting, compilation, unit tests and the relevant real-database integration suite.
+4. Update the relevant documentation and configuration examples.
+5. Open a pull request with database versions, environment details and test results.
 
-<p align="center">Built by Agata Proxima · <a href="https://agataproxima.com">agataproxima.com</a> · <a href="https://github.com/Agata-Proxima">GitHub organization</a></p>
+Use [GitHub Issues](https://github.com/Proxima-Engine/proxima-engine/issues) for reproducible defects and feature requests. Report vulnerabilities through [SECURITY.md](SECURITY.md), not a public issue.
 
-## Install a registered Engine node on Windows or Linux
+## Project links
 
-The customer-node installer supports Windows 10/11 hosts running Docker Desktop with the WSL 2 backend, Linux containers, and Docker Compose v2. Windows users have a dedicated PowerShell installer; Linux users have a Bash installer. Both install the same Proxima Engine container and use the same signed enrollment and heartbeat protocol.
+- [Agata Proxima website](https://agataproxima.com)
+- [Source code](https://github.com/Proxima-Engine/proxima-engine)
+- [CI workflows](https://github.com/Proxima-Engine/proxima-engine/actions)
+- [Issues](https://github.com/Proxima-Engine/proxima-engine/issues)
+- [Pull requests](https://github.com/Proxima-Engine/proxima-engine/pulls)
+- [Releases](https://github.com/Proxima-Engine/proxima-engine/releases)
+- [Discord](https://discord.gg/xsYSuDMzg)
 
-### Windows downloads
+## License
 
-1. Download the [Proxima Engine source ZIP](https://github.com/Proxima-Engine/proxima-engine/archive/refs/heads/main.zip) and extract it.
-2. In Agata Proxima Cloud → Nodes, copy the Windows PowerShell setup commands shown with the node's one-time enrollment token.
-3. Keep the included [Windows PowerShell installer](https://raw.githubusercontent.com/Proxima-Engine/proxima-engine/main/install-customer.ps1) and [customer Compose file](https://raw.githubusercontent.com/Proxima-Engine/proxima-engine/main/compose.customer.yaml) together in the extracted repository folder.
-4. Paste the copied setup commands into the same PowerShell session. The installer generates `.env` and `secrets/node_enrollment_token`; it prompts for the PostgreSQL upstream address if it is not set. No tenant signing key download is required.
-
-### Windows prerequisites
-
-- Windows 10/11 with Docker Desktop configured to use the WSL 2 backend and Linux containers.
-- Docker daemon running before installation.
-- The Windows setup commands copied from the registered node in Node Management.
-- Network access from the Engine container to the configured PostgreSQL upstream and Agata Proxima HTTPS enrollment/heartbeat endpoints.
-
-The Engine is distributed as a Linux container. On Windows, Docker Desktop runs that container through its Linux/WSL 2 backend; this is the supported Windows installation path. The PowerShell installer is a Windows host installer, not an MSI and not a native Windows service binary.
-
-### Run the Windows installer
-
-Open PowerShell in the extracted folder. If the machine's execution policy blocks a locally downloaded script, allow it for this PowerShell process only:
-
-```powershell
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-.\install-customer.ps1
-```
-
-The installer performs these checks and actions in order:
-
-1. Generates the node environment file and one-time enrollment-token secret from the copied setup commands.
-2. Prompts for the PostgreSQL upstream host and port when it is not already configured.
-3. Confirms the Docker CLI and a running Docker daemon.
-4. Confirms that Docker is using Linux containers and Docker Compose v2 is available.
-5. Validates the customer Compose configuration.
-6. Builds and starts the Engine container.
-7. Waits up to 120 seconds for the container's Docker health check to report `healthy`.
-8. Prints container status and the local PostgreSQL proxy endpoint.
-
-A successful installation prints **Proxima Engine is healthy**. Then open Agata Proxima → Nodes/Fleet and confirm the registered node reports healthy after its signed heartbeat arrives. During first enrollment, the Control Plane returns the node heartbeat key and an organization-scoped tenant verification key over HTTPS. The Engine stores both in its protected identity file in a named Docker volume. The Control Plane master signing secret is never sent to customer nodes. After the node is healthy, replace the contents of `secrets/node_enrollment_token` with `enrollment-complete`; keep the file in place for subsequent Compose starts.
-
-### Verify and operate on Windows
-
-```powershell
-docker compose -f compose.customer.yaml ps
-docker compose -f compose.customer.yaml logs --tail 100 engine
-$containerId = docker compose -f compose.customer.yaml ps -q engine
-docker inspect --format '{{.State.Health.Status}}' $containerId
-```
-
-The final command prints the container health state. To verify SQL connectivity, connect your application or a PostgreSQL client to `127.0.0.1:6432` using the database credentials configured for your upstream PostgreSQL service.
-
-Restart and stop the registered node:
-
-```powershell
-docker compose -f compose.customer.yaml restart engine
-docker compose -f compose.customer.yaml down
-```
-
-Start it again without rebuilding:
-
-```powershell
-docker compose -f compose.customer.yaml up -d
-```
-
-### Linux installation
-
-Linux customers copy the Linux shell setup commands from Agata Proxima → Nodes and paste them into a shell in the extracted repository folder. The Bash installer creates the environment and enrollment-token secret automatically:
-
-```bash
-chmod +x ./install-customer.sh
-./install-customer.sh
-```
-
-For the Linux deployment-executor service installer and its security requirements, see [Customer-managed deployment executor](CUSTOMER_DEPLOYMENT_EXECUTOR.md).
-
-## Customer-managed deployment executor
-
-The Engine node installer and the deployment executor are separate services:
-
-- **Engine node:** the PowerShell installer `install-customer.ps1` supports Windows hosts using Docker Desktop in Linux-container mode. The Bash installer `install-customer.sh` supports Linux hosts with Docker Engine and Compose v2. Both install the Engine container and establish signed Fleet heartbeats.
-- **Deployment executor:** this customer-hosted receiver applies approved Engine version changes after Agata sends a signed `deployment.created` event. It verifies the signature, node identity and version allowlist, performs fixed Compose operations, checks runtime health and reports the observed result to the Control Plane.
-- **Linux production service:** the supplied `install-deployment-executor.sh` installs the receiver as a protected systemd service. It requires Node.js 22+, Docker Engine/Compose, systemd and a customer-managed HTTPS reverse proxy.
-- **Windows executor host:** the Node.js receiver can run interactively for development or staging. Production requires a customer-managed Windows service wrapper with a protected service account, or a customer-owned orchestrator. The Linux systemd installer is not a Windows service installer.
-
-In Agata Proxima, **Deployments → Set up deployment executor** creates the dedicated organization API key and signed webhook and returns the one-time `deployment-executor.env` file. It does not remotely install software or configure DNS. Install the public executor on the customer host first, configure its HTTPS route, then use the dashboard wizard to provision the credentials. Follow the [complete customer deployment executor guide](docs/CUSTOMER_DEPLOYMENT_EXECUTOR.md) for the installation, configuration, security and rollback procedure.
-
-### Network and security requirements
-
-- The Engine listens on TCP 6432 and binds to host loopback by default. Keep this binding when the application runs on the same host.
-- If the application runs in another container, attach it to the configured Compose network and use the Engine service name and port. For a different host, use a private network/VPN, a deliberate private bind address, and a restrictive firewall rule.
-- The configured PostgreSQL upstream address is resolved from inside the Engine container. `localhost` refers to the container itself, not the Windows host. Use a reachable database hostname or the appropriate Docker Desktop host gateway address.
-- Never expose PostgreSQL proxy port 6432, the status interface, or metrics publicly.
-- Never commit, email, or paste `.env`, enrollment tokens, node identity files, operator API keys, or webhook secrets.
-- The Control Plane master tenant-signing secret stays in the Control Plane. A customer Engine receives only its own organization's derived verification key during HTTPS enrollment; the Engine stores it in the protected identity file.
+Proxima Engine is distributed under the [MIT License](LICENSE) for the source and materials covered by that license. Hosted services, private control-plane source and reserved brand assets are separate; see [Copyright and brand](COPYRIGHT.md).
