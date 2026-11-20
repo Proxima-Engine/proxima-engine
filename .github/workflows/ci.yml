@@ -113,6 +113,8 @@ jobs:
         run: bash scripts/test-mysql-gateways-ci.sh
       - name: Verify two-tenant isolation against PostgreSQL
         run: bash scripts/test-two-tenants.sh
+      - name: Verify two-tenant isolation against CockroachDB 25.2
+        run: bash scripts/test-cockroachdb-tenant-isolation-ci.sh
       - name: Verify MongoDB tenant database isolation
         env:
           PROXIMA_MONGODB_TEST_URI: mongodb://root:proxima-mongo-ci@127.0.0.1:27017/admin?authSource=admin&directConnection=true
