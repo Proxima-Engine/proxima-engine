@@ -90,6 +90,7 @@ jobs:
         run: |
           mkdir -p secrets
           printf 'test-enrollment-token' > secrets/node_enrollment_token
+          printf '{"users":[]}' > secrets/mysql-identities.json
           cat > .env <<'EOF'
           PROXIMA_NODE_ID=00000000-0000-4000-8000-000000000001
           PROXIMA_NODE_ENROLLMENT_URL=https://api.agataproxima.com/api/v1/nodes/enroll
@@ -123,6 +124,8 @@ jobs:
         run: bash scripts/test-mongodb-tenant-isolation-ci.sh
       - name: Build container image
         run: docker build -t proxima-engine:ci .
+      - name: Verify packaged gateway executables
+        run: docker run --rm --entrypoint /bin/sh proxima-engine:ci -c 'test -x /usr/local/bin/proxima-engine && test -x /usr/local/bin/proxima-mysql-gateway && test -x /usr/local/bin/proxima-mongodb-gateway'
       - name: Verify PgBouncer tenant-pool isolation
         run: bash scripts/test-pgbouncer-pooling.sh
 
