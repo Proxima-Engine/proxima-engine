@@ -11,7 +11,7 @@ The Proxima Engine documentation covers the Rust data plane, database protocol g
 - **[MariaDB documentation](MARIADB.md)** — provision MariaDB tenant databases, configure client identities, connect clients and run the MariaDB 11.4 integration suite.
 - **[CockroachDB compatibility](COCKROACHDB_COMPATIBILITY.md)** — CockroachDB 25.2+ using the PostgreSQL wire gateway, native RLS, tenant roles and transaction retry behavior.
 - **[MongoDB tenant isolation](MONGODB_TENANT_ISOLATION.md)** — restricted MongoDB 8 OP_MSG gateway, SCRAM-SHA-256, TLS, tenant database binding and feature limitations.
-- [SQL Server and Redis implementation plan](SQLSERVER_REDIS_IMPLEMENTATION_PLAN.md) — separate TDS and RESP gateway architectures, security boundaries, implementation gates and acceptance criteria.
+- [SQL Server native tenant isolation](SQLSERVER_NATIVE_TENANCY.md) — dedicated database and least-privilege login per tenant; explicitly not a TDS proxy.\n- [Redis tenant gateway](REDIS_TENANT_GATEWAY.md) — restricted RESP2 TLS gateway, client identity binding, key namespace enforcement and Redis ACL configuration.\n- [SQL Server and Redis implementation plan](SQLSERVER_REDIS_IMPLEMENTATION_PLAN.md) — protocol feasibility decisions, security boundaries and acceptance criteria.
 - [Database production verification system](DATABASE_PRODUCTION_VERIFICATION.md) — target one-command real-database test runner, per-database acceptance suites, evidence reporting and production-confidence levels.
 - [Shared MySQL protocol authentication](MYSQL_GATEWAY_AUTH.md) — verifier formats and authentication behavior.
 - [Architecture](ARCHITECTURE.md) — request lifecycle, tenant identity, role routing and system boundaries.
@@ -30,8 +30,8 @@ The Proxima Engine documentation covers the Rust data plane, database protocol g
 | MariaDB | [Dedicated guide](MARIADB.md), [authentication](MYSQL_GATEWAY_AUTH.md) | MySQL-compatible client protocol gateway |
 | CockroachDB 25.2+ | [Compatibility profile](COCKROACHDB_COMPATIBILITY.md) | PostgreSQL wire gateway with CockroachDB-native forced RLS and tenant-role acceptance test |
 | MongoDB 8 | [Restricted gateway guide](MONGODB_TENANT_ISOLATION.md) | Separate OP_MSG gateway; SCRAM-SHA-256, TLS, database-per-tenant isolation; restricted preview, not full feature parity |
-| SQL Server | [Implementation plan](SQLSERVER_REDIS_IMPLEMENTATION_PLAN.md) | Planned dedicated TDS gateway; implementation gated on proven server-side TDS/TLS/authentication design |
-| Redis | [Implementation plan](SQLSERVER_REDIS_IMPLEMENTATION_PLAN.md) | Planned dedicated RESP gateway; command-aware tenant key enforcement backed by Redis ACLs |
+| SQL Server | [Native tenant isolation](SQLSERVER_NATIVE_TENANCY.md) | Native database-per-tenant profile with dedicated SQL login; no Proxima TDS proxy or shared-database RLS gateway |
+| Redis | [Tenant gateway](REDIS_TENANT_GATEWAY.md) | Restricted RESP2 TLS gateway with immutable tenant sessions, namespace rewriting and upstream Redis ACL users; limited command compatibility |
 
 ## Developer tools
 
