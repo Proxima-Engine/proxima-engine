@@ -99,12 +99,18 @@ jobs:
           mkdir -p secrets
           printf 'test-enrollment-token' > secrets/node_enrollment_token
           printf '{"users":[]}' > secrets/mysql-identities.json
+          printf '{"users":[]}' > secrets/redis-identities.json
+          printf 'test-ca' > secrets/redis-upstream-ca.pem
+          printf 'test-cert' > secrets/redis-gateway-cert.pem
+          printf 'test-key' > secrets/redis-gateway-key.pem
           cat > .env <<'EOF'
           PROXIMA_NODE_ID=00000000-0000-4000-8000-000000000001
           PROXIMA_NODE_ENROLLMENT_URL=https://api.agataproxima.com/api/v1/nodes/enroll
           PROXIMA_UPSTREAM_ADDR=127.0.0.1:5432
           PROXIMA_LISTEN_ADDR=0.0.0.0:6432
           PROXIMA_ENVIRONMENT=production
+          PROXIMA_REDIS_UPSTREAM_ADDR=redis:6379
+          PROXIMA_REDIS_UPSTREAM_TLS_SERVER_NAME=redis
           EOF
           docker compose -f compose.customer.yaml config --quiet
       - name: Run engine tests
