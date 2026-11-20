@@ -1,4 +1,4 @@
-use crate::mongodb_policy::{MongoPolicyError, MongoSessionRegistry, MongoTenantPolicy};
+use crate::mongodb_policy::{MongoSessionRegistry, MongoTenantPolicy};
 use mongodb::bson::{self, Bson, Document};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName};
 use rustls::{ClientConfig, RootCertStore, ServerConfig};
@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, BufReader};
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -250,7 +250,6 @@ async fn handle_connection(
                 }
                 write_frame(&mut upstream, &frame).await?;
             }
-            "hello" | "isMaster" => unreachable!(),
             "commitTransaction" | "abortTransaction" => {
                 let Some(principal) = identity.as_ref() else {
                     send_command_error(&mut client, message.request_id, "admin", "authentication is required").await?;
@@ -269,7 +268,7 @@ async fn handle_connection(
                     send_command_error(&mut client, message.request_id, "admin", "transaction control requires a tenant-bound logical session").await?;
                     continue;
                 }
-                if message.body.get_i64("txnNumber").is_err() || message.body.get_bool("autocommit") != Ok(false) {
+                if message.body.get_i64("txnNumber").is_err() || !matches!(message.body.get_bool("autocommit"), Ok(false)) {
                     send_command_error(&mut client, message.request_id, "admin", "invalid transaction control fields").await?;
                     continue;
                 }
@@ -336,8 +335,6 @@ async fn handle_connection(
 
 struct MongoMessage {
     request_id: i32,
-    response_to: i32,
-    flags: i32,
     body: Document,
     sequences: Vec<(String, Vec<Document>)>,
 }
@@ -374,11 +371,8 @@ fn decode_op_msg(frame: &[u8]) -> io::Result<MongoMessage> {
         return Err(io::Error::new(io::ErrorKind::Unsupported, format!("MongoDB opcode {opcode} is not supported; only OP_MSG is accepted")));
     }
     let flags = i32::from_le_bytes(frame[16..20].try_into().unwrap());
-    if flags & 0x0001 != 0 {
+    if flags != 0 {
         return Err(io::Error::new(io::ErrorKind::Unsupported, "MongoDB OP_MSG checksums are not supported"));
-    }
-    if flags & 0x0002 != 0 {
-        return Err(io::Error::new(io::ErrorKind::Unsupported, "MongoDB OP_MSG moreToCome is not supported"));
     }
 
     let mut offset = 20usize;
@@ -431,7 +425,7 @@ fn decode_op_msg(frame: &[u8]) -> io::Result<MongoMessage> {
         }
     }
     let body = body.ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "MongoDB OP_MSG is missing its body section"))?;
-    Ok(MongoMessage { request_id, response_to, flags, body, sequences })
+    Ok(MongoMessage { request_id, body, sequences })
 }
 
 fn read_bson_document(frame: &[u8], offset: usize, limit: usize) -> io::Result<(Document, usize)> {
