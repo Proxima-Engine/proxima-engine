@@ -59,6 +59,7 @@ CREATE TABLE records (id NUMBER PRIMARY KEY, payload VARCHAR2(80) NOT NULL);
 INSERT INTO records VALUES (1, 'tenant-b-only');
 COMMIT;
 SELECT payload FROM records WHERE id = 1;
+SELECT USER FROM dual;
 EXIT
 SQL
 )"
