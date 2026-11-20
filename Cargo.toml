@@ -1,4 +1,4 @@
 [workspace]
 resolver = "2"
-members = ["crates/proxima-engine"]
+members = ["crates/proxima-engine", "vendor/opensrv-mysql"]
 default-members = ["crates/proxima-engine"]

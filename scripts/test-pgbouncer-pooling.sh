@@ -3,6 +3,10 @@
 # Use synthetic data only. The test uses an isolated Compose project and volume.
 set -euo pipefail
 
+# The CI job already runs a PostgreSQL service on host port 5432.
+# Keep this disposable Compose database on a separate host port.
+export PROXIMA_POSTGRES_HOST_PORT="${PROXIMA_POSTGRES_HOST_PORT:-15432}"
+
 COMPOSE=(docker compose -p proxima-pgbouncer-test -f compose.dev.yaml)
 cleanup() {
   "${COMPOSE[@]}" down -v >/dev/null 2>&1 || true
