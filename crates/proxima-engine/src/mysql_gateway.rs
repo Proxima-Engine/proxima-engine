@@ -155,49 +155,22 @@ fn decode_parameters(params: ParamParser<'_>) -> Result<Vec<UpstreamValue>, ()> 
     .unwrap_or(Err(()))
 }
 
-/// Convert upstream values to the text representation used by this
-/// gateway's result metadata. NULL remains NULL.
-fn upstream_value_to_text(value: UpstreamValue) -> Option<String> {
-    match value {
-        UpstreamValue::NULL => None,
-
-        UpstreamValue::Bytes(bytes) => match String::from_utf8(bytes.clone()) {
-            Ok(text) => Some(text),
-            Err(_) => Some(format!("0x{}", hex::encode(bytes))),
-        },
-
-        UpstreamValue::Int(value) => Some(value.to_string()),
-        UpstreamValue::UInt(value) => Some(value.to_string()),
-        UpstreamValue::Float(value) => Some(value.to_string()),
-        UpstreamValue::Double(value) => Some(value.to_string()),
-
-        UpstreamValue::Date(year, month, day, hour, minute, second, micros) => {
-            if hour == 0 && minute == 0 && second == 0 && micros == 0 {
-                Some(format!("{year:04}-{month:02}-{day:02}"))
-            } else if micros == 0 {
-                Some(format!(
-                    "{year:04}-{month:02}-{day:02} {hour:02}:{minute:02}:{second:02}"
-                ))
-            } else {
-                Some(format!(
-                    "{year:04}-{month:02}-{day:02} {hour:02}:{minute:02}:{second:02}.{micros:06}"
-                ))
-            }
-        }
-
-        UpstreamValue::Time(negative, days, hours, minutes, seconds, micros) => {
-            let total_hours = days * 24 + u32::from(hours);
-            let sign = if negative { "-" } else { "" };
-
-            if micros == 0 {
-                Some(format!("{sign}{total_hours:02}:{minutes:02}:{seconds:02}"))
-            } else {
-                Some(format!(
-                    "{sign}{total_hours:02}:{minutes:02}:{seconds:02}.{micros:06}"
-                ))
-            }
-        }
-    }
+/// Preserve the upstream value's native MySQL representation. This keeps
+/// binary payloads byte-exact and lets opensrv-mysql encode numeric and
+/// temporal values according to the result column's protocol type.
+fn upstream_value_to_output(value: UpstreamValue) -> Option<opensrv_mysql::Value> {
+    Some(match value {
+        UpstreamValue::NULL => return None,
+        UpstreamValue::Bytes(bytes) => opensrv_mysql::Value::Bytes(bytes),
+        UpstreamValue::Int(value) => opensrv_mysql::Value::Int(value),
+        UpstreamValue::UInt(value) => opensrv_mysql::Value::UInt(value),
+        UpstreamValue::Float(value) => opensrv_mysql::Value::Float(value),
+        UpstreamValue::Double(value) => opensrv_mysql::Value::Double(value),
+        UpstreamValue::Date(year, month, day, hour, minute, second, micros) =>
+            opensrv_mysql::Value::Date(year, month, day, hour, minute, second, micros),
+        UpstreamValue::Time(negative, days, hours, minutes, seconds, micros) =>
+            opensrv_mysql::Value::Time(negative, days, hours, minutes, seconds, micros),
+    })
 }
 
 /// Preserve the upstream MySQL protocol type code. Both driver and server
@@ -212,7 +185,7 @@ fn output_column(column: &mysql_async::Column) -> Column {
         table: column.table_str().into_owned(),
         column: column.name_str().into_owned(),
         coltype: output_column_type(column.column_type()),
-        colflags: ColumnFlags::empty(),
+        colflags: ColumnFlags::from_bits_truncate(column.flags().bits()),
     }
 }
 
@@ -534,7 +507,7 @@ where
             let values: Vec<Option<String>> = row
                 .unwrap()
                 .into_iter()
-                .map(upstream_value_to_text)
+                .map(upstream_value_to_output)
                 .collect();
 
             output.write_row(values).await?;
@@ -785,39 +758,31 @@ mod tests {
 
     #[test]
     fn preserves_null_values() {
-        assert_eq!(upstream_value_to_text(UpstreamValue::NULL), None);
+        assert_eq!(upstream_value_to_output(UpstreamValue::NULL), None);
     }
 
     #[test]
-    fn converts_integer_values() {
-        assert_eq!(
-            upstream_value_to_text(UpstreamValue::Int(-42)),
-            Some("-42".to_string())
-        );
+    fn preserves_signed_integer_values() {
+        assert!(matches!(upstream_value_to_output(UpstreamValue::Int(-42)), Some(opensrv_mysql::Value::Int(-42))));
     }
 
     #[test]
-    fn converts_unsigned_values() {
-        assert_eq!(
-            upstream_value_to_text(UpstreamValue::UInt(42)),
-            Some("42".to_string())
-        );
+    fn preserves_unsigned_integer_values() {
+        assert!(matches!(upstream_value_to_output(UpstreamValue::UInt(42)), Some(opensrv_mysql::Value::UInt(42))));
     }
 
     #[test]
-    fn preserves_valid_utf8_bytes() {
-        assert_eq!(
-            upstream_value_to_text(UpstreamValue::Bytes(b"tenant-data".to_vec())),
-            Some("tenant-data".to_string())
-        );
+    fn preserves_binary_payloads_byte_for_byte() {
+        let bytes = vec![0xff, 0x00, 0x80, 0x41];
+        assert!(matches!(upstream_value_to_output(UpstreamValue::Bytes(value)) if value == bytes));
     }
 
     #[test]
-    fn encodes_non_utf8_bytes_without_lossy_replacement() {
-        assert_eq!(
-            upstream_value_to_text(UpstreamValue::Bytes(vec![0xff, 0x00])),
-            Some("0xff00".to_string())
-        );
+    fn preserves_datetime_values_as_typed_values() {
+        assert!(matches!(
+            upstream_value_to_output(UpstreamValue::Date(2026, 11, 19, 12, 30, 45, 123456)),
+            Some(opensrv_mysql::Value::Date(2026, 11, 19, 12, 30, 45, 123456))
+        ));
     }
 
     #[test]
