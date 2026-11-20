@@ -4,7 +4,7 @@
 
 <h1 align="center">Agata Proxima · Proxima Engine</h1>
 <p align="center"><strong>Multi-database tenant isolation, enforced at the database connection boundary.</strong></p>
-<p align="center">Proxima Engine is the open-source Rust data plane for PostgreSQL, CockroachDB 25.2+, MySQL, MariaDB, and a restricted MongoDB 8 gateway. It authenticates database clients, binds sessions to tenant-specific upstream identities, applies protocol-aware admission controls and works with native database privileges.</p>
+<p align="center">Proxima Engine is the open-source Rust data plane for PostgreSQL, CockroachDB 25.2+, MySQL, MariaDB, a restricted MongoDB 8 gateway, and a restricted Redis RESP2 gateway; SQL Server uses a separate native database-per-tenant profile. It authenticates database clients, binds sessions to tenant-specific upstream identities, applies protocol-aware admission controls and works with native database privileges.</p>
 
 <p align="center">
   <a href="https://github.com/Proxima-Engine/proxima-engine/actions/workflows/ci.yml">Continuous integration</a> ·
@@ -43,7 +43,7 @@ The product has two cooperating components:
 
 ### Proxima Engine — public, open-source data plane
 
-Proxima Engine is a Rust service that sits between an application's existing database driver and its database server. It provides a PostgreSQL protocol listener, a separate MySQL-compatible protocol listener, and a restricted MongoDB OP_MSG listener. CockroachDB 25.2+ uses the PostgreSQL wire listener. Applications keep their existing database drivers and connect to the matching Engine endpoint.
+Proxima Engine is a Rust service that sits between an application's existing database driver and its database server. It provides a PostgreSQL protocol listener, a separate MySQL-compatible protocol listener, a restricted MongoDB OP_MSG listener, and a restricted Redis RESP2 listener. CockroachDB 25.2+ uses the PostgreSQL wire listener. SQL Server is documented as a native database-per-tenant security profile, not a Proxima TDS proxy. Applications keep their existing database drivers and connect to the matching Engine endpoint.
 
 The Engine provides:
 
@@ -52,7 +52,7 @@ The Engine provides:
 - **MySQL and MariaDB session binding.** Authenticates the client against a protected identity registry, binds the session to one tenant principal, validates the assigned upstream database and uses a dedicated least-privilege upstream account.
 - **MySQL and MariaDB enforcement.** Authenticates the client against a protected identity registry, binds the session to one tenant principal, validates the assigned upstream database, and uses a dedicated least-privilege upstream account. The MySQL-compatible gateway has separate MySQL and MariaDB integration suites.
 - **CockroachDB compatibility.** Reuses the PostgreSQL wire gateway and requires CockroachDB-native forced row-level security, tenant-scoped roles, and least-privilege grants. The compatibility profile is verified against CockroachDB 25.2.
-- **MongoDB restricted gateway.** Provides a separate OP_MSG gateway with SCRAM-SHA-256 authentication, TLS, database-per-tenant identity mapping, a narrow command allowlist, and tenant-bound sessions. Unsupported commands, transactions, sharded topologies, compression, and full MongoDB feature parity are not claimed.
+- **MongoDB restricted gateway.** Provides a separate OP_MSG gateway with SCRAM-SHA-256 authentication, TLS, database-per-tenant identity mapping, a narrow command allowlist, and tenant-bound sessions. Unsupported commands, transactions, sharded topologies, compression, and full MongoDB feature parity are not claimed.\n- **Redis restricted gateway (preview).** Adds a separate RESP2 TLS listener, client identity registry, immutable tenant sessions, key namespace rewriting and per-tenant upstream Redis ACL users. RESP3, transactions, scripting, Pub/Sub, key scans and broad command compatibility are deliberately unsupported; the CI acceptance suite is the release gate.\n- **SQL Server native tenant profile (preview).** Uses a dedicated SQL Server database and least-privilege login per tenant so applications do not include tenant IDs in SQL. It is not a TDS proxy and does not provide Proxima gateway-side identity mapping or shared-database RLS.
 - **Protocol and connection controls.** Applies protocol-specific startup handling, connection limits, upstream timeouts and configured TLS requirements.
 - **PostgreSQL security operations.** Includes the peer-scoped violation breaker, short-lived break-glass tokens with replay protection and the local signed attestation ledger.
 - **PostgreSQL operational visibility.** Exposes the Engine's local health/status routes and Prometheus metrics.
@@ -79,7 +79,7 @@ flowchart LR
   Cloud["Agata Proxima Cloud · hosted control plane"] -.->|"Authorized enrollment and management"| Engine
 ```
 
-Proxima Engine works alongside existing database deployments and drivers. PostgreSQL and CockroachDB sessions use the PostgreSQL wire listener, tenant-scoped roles and database-native RLS. MySQL and MariaDB sessions authenticate through the MySQL-compatible listener and remain bound to the tenant's assigned database and least-privilege upstream account. MongoDB sessions use the restricted OP_MSG gateway and a tenant-specific database identity. Application authentication and organization membership checks remain in the trusted application backend.
+Proxima Engine works alongside existing database deployments and drivers. PostgreSQL and CockroachDB sessions use the PostgreSQL wire listener, tenant-scoped roles and database-native RLS. MySQL and MariaDB sessions authenticate through the MySQL-compatible listener and remain bound to the tenant's assigned database and least-privilege upstream account. MongoDB sessions use the restricted OP_MSG gateway and a tenant-specific database identity. Redis preview sessions use the RESP2 gateway and tenant key namespaces backed by Redis ACLs. SQL Server preview deployments use distinct database logins and databases per tenant. Application authentication and organization membership checks remain in the trusted application backend.
 
 ## Database guides — separate setup for each engine
 
@@ -91,13 +91,13 @@ Each database has its own implementation guide, setup sequence, configuration, c
 | **MySQL** | [MySQL gateway guide](docs/MYSQL.md) | [Client authentication](docs/MYSQL_GATEWAY_AUTH.md) · [MySQL integration test](crates/proxima-engine/tests/mysql_gateway_integration.rs) |
 | **MariaDB** | [MariaDB gateway guide](docs/MARIADB.md) | [Client authentication](docs/MYSQL_GATEWAY_AUTH.md) · [MariaDB integration test](crates/proxima-engine/tests/mariadb_gateway_integration.rs) |
 | **CockroachDB 25.2+** | [Compatibility profile](docs/COCKROACHDB_COMPATIBILITY.md) | [Real CockroachDB tenant-isolation acceptance script](scripts/test-cockroachdb-tenant-isolation-ci.sh) |
-| **MongoDB 8** | [Restricted gateway guide](docs/MONGODB_TENANT_ISOLATION.md) | [MongoDB gateway source](crates/proxima-engine/src/mongodb_gateway.rs) · [Real MongoDB tenant-isolation acceptance test](crates/proxima-engine/tests/mongodb_tenant_isolation.rs) |
+| **MongoDB 8** | [Restricted gateway guide](docs/MONGODB_TENANT_ISOLATION.md) | [MongoDB gateway source](crates/proxima-engine/src/mongodb_gateway.rs) · [Real MongoDB tenant-isolation acceptance test](crates/proxima-engine/tests/mongodb_tenant_isolation.rs) |\n| **Redis 7.4+ (preview)** | [Redis tenant gateway](docs/REDIS_TENANT_GATEWAY.md) | [RESP2 policy source](crates/proxima-engine/src/redis_protocol.rs) · [TLS gateway source](crates/proxima-engine/src/redis_gateway.rs) · [Real Redis acceptance script](scripts/test-redis-tenant-gateway-ci.sh) |\n| **SQL Server 2022 (native profile preview)** | [Native tenant isolation](docs/SQLSERVER_NATIVE_TENANCY.md) | [Two-tenant provisioning fixture](scripts/sqlserver-provision-two-tenants.sql) · [Real SQL Server acceptance script](scripts/test-sqlserver-tenant-isolation-ci.sh) · No Proxima TDS proxy |
 
 ### What is a database gateway?
 
 A database gateway is a protocol-aware network service between an application and its database. The application continues using its normal database driver. The driver connects to the matching Proxima listener; Proxima authenticates the connection, binds it to one tenant identity and forwards it to the assigned upstream database using that tenant's credentials.
 
-The gateway does not replace PostgreSQL, CockroachDB, MySQL, MariaDB or MongoDB. It does not turn the databases into one database engine, and it does not make their security features interchangeable. PostgreSQL and CockroachDB use the PostgreSQL wire listener with their own native roles and RLS behavior. MySQL and MariaDB use the MySQL-compatible listener, tenant-specific upstream accounts, database grants and SQL admission controls. MongoDB uses a separate restricted OP_MSG gateway and MongoDB RBAC.
+The gateway does not replace PostgreSQL, CockroachDB, MySQL, MariaDB or MongoDB. It does not turn the databases into one database engine, and it does not make their security features interchangeable. PostgreSQL and CockroachDB use the PostgreSQL wire listener with their own native roles and RLS behavior. MySQL and MariaDB use the MySQL-compatible listener, tenant-specific upstream accounts, database grants and SQL admission controls. MongoDB uses a separate restricted OP_MSG gateway and MongoDB RBAC. Redis preview uses a RESP2 gateway, command allowlisting, tenant key namespaces and upstream ACL users. SQL Server preview uses native database-per-tenant logins and permissions; it is not a Proxima wire-protocol gateway.
 
 ### PostgreSQL
 
