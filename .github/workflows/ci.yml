@@ -2,7 +2,7 @@ name: Rust CI
 
 on:
   push:
-    branches: [main, feature/universal-database-gateways, feature/mongodb-enterprise-tenant-isolation, feature/mongodb-cockroachdb-completion, feature/sqlserver-redis-tenant-gateways]
+    branches: [main, feature/universal-database-gateways, feature/mongodb-enterprise-tenant-isolation, feature/mongodb-cockroachdb-completion, feature/sqlserver-redis-tenant-gateways, feature/sqlite-oracle-native-integrations]
   pull_request:
     branches: [main]
   # One scheduled run per day on the default branch. Keep the schedule
