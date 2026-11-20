@@ -9,7 +9,7 @@ COPY vendor ./vendor
 COPY dashboard ./dashboard
 COPY frontend/src/assets/agata-proxima-orbit.svg ./frontend/src/assets/agata-proxima-orbit.svg
 
-RUN cargo build --release -p proxima-engine --bin proxima-engine --bin proxima-mysql-gateway --bin proxima-mongodb-gateway
+RUN cargo build --release -p proxima-engine --bin proxima-engine --bin proxima-mysql-gateway --bin proxima-mongodb-gateway --bin proxima-redis-gateway
 
 FROM debian:bookworm-slim AS runtime
 RUN apt-get update \
@@ -23,6 +23,7 @@ RUN apt-get update \
 COPY --from=builder /src/target/release/proxima-engine /usr/local/bin/proxima-engine
 COPY --from=builder /src/target/release/proxima-mysql-gateway /usr/local/bin/proxima-mysql-gateway
 COPY --from=builder /src/target/release/proxima-mongodb-gateway /usr/local/bin/proxima-mongodb-gateway
+COPY --from=builder /src/target/release/proxima-redis-gateway /usr/local/bin/proxima-redis-gateway
 
 ENV PROXIMA_LISTEN_ADDR=0.0.0.0:6432 \
     PROXIMA_UPSTREAM_ADDR=127.0.0.1:5432 \
@@ -35,6 +36,6 @@ ENV PROXIMA_LISTEN_ADDR=0.0.0.0:6432 \
     PROXIMA_BREAK_GLASS_REPLAY_DIR=/var/lib/proxima/replays
 
 USER proxima:proxima
-EXPOSE 6432 3307 27018
+EXPOSE 6432 3307 27018 6380
 VOLUME ["/var/lib/proxima"]
 ENTRYPOINT ["/usr/local/bin/proxima-engine"]
