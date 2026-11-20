@@ -25,3 +25,4 @@ pub mod mongodb_policy;
 pub mod mongodb_gateway;
 
 pub mod redis_protocol;
+pub mod redis_gateway;
