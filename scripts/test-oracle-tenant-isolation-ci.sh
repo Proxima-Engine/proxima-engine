@@ -40,7 +40,7 @@ SQL
 tenant_sql() {
   local user="$1" password="$2"
   docker exec -i -e DB_USER="$user" -e DB_PASSWORD="$password" "$container" bash -lc \
-    'sqlplus -L -s "$DB_USER/$DB_PASSWORD@//localhost:1521/FREEPDB1"'
+    'exec sqlplus -L -s "$DB_USER/$DB_PASSWORD@//localhost:1521/FREEPDB1"'
 }
 
 a_output="$(tenant_sql PROXIMA_TENANT_A_OWNER "$tenant_a_password" <<'SQL'
@@ -49,6 +49,7 @@ CREATE TABLE records (id NUMBER PRIMARY KEY, payload VARCHAR2(80) NOT NULL);
 INSERT INTO records VALUES (1, 'tenant-a-only');
 COMMIT;
 SELECT payload FROM records WHERE id = 1;
+SELECT USER FROM dual;
 EXIT
 SQL
 )"
@@ -63,6 +64,8 @@ SQL
 )"
 grep -q 'tenant-a-only' <<<"$a_output"
 grep -q 'tenant-b-only' <<<"$b_output"
+grep -q 'PROXIMA_TENANT_A_OWNER' <<<"$a_output"
+grep -q 'PROXIMA_TENANT_B_OWNER' <<<"$b_output"
 
 expect_denied() {
   local user="$1" password="$2" statement="$3"
