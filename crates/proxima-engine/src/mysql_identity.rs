@@ -94,9 +94,27 @@ impl MysqlIdentityRegistry {
                 )));
             }
 
-            if !upstream_url.starts_with("mysql://") && !upstream_url.starts_with("mysqls://") {
+            if !upstream_url.starts_with("mysql://") {
                 return Err(IdentityError::InvalidRegistry(format!(
-                    "users[{index}].upstream_url must use mysql:// or mysqls://"
+                    "users[{index}].upstream_url must use the mysql:// scheme supported by mysql_async"
+                )));
+            }
+
+            let upstream_options = mysql_async::Opts::from_url(&upstream_url).map_err(|error| {
+                IdentityError::InvalidRegistry(format!(
+                    "users[{index}].upstream_url is invalid: {error}"
+                ))
+            })?;
+
+            if upstream_options.db_name() != Some(database.as_str()) {
+                return Err(IdentityError::InvalidRegistry(format!(
+                    "users[{index}].database must match the database selected by upstream_url"
+                )));
+            }
+
+            if upstream_options.user().is_none() || upstream_options.pass().is_none() {
+                return Err(IdentityError::InvalidRegistry(format!(
+                    "users[{index}].upstream_url must include explicit upstream credentials"
                 )));
             }
 
@@ -352,6 +370,30 @@ mod tests {
             }}"#
         );
 
+        assert!(MysqlIdentityRegistry::from_json(&json).is_err());
+    }
+
+    #[test]
+    fn rejects_upstream_database_mismatch() {
+        let json = registry_json().replace(
+            "127.0.0.1:3306/tenant_a_db",
+            "127.0.0.1:3306/tenant_b_db"
+        );
+        assert!(MysqlIdentityRegistry::from_json(&json).is_err());
+    }
+
+    #[test]
+    fn rejects_upstream_url_without_database() {
+        let json = registry_json().replace(
+            "127.0.0.1:3306/tenant_a_db",
+            "127.0.0.1:3306/"
+        );
+        assert!(MysqlIdentityRegistry::from_json(&json).is_err());
+    }
+
+    #[test]
+    fn rejects_mysqls_scheme_not_supported_by_driver() {
+        let json = registry_json().replace("mysql://", "mysqls://");
         assert!(MysqlIdentityRegistry::from_json(&json).is_err());
     }
 
