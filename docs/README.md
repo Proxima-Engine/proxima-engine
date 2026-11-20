@@ -30,7 +30,7 @@ The Proxima Engine documentation covers the Rust data plane, database protocol g
 
 - [Engine local-development CLI](CLI.md) — Python 3.10+ tool for local node identity, signed tenant test tokens, diagnostics and local Engine status. This is not the downloadable Cloud API CLI.
 - [Cloud API CLI download](https://agataproxima.com/developers/cli) — separate Node.js 22+ read-only CLI for authenticated Cloud API health, identity and resource listings.
-- [Integration starter kit](https://agataproxima.com/developers/downloads) — server-side JavaScript API client, Node example, CLI smoke scripts, webhook receiver, Supabase/Firebase examples, GitHub Actions/Vercel templates, Terraform check example and ChatGPT/MCP server example. The JavaScript client is bundled source, not a published npm SDK; the Terraform sample is not a dedicated provider.
+- [Developer portal](https://agataproxima.com/developers) — API reference, server-side JavaScript client guidance, standalone Cloud API CLI, webhooks and integration recipes. The JavaScript client is source-level guidance rather than a published npm package; the Terraform example is not a dedicated provider.
 
 ## Integrate and operate
 
@@ -43,15 +43,15 @@ The Proxima Engine documentation covers the Rust data plane, database protocol g
 - [Verification](VERIFICATION.md) — automated tests, PostgreSQL integration, MySQL and MariaDB CI, and evidence verification.
 - [Engineering validation evidence](../evidence/engineering-validation-2026-11-09.md) — recorded validation outputs.
 
-## Multi-database Cloud architecture
+## Cloud and Engine integration architecture
 
-- [Database gateways in Agata Proxima Cloud](CLOUD_CONTROL_PLANE.md) — current PostgreSQL-oriented hosted contract, the current local MySQL/MariaDB Engine boundary, and the staged architecture for engine-aware database targets, gateway nodes, tenant bindings, policies, deployment and verification.
+- [Engine and Cloud integration architecture](CLOUD_CONTROL_PLANE.md) — how the multi-database Engine connects to the hosted management plane, how database targets and tenant bindings are modeled, and how engine-specific policies, deployment and verification fit together.
 
 ## Security and hosted product
 
 - [Security architecture](SECURITY.md) — implemented controls and required runtime configuration.
 - [MySQL gateway authentication](MYSQL_GATEWAY_AUTH.md) — caching SHA-2 and legacy native password verifier formats.
-- [Hosted Cloud control plane](CLOUD_CONTROL_PLANE.md) — hosted organization workflows and Engine boundary.
+- [Hosted Cloud control plane](CLOUD_CONTROL_PLANE.md) — hosted organization workflows and Engine management connectivity.
 - [Plans and billing](BILLING.md) — hosted plans, checkout, subscription and billing.
 - [Support](SUPPORT.md) — contact routes, diagnostics and issue reporting.
 
