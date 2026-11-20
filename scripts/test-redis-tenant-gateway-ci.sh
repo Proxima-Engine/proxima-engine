@@ -22,7 +22,8 @@ tls-key-file /tls/server.key
 tls-ca-cert-file /tls/ca.crt
 tls-auth-clients no
 user default on >proxima-admin-ci ~* &* +@all
-CONF\ndocker run -d --name "$redis_id" -p 127.0.0.1:6389:6379 -v "$tmp/tls:/tls:ro" redis:7.4-alpine redis-server /tls/redis.conf >/dev/null
+CONF
+docker run -d --name "$redis_id" -p 127.0.0.1:6389:6379 -v "$tmp/tls:/tls:ro" redis:7.4-alpine redis-server /tls/redis.conf >/dev/null
 for _ in $(seq 1 40); do redis-cli --tls --cacert "$tmp/tls/ca.crt" -h 127.0.0.1 -p 6389 -a proxima-admin-ci PING >/dev/null 2>&1 && break; sleep 1; done
 redis-cli --tls --cacert "$tmp/tls/ca.crt" -h 127.0.0.1 -p 6389 -a proxima-admin-ci ACL SETUSER tenant_a on '>upstream-a' '~proxima:{ca978112ca1bbdcafac231b39a23dc4d}:*' +get +set +del +exists +mget +mset +incr +expire +ttl +type +bitop >/dev/null
 redis-cli --tls --cacert "$tmp/tls/ca.crt" -h 127.0.0.1 -p 6389 -a proxima-admin-ci ACL SETUSER tenant_b on '>upstream-b' '~proxima:{3e23e8160039594a33894f6564e1b134}:*' +get +set +del +exists +mget +mset +incr +expire +ttl +type +bitop >/dev/null
