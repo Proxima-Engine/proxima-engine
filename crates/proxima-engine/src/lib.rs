@@ -29,3 +29,6 @@ pub mod redis_gateway;
 
 pub mod sqlite_tenant;
 pub mod oracle_tenant;
+
+pub mod dynamodb_tenant;
+pub mod cassandra_tenant;
