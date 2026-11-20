@@ -42,6 +42,10 @@ The Proxima Engine documentation covers the Rust data plane, database protocol g
 - [Verification](VERIFICATION.md) — automated tests, PostgreSQL integration, MySQL and MariaDB CI, and evidence verification.
 - [Engineering validation evidence](../evidence/engineering-validation-2026-11-09.md) — recorded validation outputs.
 
+## Multi-database Cloud architecture
+
+- [Database gateways in Agata Proxima Cloud](CLOUD_CONTROL_PLANE.md) — current PostgreSQL-oriented hosted contract, the current local MySQL/MariaDB Engine boundary, and the staged architecture for engine-aware database targets, gateway nodes, tenant bindings, policies, deployment and verification.
+
 ## Security and hosted product
 
 - [Security architecture](SECURITY.md) — implemented controls and required runtime configuration.
