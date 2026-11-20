@@ -42,7 +42,7 @@ export PROXIMA_REDIS_TLS_KEY_FILE="$tmp/tls/gateway.key"
 export PROXIMA_REDIS_IDENTITY_REGISTRY="$tmp/identities.json"
 "$root/target/debug/proxima-redis-gateway" > "$tmp/gateway.log" 2>&1 & gateway_pid=$!
 for _ in $(seq 1 40); do redis-cli --tls --insecure -h 127.0.0.1 -p 6380 --user client_a -a client-a PING 2>/dev/null | grep -q PONG && break; sleep 1; done
-client(){ local user="$1" pass="$2"; shift 2; redis-cli --raw --tls --insecure -h 127.0.0.1 -p 6380 --user "$user" -a "$pass" "$@"; }
+client(){ local user="$1" pass="$2"; shift 2; redis-cli --raw --tls --cacert "$tmp/tls/ca.crt" -h 127.0.0.1 -p 6380 --user "$user" -a "$pass" "$@"; }
 [[ "$(client client_a client-a SET shared alpha)" == "OK" ]]
 [[ "$(client client_b client-b SET shared beta)" == "OK" ]]
 [[ "$(client client_a client-a GET shared)" == "alpha" ]]
