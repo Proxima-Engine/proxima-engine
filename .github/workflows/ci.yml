@@ -116,7 +116,14 @@ jobs:
       - name: Build MongoDB wire gateway
         run: cargo build -p proxima-engine --bin proxima-mongodb-gateway
       - name: Install database clients for acceptance tests
-        run: sudo apt-get update && sudo apt-get install -y postgresql-client default-mysql-client netcat-openbsd redis-tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client default-mysql-client netcat-openbsd redis-tools curl gnupg
+          sudo mkdir -p /etc/apt/keyrings
+          curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor | sudo tee /etc/apt/keyrings/microsoft.gpg >/dev/null
+          echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/microsoft.gpg] https://packages.microsoft.com/ubuntu/24.04/prod noble main" | sudo tee /etc/apt/sources.list.d/mssql-release.list
+          sudo apt-get update
+          sudo ACCEPT_EULA=Y apt-get install -y mssql-tools18 unixodbc-dev
       - name: Verify MySQL 8 and MariaDB tenant isolation
         env:
           MYSQL_ROOT_PASSWORD: proxima-mysql-ci
