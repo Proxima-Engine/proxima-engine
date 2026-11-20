@@ -28,12 +28,12 @@ let tenant_database_user = tenant.connect_user();
 
 ## Isolation properties
 
-Each tenant has a distinct Oracle schema owner and authentication identity. Without explicit object grants, Tenant A cannot select from Tenant B's schema. Changing CURRENT_SCHEMA changes name resolution only; it does not grant privileges. Tenant accounts cannot assume DBA or another tenant's identity. The profile does not grant SELECT ANY TABLE, INSERT ANY TABLE, or other cross-schema ANY privileges.
+Each tenant has a distinct Oracle schema owner and authentication identity. Tenant accounts receive no explicit object grants, no DBA role, and no cross-schema ANY privileges. Changing CURRENT_SCHEMA changes name resolution only; it does not grant privileges. The real-database acceptance test verifies that a tenant query does not return another tenant's marker data, that no ANY-table privileges or cross-schema object grants are present, and that DBA role activation is rejected. The test deliberately checks data non-disclosure rather than treating an empty cross-schema SELECT result as proof that the SQL statement itself was rejected.
 
 This is schema-per-tenant isolation inside one Oracle database/PDB. It is not database-per-tenant or PDB-per-tenant isolation. Customers needing stronger administrative or recovery boundaries can deploy separate PDBs or Oracle databases per tenant.
 
 ## Verification
 
-Run `bash scripts/test-oracle-tenant-isolation-ci.sh` with Docker available and `ORACLE_PASSWORD` set. The script starts a disposable Oracle Free 23 container, provisions two independent schema owners, verifies tenant-local create/read operations, and asserts that cross-schema reads and DBA role activation are denied. The script removes its disposable container on exit.
+Run `bash scripts/test-oracle-tenant-isolation-ci.sh` with Docker available and `ORACLE_PASSWORD` set. The script starts a disposable Oracle Free 23 container, provisions two independent schema owners, verifies tenant-local create/read operations, checks that cross-schema queries do not return another tenant's data, inspects effective grants, and asserts that DBA role activation is denied. The script removes its disposable container on exit.
 
 The Rust unit tests validate identifier injection rejection, derived usernames, least-privilege DDL and password quoting. CI runs the Rust tests and the real Oracle acceptance script.
