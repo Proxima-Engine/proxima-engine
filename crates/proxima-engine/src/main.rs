@@ -159,6 +159,85 @@ async fn deliver_pending_attestations(
         }
     }
 }
+fn runtime_capability_report() -> (Vec<String>, serde_json::Value, Option<String>) {
+    let executable = std::env::current_exe().ok();
+    let directory = executable.as_ref().and_then(|path| path.parent());
+    let has_gateway = |name: &str| {
+        directory.is_some_and(|directory| {
+            directory.join(format!("{}{}", name, std::env::consts::EXE_SUFFIX)).is_file()
+        })
+    };
+
+    let mysql_gateway = has_gateway("proxima-mysql-gateway");
+    let mongodb_gateway = has_gateway("proxima-mongodb-gateway");
+    let redis_gateway = has_gateway("proxima-redis-gateway");
+
+    let mut provider_keys = vec!["cockroachdb".to_owned(), "postgresql".to_owned()];
+    if mysql_gateway {
+        provider_keys.push("mariadb".to_owned());
+        provider_keys.push("mysql".to_owned());
+    }
+    if mongodb_gateway {
+        provider_keys.push("mongodb".to_owned());
+    }
+    provider_keys.sort();
+
+    let capabilities = serde_json::json!({
+        "engine_version": env!("CARGO_PKG_VERSION"),
+        "protocols": {
+            "postgresql_wire": true,
+            "mysql_wire": mysql_gateway,
+            "mongodb_op_msg": mongodb_gateway,
+            "redis_resp2": redis_gateway
+        },
+        "gateway_binaries": {
+            "proxima-engine": true,
+            "proxima-mysql-gateway": mysql_gateway,
+            "proxima-mongodb-gateway": mongodb_gateway,
+            "proxima-redis-gateway": redis_gateway
+        },
+        "isolation_profiles": {
+            "postgresql": "roles-and-rls",
+            "cockroachdb": "roles-and-forced-rls",
+            "mysql": if mysql_gateway { "tenant-accounts-and-grants" } else { "unavailable" },
+            "mariadb": if mysql_gateway { "tenant-accounts-and-grants" } else { "unavailable" },
+            "mongodb": if mongodb_gateway { "database-per-tenant-rbac" } else { "unavailable" }
+        }
+    });
+
+    let artifact_digest = executable
+        .and_then(|path| std::fs::read(path).ok())
+        .map(|bytes| format!("sha256:{}", hex::encode(Sha256::digest(bytes))));
+    (provider_keys, capabilities, artifact_digest)
+}
+
+fn sign_node_heartbeat_v2(
+    key: &[u8],
+    node_id: &str,
+    organization_id: &str,
+    timestamp: i64,
+    version: &str,
+    runtime_status: &str,
+    provider_keys: &[String],
+    capabilities: &serde_json::Value,
+    artifact_digest: Option<&str>,
+) -> Result<String, hmac::digest::InvalidLength> {
+    let canonical = format!(
+        "proxima-node-heartbeat-v2\\n{}\\n{}\\n{}\\n{}\\n{}\\n{}\\n{}\\n{}",
+        node_id,
+        organization_id,
+        timestamp,
+        version,
+        runtime_status,
+        provider_keys.join(","),
+        capabilities,
+        artifact_digest.unwrap_or("")
+    );
+    let mut mac = hmac::Hmac::<Sha256>::new_from_slice(key)?;
+    mac.update(canonical.as_bytes());
+    Ok(hex::encode(mac.finalize().into_bytes()))
+}
+
 fn sign_node_heartbeat(
     key: &[u8],
     node_id: &str,
@@ -584,6 +663,7 @@ async fn main() -> io::Result<()> {
         std::env::var("PROXIMA_ORGANIZATION_ID").ok(),
         std::env::var("PROXIMA_NODE_SIGNING_KEY_HEX").ok(),
     );
+    let (provider_keys, capabilities, artifact_digest) = runtime_capability_report();
     if let (Some(url), (Some(node_id), Some(organization_id), Some(key_hex))) =
         (heartbeat_url, heartbeat_identity)
     {
@@ -604,13 +684,16 @@ async fn main() -> io::Result<()> {
                             .unwrap_or_default();
                         let version = env!("CARGO_PKG_VERSION").to_string();
                         let runtime_status = "running";
-                        let signature = match sign_node_heartbeat(
+                        let signature = match sign_node_heartbeat_v2(
                             &signing_key,
                             &node_id,
                             &organization_id,
                             timestamp,
                             &version,
                             runtime_status,
+                            &provider_keys,
+                            &capabilities,
+                            artifact_digest.as_deref(),
                         ) {
                             Ok(signature) => signature,
                             Err(_) => {
@@ -623,6 +706,9 @@ async fn main() -> io::Result<()> {
                             "timestamp": timestamp,
                             "version": version,
                             "runtime_status": runtime_status,
+                            "provider_keys": provider_keys,
+                            "capabilities": capabilities,
+                            "artifact_digest": artifact_digest,
                             "signature": signature
                         });
                         match client.post(&url).json(&payload).send().await {
@@ -1333,6 +1419,26 @@ mod node_heartbeat_signature_tests {
     }
 
     #[test]
+    fn capability_report_is_signed_and_bound_to_node_and_artifact() {
+        let key = [9u8; 32];
+        let providers = vec!["cockroachdb".to_owned(), "postgresql".to_owned()];
+        let capabilities = serde_json::json!({"engine_version":"0.1.0","postgresql_wire":true});
+        let signature = sign_node_heartbeat_v2(
+            &key, "node-a", "org-a", 1_800_000_000, "0.1.0", "running",
+            &providers, &capabilities, Some("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+        ).unwrap();
+        let changed = sign_node_heartbeat_v2(
+            &key, "node-a", "org-a", 1_800_000_000, "0.1.0", "running",
+            &providers, &capabilities, Some("sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+        ).unwrap();
+        let changed_provider = sign_node_heartbeat_v2(
+            &key, "node-a", "org-a", 1_800_000_000, "0.1.0", "running",
+            &["cockroachdb".to_owned()], &capabilities, Some("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+        ).unwrap();
+        assert_ne!(signature, changed);
+        assert_ne!(signature, changed_provider);
+    }
+
     fn heartbeat_signature_changes_when_signed_fields_change() {
         let key = [7u8; 32];
         let baseline = sign_node_heartbeat(
