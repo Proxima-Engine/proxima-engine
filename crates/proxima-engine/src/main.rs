@@ -159,9 +159,10 @@ async fn deliver_pending_attestations(
         }
     }
 }
-fn runtime_capability_report() -> (Vec<String>, serde_json::Value, Option<String>) {
-    let executable = std::env::current_exe().ok();
-    let directory = executable.as_ref().and_then(|path| path.parent());
+fn runtime_capability_report_from(
+    executable: &std::path::Path,
+) -> (Vec<String>, serde_json::Value, Option<String>) {
+    let directory = executable.parent();
     let has_gateway = |name: &str| {
         directory.is_some_and(|directory| {
             directory.join(format!("{}{}", name, std::env::consts::EXE_SUFFIX)).is_file()
@@ -180,8 +181,6 @@ fn runtime_capability_report() -> (Vec<String>, serde_json::Value, Option<String
     if mongodb_gateway {
         provider_keys.push("mongodb".to_owned());
     }
-    // Redis is a separate RESP2 gateway binary, not part of the PostgreSQL
-    // Engine process. Advertise it only when the packaged executable exists.
     if redis_gateway {
         provider_keys.push("redis".to_owned());
     }
@@ -211,10 +210,52 @@ fn runtime_capability_report() -> (Vec<String>, serde_json::Value, Option<String
         }
     });
 
-    let artifact_digest = executable
-        .and_then(|path| std::fs::read(path).ok())
+    let artifact_digest = std::fs::read(executable)
+        .ok()
         .map(|bytes| format!("sha256:{}", hex::encode(Sha256::digest(bytes))));
     (provider_keys, capabilities, artifact_digest)
+}
+
+fn runtime_capability_report() -> (Vec<String>, serde_json::Value, Option<String>) {
+    match std::env::current_exe() {
+        Ok(executable) => runtime_capability_report_from(&executable),
+        Err(_) => (Vec::new(), serde_json::json!({}), None),
+    }
+}
+
+#[cfg(test)]
+mod runtime_capability_report_tests {
+    use super::runtime_capability_report_from;
+    use std::{fs, path::PathBuf};
+
+    #[test]
+    fn redis_is_advertised_only_when_its_gateway_binary_is_packaged() {
+        let directory = std::env::temp_dir().join(format!(
+            "proxima-runtime-capabilities-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&directory);
+        fs::create_dir_all(&directory).unwrap();
+        let engine = directory.join(format!("proxima-engine{}", std::env::consts::EXE_SUFFIX));
+        fs::write(&engine, b"synthetic engine artifact").unwrap();
+
+        let (without_redis, caps_without, digest) = runtime_capability_report_from(&engine);
+        assert!(!without_redis.iter().any(|key| key == "redis"));
+        assert_eq!(caps_without["protocols"]["redis_resp2"], false);
+        assert!(digest.as_deref().is_some_and(|value| value.starts_with("sha256:")));
+
+        let redis = directory.join(format!("proxima-redis-gateway{}", std::env::consts::EXE_SUFFIX));
+        fs::write(&redis, b"synthetic redis gateway artifact").unwrap();
+        let (with_redis, caps_with, _) = runtime_capability_report_from(&engine);
+        assert!(with_redis.windows(2).all(|pair| pair[0] < pair[1]));
+        assert!(with_redis.iter().any(|key| key == "redis"));
+        assert_eq!(caps_with["protocols"]["redis_resp2"], true);
+        assert_eq!(
+            caps_with["isolation_profiles"]["redis"],
+            "resp2-tenant-key-namespace-and-acl"
+        );
+        let _ = fs::remove_dir_all(PathBuf::from(directory));
+    }
 }
 
 fn sign_node_heartbeat_v2(
