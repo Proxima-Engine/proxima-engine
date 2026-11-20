@@ -1,6 +1,6 @@
-# Agata CLI for Proxima Engine
+# Local Engine CLI for Proxima Engine
 
-The public Engine repository includes a Python 3.10+ command-line tool implemented with the Python standard library. It bootstraps local development identity, creates signed tenant test tokens, checks local diagnostics, and reports Engine status.
+The public Engine repository includes a Python 3.10+ local-development command-line tool implemented with the Python standard library. It bootstraps local node identity, creates signed tenant test tokens, checks local diagnostics, and reports the local Engine status. This tool is separate from the Node.js Cloud API CLI distributed from the Agata Proxima website.
 
 Run commands from the repository root:
 
@@ -32,7 +32,7 @@ The `init` command creates `.proxima-dev/dev-config.json` and `.proxima-dev/node
 
 The `.proxima-dev/` directory contains secrets and is ignored by Git. Keep it local and do not publish its contents.
 
-The CLI operates on local development identity and local Engine endpoints. Hosted node registration and account workflows are managed separately by Agata Proxima Cloud.
+The Engine CLI operates only on local development identity and local Engine endpoints. It does not create Cloud organizations, API keys, tenants, policies or hosted nodes. For the separate Node.js Cloud API CLI, see the [downloadable CLI guide](https://agataproxima.com/developers/cli) and [standalone CLI ZIP](https://agataproxima.com/downloads/agata-proxima-cli.zip).
 
 ## Token handling
 

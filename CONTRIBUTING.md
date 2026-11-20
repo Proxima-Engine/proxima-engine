@@ -4,7 +4,7 @@ Thanks for considering a contribution. This repository contains the public Rust 
 
 ## Before you start
 
-- Search [existing issues](https://github.com/Agata-Proxima/proxima-engine/issues) before opening a new one.
+- Search [existing issues](https://github.com/Proxima-Engine/proxima-engine/issues) before opening a new one.
 - For a vulnerability, follow [SECURITY.md](SECURITY.md); do not publish exploit details in a public issue.
 - For meaningful behavior changes, open an issue first so the expected behavior can be agreed.
 

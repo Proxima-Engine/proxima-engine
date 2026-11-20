@@ -16,7 +16,7 @@ Agata Proxima is not responsible for operating, monitoring, securing, or maintai
 
 ## Support and security reports
 
-Community questions, reproducible bugs, and feature requests may be submitted through [GitHub Issues](https://github.com/Agata-Proxima/proxima-engine/issues). Please do not post passwords, private keys, access tokens, customer data, or exploitable vulnerability details in public issues. Follow the [Security Policy](../SECURITY.md) to report potential vulnerabilities privately.
+Community questions, reproducible bugs, and feature requests may be submitted through [GitHub Issues](https://github.com/Proxima-Engine/proxima-engine/issues). Please do not post passwords, private keys, access tokens, customer data, or exploitable vulnerability details in public issues. Follow the [Security Policy](../SECURITY.md) to report potential vulnerabilities privately.
 
 Support for the hosted Agata Proxima service is separate from community support for this open-source repository. See the hosted service's published terms and support channels for any service-specific commitments.
 

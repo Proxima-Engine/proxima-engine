@@ -141,9 +141,11 @@ The recorded [PgBouncer transaction-pooling evidence](../evidence/pgbouncer-tran
 - Set pool size and timeouts with the Engine's connection limit in mind.
 - Route application traffic through the Engine endpoint.
 
-## SDK availability
+## PostgreSQL driver and SDK availability
 
-The repository ships connection recipes for standard PostgreSQL driver packages. Use your application's existing driver with the Engine endpoint; these integrations require no separate Proxima SDK dependency.
+For PostgreSQL database traffic, the Engine speaks the PostgreSQL wire protocol. Keep your application's existing PostgreSQL driver and point it at the Engine endpoint; no separate Proxima database-driver SDK is required.
+
+This is distinct from the Agata Proxima Cloud management API client. The Cloud integration starter kit includes a server-side JavaScript HTTP client for organization-scoped control-plane requests. It is bundled source code, not a published npm SDK. See the [JavaScript client guide](https://agataproxima.com/developers/sdks) and [integration starter kit](https://agataproxima.com/developers/downloads).
 
 ## Integration checklist
 

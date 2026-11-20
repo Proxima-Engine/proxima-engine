@@ -27,10 +27,10 @@ Review the exact commands and observed results in [Tenant isolation](TENANT_ISOL
 
 ## Participate
 
-[Star or follow the Engine](https://github.com/Agata-Proxima/proxima-engine) to track changes. Use [GitHub Issues](https://github.com/Agata-Proxima/proxima-engine/issues) for reproducible bugs, driver compatibility reports, and improvement requests. Read [Contributing](../CONTRIBUTING.md) before submitting a pull request. Report vulnerabilities privately through the repository [Security Policy](../SECURITY.md).
+[Star or follow the Engine](https://github.com/Proxima-Engine/proxima-engine) to track changes. Use [GitHub Issues](https://github.com/Proxima-Engine/proxima-engine/issues) for reproducible bugs, driver compatibility reports, and improvement requests. Read [Contributing](../CONTRIBUTING.md) before submitting a pull request. Report vulnerabilities privately through the repository [Security Policy](../SECURITY.md).
 
 ## Project resources
 
 - Website: https://agataproxima.com
-- Engine: https://github.com/Agata-Proxima/proxima-engine
+- Engine: https://github.com/Proxima-Engine/proxima-engine
 - [Discord community](https://discord.gg/xsYSuDMzg)
