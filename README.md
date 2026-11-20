@@ -6,10 +6,17 @@
 <p align="center"><strong>Database protocol gateways and tenant isolation enforced at the connection boundary.</strong></p>
 <p align="center">
   <a href="https://github.com/Proxima-Engine/proxima-engine/actions/workflows/ci.yml"><img alt="Rust CI" src="https://github.com/Proxima-Engine/proxima-engine/actions/workflows/ci.yml/badge.svg?branch=main"></a>
-  <a href="https://github.com/Proxima-Engine/proxima-engine/actions/workflows/tenant-evidence.yml"><img alt="Tenant evidence" src="https://github.com/Proxima-Engine/proxima-engine/actions/workflows/tenant-evidence.yml/badge.svg?branch=main"></a>
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
 </p>
 <p align="center"><a href="https://agataproxima.com">Website</a> · <a href="docs/README.md">Documentation</a> · <a href="https://github.com/Proxima-Engine/proxima-engine/issues">Issues</a> · <a href="https://discord.gg/xsYSuDMzg">Discord</a></p>
+
+## Watch the PostgreSQL engineering demonstration
+
+The original PostgreSQL walkthrough remains part of the project documentation. It demonstrates tenant-bound PostgreSQL sessions, PgBouncer transaction pooling, deliberate Row-Level Security misconfiguration tests, signed-token validation, and Engine recovery.
+
+**[Watch the PostgreSQL tenant-isolation demonstration](https://github.com/user-attachments/assets/bca488eb-829c-4672-bbe9-b25878e5401c)** · [Read the engineering case study](docs/ENGINEERING_CASE_STUDY.md) · [Review recorded validation evidence](evidence/engineering-validation-2026-11-09.md)
+
+
 
 Proxima Engine is the open-source Rust data plane in Agata Proxima. It provides protocol-aware database gateways, immutable tenant-to-session binding, upstream identity validation, conservative SQL admission, connection controls and repeatable integration tests. It places tenant enforcement between an application and its database—not inside application conventions alone.
 
