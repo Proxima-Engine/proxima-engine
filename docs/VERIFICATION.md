@@ -1,6 +1,6 @@
 # Verification and test guide
 
-Use this guide to run the Engine test suite, exercise tenant isolation across PostgreSQL, MySQL, MariaDB, CockroachDB and MongoDB, verify the Docker image build and PgBouncer transaction-pool separation, inspect runtime endpoints, and validate signed local evidence. Record the exact source commit and toolchain with each result.
+Use this guide to run the Engine test suite, exercise tenant isolation across PostgreSQL, MySQL, MariaDB, CockroachDB, MongoDB, Redis and SQL Server's native database-per-tenant profile, verify the Docker image build and PgBouncer transaction-pool separation, inspect runtime endpoints, and validate signed local evidence. Record the exact source commit and toolchain with each result.
 
 ## Verification workflow
 
@@ -164,3 +164,24 @@ For each verification run, record:
 - Attestation verifier command, trusted key fingerprint, organization/node context, and result.
 
 Never include private keys, passwords, signed tokens, or customer data in published evidence.
+
+## 8. Verify the Redis RESP2 tenant gateway
+
+Build the gateway, then run the real Redis 7.4 TLS acceptance fixture:
+
+    cargo build -p proxima-engine --bin proxima-redis-gateway
+    bash scripts/test-redis-tenant-gateway-ci.sh
+
+The script creates a disposable TLS-enabled Redis server, provisions two upstream ACL users with tenant-specific key patterns, starts the gateway with two client identities, and tests overlapping keys, multi-key rewriting, raw-prefix injection attempts, denied administrative commands, and invalid client credentials. It uses Docker, OpenSSL, redis-cli with TLS support, and host ports 6380 and 6389. The script removes its temporary Redis container on exit.
+
+The gateway currently supports only its documented RESP2 command allowlist. RESP3, transactions, scripting, Pub/Sub, blocking commands, and arbitrary Redis client compatibility are not supported.
+
+## 9. Verify SQL Server native database-per-tenant isolation
+
+The SQL Server profile is a native SQL Server security pattern, not a Proxima TDS proxy. The runner starts and removes a disposable SQL Server 2022 Docker container, binds it to 127.0.0.1:1433, and uses sqlcmd 18:
+
+    bash scripts/test-sqlserver-tenant-isolation-ci.sh
+
+Set MSSQL_SA_PASSWORD to the disposable instance's administrator password. The test creates two dedicated databases and SQL logins, checks tenant-specific CRUD, and verifies that cross-database reads, database switching, schema creation, login impersonation, and invalid credentials are denied. It drops and recreates its named test databases and logins; never run it against production.
+
+The SQL Server profile does not provide Proxima gateway-side authentication, identity routing, shared-database RLS, or policy telemetry. Its tenant boundary is the unique SQL Server login and database assigned by a trusted provisioning process.

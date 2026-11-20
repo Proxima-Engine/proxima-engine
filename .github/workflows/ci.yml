@@ -2,7 +2,7 @@ name: Rust CI
 
 on:
   push:
-    branches: [main, feature/universal-database-gateways, feature/mongodb-enterprise-tenant-isolation, feature/mongodb-cockroachdb-completion]
+    branches: [main, feature/universal-database-gateways, feature/mongodb-enterprise-tenant-isolation, feature/mongodb-cockroachdb-completion, feature/sqlserver-redis-tenant-gateways]
   pull_request:
     branches: [main]
   # One scheduled run per day on the default branch. Keep the schedule
@@ -91,12 +91,18 @@ jobs:
           mkdir -p secrets
           printf 'test-enrollment-token' > secrets/node_enrollment_token
           printf '{"users":[]}' > secrets/mysql-identities.json
+          printf '{"users":[]}' > secrets/redis-identities.json
+          printf 'test-ca' > secrets/redis-upstream-ca.pem
+          printf 'test-cert' > secrets/redis-gateway-cert.pem
+          printf 'test-key' > secrets/redis-gateway-key.pem
           cat > .env <<'EOF'
           PROXIMA_NODE_ID=00000000-0000-4000-8000-000000000001
           PROXIMA_NODE_ENROLLMENT_URL=https://api.agataproxima.com/api/v1/nodes/enroll
           PROXIMA_UPSTREAM_ADDR=127.0.0.1:5432
           PROXIMA_LISTEN_ADDR=0.0.0.0:6432
           PROXIMA_ENVIRONMENT=production
+          PROXIMA_REDIS_UPSTREAM_ADDR=redis:6379
+          PROXIMA_REDIS_UPSTREAM_TLS_SERVER_NAME=redis
           EOF
           docker compose -f compose.customer.yaml config --quiet
       - name: Run engine tests
@@ -107,8 +113,17 @@ jobs:
         run: cargo build -p proxima-engine --bin proxima-mysql-gateway
       - name: Build MongoDB wire gateway
         run: cargo build -p proxima-engine --bin proxima-mongodb-gateway
+      - name: Build Redis RESP2 gateway
+        run: cargo build -p proxima-engine --bin proxima-redis-gateway
       - name: Install database clients for acceptance tests
-        run: sudo apt-get update && sudo apt-get install -y postgresql-client default-mysql-client netcat-openbsd
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client default-mysql-client netcat-openbsd redis-tools curl gnupg
+          sudo mkdir -p /etc/apt/keyrings
+          curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor | sudo tee /etc/apt/keyrings/microsoft.gpg >/dev/null
+          echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/microsoft.gpg] https://packages.microsoft.com/ubuntu/24.04/prod noble main" | sudo tee /etc/apt/sources.list.d/mssql-release.list
+          sudo apt-get update
+          sudo ACCEPT_EULA=Y apt-get install -y mssql-tools18 unixodbc-dev
       - name: Verify MySQL 8 and MariaDB tenant isolation
         env:
           MYSQL_ROOT_PASSWORD: proxima-mysql-ci
@@ -118,6 +133,12 @@ jobs:
         run: bash scripts/test-two-tenants.sh
       - name: Verify two-tenant isolation against CockroachDB 25.2
         run: bash scripts/test-cockroachdb-tenant-isolation-ci.sh
+      - name: Verify SQL Server native tenant database isolation
+        env:
+          MSSQL_SA_PASSWORD: CI-only-NotASecret-2026!
+        run: bash scripts/test-sqlserver-tenant-isolation-ci.sh
+      - name: Verify Redis RESP2 gateway tenant isolation
+        run: bash scripts/test-redis-tenant-gateway-ci.sh
       - name: Verify MongoDB tenant database isolation
         env:
           PROXIMA_MONGODB_TEST_URI: mongodb://root:proxima-mongo-ci@127.0.0.1:27017/admin?authSource=admin&directConnection=true
@@ -125,7 +146,7 @@ jobs:
       - name: Build container image
         run: docker build -t proxima-engine:ci .
       - name: Verify packaged gateway executables
-        run: docker run --rm --entrypoint /bin/sh proxima-engine:ci -c 'test -x /usr/local/bin/proxima-engine && test -x /usr/local/bin/proxima-mysql-gateway && test -x /usr/local/bin/proxima-mongodb-gateway'
+        run: docker run --rm --entrypoint /bin/sh proxima-engine:ci -c 'test -x /usr/local/bin/proxima-engine && test -x /usr/local/bin/proxima-mysql-gateway && test -x /usr/local/bin/proxima-mongodb-gateway && test -x /usr/local/bin/proxima-redis-gateway'
       - name: Verify PgBouncer tenant-pool isolation
         run: bash scripts/test-pgbouncer-pooling.sh
 

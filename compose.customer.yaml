@@ -56,11 +56,49 @@ services:
     tmpfs:
       - /tmp:size=16m,noexec,nosuid
 
+  redis-gateway:
+    profiles: ["redis"]
+    image: ghcr.io/proxima-engine/proxima-engine:${PROXIMA_ENGINE_VERSION:-latest}
+    build:
+      context: .
+      dockerfile: Dockerfile
+    entrypoint: ["/usr/local/bin/proxima-redis-gateway"]
+    restart: unless-stopped
+    environment:
+      PROXIMA_REDIS_IDENTITY_REGISTRY: /run/secrets/redis_identity_registry
+      PROXIMA_REDIS_LISTEN_ADDR: 0.0.0.0:6380
+      PROXIMA_REDIS_UPSTREAM_ADDR: ${PROXIMA_REDIS_UPSTREAM_ADDR:?Set PROXIMA_REDIS_UPSTREAM_ADDR}
+      PROXIMA_REDIS_UPSTREAM_TLS_SERVER_NAME: ${PROXIMA_REDIS_UPSTREAM_TLS_SERVER_NAME:?Set PROXIMA_REDIS_UPSTREAM_TLS_SERVER_NAME}
+      PROXIMA_REDIS_UPSTREAM_TLS_CA_FILE: /run/secrets/redis_upstream_ca
+      PROXIMA_REDIS_TLS_CERT_FILE: /run/secrets/redis_gateway_cert
+      PROXIMA_REDIS_TLS_KEY_FILE: /run/secrets/redis_gateway_key
+      PROXIMA_REDIS_MAX_CONNECTIONS: ${PROXIMA_REDIS_MAX_CONNECTIONS:-128}
+    ports:
+      - "${PROXIMA_REDIS_BIND_ADDRESS:-127.0.0.1}:6380:6380"
+    secrets:
+      - redis_identity_registry
+      - redis_upstream_ca
+      - redis_gateway_cert
+      - redis_gateway_key
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,noexec,nosuid
+
 secrets:
   mysql_identity_registry:
     file: ./secrets/mysql-identities.json
   node_enrollment_token:
     file: ./secrets/node_enrollment_token
+  redis_identity_registry:
+    file: ./secrets/redis-identities.json
+  redis_upstream_ca:
+    file: ./secrets/redis-upstream-ca.pem
+  redis_gateway_cert:
+    file: ./secrets/redis-gateway-cert.pem
+  redis_gateway_key:
+    file: ./secrets/redis-gateway-key.pem
 
 networks:
   default:
