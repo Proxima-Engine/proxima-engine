@@ -617,7 +617,31 @@ async fn pull_and_stage_database_config_once() -> Result<(), Box<dyn std::error:
     let mut staged = Vec::new();
     let records = bundle.get("assignments").and_then(serde_json::Value::as_array)
         .ok_or("configuration bundle assignments must be an array")?;
+    if records.len() > 1 {
+        return Err("this Engine node supports one active upstream target per gateway process".into());
+    }
+    let executable = env::current_exe()?;
+    let executable_dir = executable.parent().ok_or("Engine executable directory is unavailable")?;
     for record in records {
+        let gateway_runtime = record.get("gateway_runtime").and_then(serde_json::Value::as_str)
+            .ok_or("gateway runtime is missing")?;
+        let runtime_available = match gateway_runtime {
+            "proxima-engine" => true,
+            "proxima-mysql-gateway" => executable_dir.join(format!("proxima-mysql-gateway{}", env::consts::EXE_SUFFIX)).is_file(),
+            "proxima-mongodb-gateway" => executable_dir.join(format!("proxima-mongodb-gateway{}", env::consts::EXE_SUFFIX)).is_file(),
+            "proxima-redis-gateway" => executable_dir.join(format!("proxima-redis-gateway{}", env::consts::EXE_SUFFIX)).is_file(),
+            _ => false,
+        };
+        if !runtime_available {
+            return Err(format!("assigned gateway runtime is not packaged: {gateway_runtime}").into());
+        }
+        let target_id = record.get("database_target_id").and_then(serde_json::Value::as_str)
+            .ok_or("database target ID missing")?;
+        let config_revision = record.get("config_revision").and_then(serde_json::Value::as_i64)
+            .ok_or("configuration revision missing")?;
+        let credential_revision = record.get("credential_revision").and_then(serde_json::Value::as_i64)
+            .ok_or("credential revision missing")?;
+        let expected_aad = format!("{node_id}\\n{target_id}\\n{config_revision}\\n{credential_revision}");
         let envelope = record.get("credential_envelope").ok_or("credential envelope missing")?;
         if envelope.get("algorithm").and_then(serde_json::Value::as_str) != Some("AES-256-GCM") {
             return Err("unsupported database credential envelope algorithm".into());
@@ -627,6 +651,9 @@ async fn pull_and_stage_database_config_once() -> Result<(), Box<dyn std::error:
         let nonce_bytes: [u8; 12] = hex::decode(envelope.get("nonce").and_then(serde_json::Value::as_str)
             .ok_or("credential envelope nonce missing")?)?.try_into().map_err(|_| "invalid credential envelope nonce")?;
         let aad = envelope.get("aad").and_then(serde_json::Value::as_str).ok_or("credential envelope AAD missing")?;
+        if aad != expected_aad {
+            return Err("credential envelope associated data does not match the assigned target and revisions".into());
+        }
         let mut plaintext = ciphertext;
         let credentials = decryptor.open_in_place(
             ring::aead::Nonce::assume_unique_for_key(nonce_bytes),
