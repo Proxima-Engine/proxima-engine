@@ -2,7 +2,7 @@ use crate::redis_protocol::{encode_command, parse_command, rewrite_keys, MAX_FRA
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName};
 use rustls::{ClientConfig, RootCertStore, ServerConfig};
 use sha2::{Digest, Sha256};
-use std::{collections::HashMap, fs::File, io::{self, BufReader}, net::SocketAddr, path::Path, sync::Arc, time::Duration};
+use std::{collections::HashMap, fs::File, future::Future, io::{self, BufReader}, net::SocketAddr, path::Path, pin::Pin, sync::Arc, time::Duration};
 use tokio::{io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt}, net::{TcpListener, TcpStream}, sync::Semaphore, time::timeout};
 use tokio_rustls::{TlsAcceptor, TlsConnector};
 use tracing::{info, warn};
@@ -115,7 +115,7 @@ async fn read_command<R:AsyncRead+Unpin>(r:&mut R,buf:&mut Vec<u8>)->io::Result<
  }
 }
 async fn line<R:AsyncRead+Unpin>(r:&mut R)->io::Result<Vec<u8>>{let mut v=Vec::new();loop{let b=r.read_u8().await?;v.push(b);if v.len()>128{return Err(invalid("RESP line too long"));}if v.ends_with(b"\r\n"){v.truncate(v.len()-2);return Ok(v);}}}
-async fn read_resp_frame<R:AsyncRead+Unpin>(r:&mut R,depth:usize)->io::Result<Vec<u8>>{
+fn read_resp_frame<'a,R:AsyncRead+Unpin+Send>(r:&'a mut R,depth:usize)->Pin<Box<dyn Future<Output=io::Result<Vec<u8>>>+Send+'a>>{Box::pin(async move {
  if depth>32{return Err(invalid("RESP nesting limit exceeded"));}
  let ty=r.read_u8().await?;let mut out=vec![ty];
  match ty{
@@ -125,8 +125,8 @@ async fn read_resp_frame<R:AsyncRead+Unpin>(r:&mut R,depth:usize)->io::Result<Ve
   _=>return Err(invalid("upstream returned unsupported RESP3 or invalid frame")),
  }
  if out.len()>MAX_FRAME_BYTES{return Err(invalid("RESP reply too large"));}Ok(out)
-}
-async fn write_error<W:AsyncWrite+Unpin>(w:&mut W,msg:&str)->io::Result<()>{let safe=msg.replace(['\r','\n']," ");w.write_all(format!("-ERR {safe}\r\n").as_bytes()).await?;w.flush().await}
+})}
+async fn write_error<W:AsyncWrite+Unpin>(w:&mut W,msg:&str)->io::Result<()>{let safe=msg.replace('\r'," ").replace('\n'," ");w.write_all(format!("-ERR {safe}\r\n").as_bytes()).await?;w.flush().await}
 fn server_tls(cert:&str,key:&str)->io::Result<ServerConfig>{
  let certs=rustls_pemfile::certs(&mut BufReader::new(File::open(cert)?)).collect::<Result<Vec<CertificateDer<'static>>,_>>().map_err(invalid)?;
  let key=rustls_pemfile::private_key(&mut BufReader::new(File::open(key)?)).map_err(invalid)?.ok_or_else(||invalid("TLS private key missing"))?;
