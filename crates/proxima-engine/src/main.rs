@@ -180,6 +180,11 @@ fn runtime_capability_report() -> (Vec<String>, serde_json::Value, Option<String
     if mongodb_gateway {
         provider_keys.push("mongodb".to_owned());
     }
+    // Redis is a separate RESP2 gateway binary, not part of the PostgreSQL
+    // Engine process. Advertise it only when the packaged executable exists.
+    if redis_gateway {
+        provider_keys.push("redis".to_owned());
+    }
     provider_keys.sort();
 
     let capabilities = serde_json::json!({
@@ -201,7 +206,8 @@ fn runtime_capability_report() -> (Vec<String>, serde_json::Value, Option<String
             "cockroachdb": "roles-and-forced-rls",
             "mysql": if mysql_gateway { "tenant-accounts-and-grants" } else { "unavailable" },
             "mariadb": if mysql_gateway { "tenant-accounts-and-grants" } else { "unavailable" },
-            "mongodb": if mongodb_gateway { "database-per-tenant-rbac" } else { "unavailable" }
+            "mongodb": if mongodb_gateway { "database-per-tenant-rbac" } else { "unavailable" },
+            "redis": if redis_gateway { "resp2-tenant-key-namespace-and-acl" } else { "unavailable" }
         }
     });
 
