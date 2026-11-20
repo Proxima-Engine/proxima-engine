@@ -13,6 +13,7 @@ printf 'subjectAltName=DNS:localhost,IP:127.0.0.1\nextendedKeyUsage=serverAuth\n
 openssl x509 -req -in "$tmp/tls/server.csr" -CA "$tmp/tls/ca.crt" -CAkey "$tmp/tls/ca.key" -CAcreateserial -out "$tmp/tls/server.crt" -days 1 -extfile "$tmp/tls/ext.cnf" >/dev/null 2>&1
 cp "$tmp/tls/server.crt" "$tmp/tls/gateway.crt"; cp "$tmp/tls/server.key" "$tmp/tls/gateway.key"
 openssl req -newkey rsa:2048 -nodes -keyout "$tmp/tls/gateway.key" -out "$tmp/tls/gateway.csr" -subj "/CN=localhost" >/dev/null 2>&1
+chmod 644 "$tmp/tls/server.key" "$tmp/tls/server.crt" "$tmp/tls/ca.crt"
 openssl x509 -req -in "$tmp/tls/gateway.csr" -CA "$tmp/tls/ca.crt" -CAkey "$tmp/tls/ca.key" -CAcreateserial -out "$tmp/tls/gateway.crt" -days 1 -extfile "$tmp/tls/ext.cnf" >/dev/null 2>&1
 cat > "$tmp/tls/redis.conf" <<'CONF'
 port 0
@@ -47,6 +48,16 @@ client(){ local user="$1" pass="$2"; shift 2; redis-cli --raw --tls --insecure -
 [[ "$(client client_a client-a GET shared)" == "alpha" ]]
 [[ "$(client client_b client-b GET shared)" == "beta" ]]
 [[ "$(client client_a client-a MGET shared)" == "alpha" ]]
+[[ "$(client client_a client-a MSET first one second two)" == "OK" ]]
+[[ "$(client client_a client-a MGET first second)" == 
+[[ "$(client client_a client-a BITOP AND combined shared shared)" == "5" ]]
+denied="$(client client_a client-a FLUSHALL 2>/dev/null || true)"
+[[ "$denied" == ERR* ]] || { echo "FLUSHALL was not explicitly denied: $denied" >&2; exit 1; }
+bad_auth="$(client client_a wrong-password GET shared 2>/dev/null || true)"
+[[ "$bad_auth" == *"ERR"* ]] || { echo "invalid gateway credentials were not rejected" >&2; exit 1; }
+echo "Redis TLS gateway two-tenant acceptance: PASS"
+one\ntwo' ]]
+[[ -z "$(client client_a client-a GET 'proxima:{3e23e8160039594a33894f6564e1b134}:shared')" ]]
 [[ "$(client client_a client-a BITOP AND combined shared shared)" == "5" ]]
 if client client_a client-a FLUSHALL >/dev/null 2>&1; then echo "FLUSHALL unexpectedly succeeded" >&2; exit 1; fi
 if client client_a wrong-password GET shared >/dev/null 2>&1; then echo "invalid gateway credentials unexpectedly succeeded" >&2; exit 1; fi
