@@ -8,6 +8,7 @@ METRICS_ADDR="127.0.0.1:19091"
 COCKROACH_ADDR="127.0.0.1:26257"
 DEV_DIR="$(mktemp -d)"
 CERT_DIR="$(mktemp -d)"
+DOCKER_USER="$(id -u):$(id -g)"
 
 cleanup() {
   if [[ -n "${engine_pid:-}" ]]; then
@@ -22,14 +23,14 @@ trap cleanup EXIT
 docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
 
 # Generate short-lived CA, node, and root client certificates for a secure test cluster.
-docker run --rm -v "$CERT_DIR:/certs" cockroachdb/cockroach:v25.2.0 \
+docker run --rm --user "$DOCKER_USER" -v "$CERT_DIR:/certs" cockroachdb/cockroach:v25.2.0 \
   cert create-ca --certs-dir=/certs --ca-key=/certs/ca.key
-docker run --rm -v "$CERT_DIR:/certs" cockroachdb/cockroach:v25.2.0 \
+docker run --rm --user "$DOCKER_USER" -v "$CERT_DIR:/certs" cockroachdb/cockroach:v25.2.0 \
   cert create-node localhost 127.0.0.1 --certs-dir=/certs --ca-key=/certs/ca.key
-docker run --rm -v "$CERT_DIR:/certs" cockroachdb/cockroach:v25.2.0 \
+docker run --rm --user "$DOCKER_USER" -v "$CERT_DIR:/certs" cockroachdb/cockroach:v25.2.0 \
   cert create-client root --certs-dir=/certs --ca-key=/certs/ca.key
 
-docker run --detach --name "$CONTAINER" --network host -v "$CERT_DIR:/certs" \
+docker run --detach --name "$CONTAINER" --network host --user "$DOCKER_USER" -v "$CERT_DIR:/certs" \
   cockroachdb/cockroach:v25.2.0 \
   start-single-node --certs-dir=/certs --listen-addr=127.0.0.1:26257 --http-addr=127.0.0.1:8080 >/dev/null
 
