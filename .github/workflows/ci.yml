@@ -2,9 +2,13 @@ name: Rust CI
 
 on:
   push:
-    branches: [main, feature/universal-database-gateways, feature/mongodb-enterprise-tenant-isolation]
+    branches: [main, feature/universal-database-gateways, feature/mongodb-enterprise-tenant-isolation, feature/mongodb-cockroachdb-completion]
   pull_request:
     branches: [main]
+  # One scheduled run per day on the default branch. Keep the schedule
+  # lightweight by reusing the same integration matrix as push/PR CI.
+  schedule:
+    - cron: "23 3 * * *"
 
 permissions:
   contents: read
