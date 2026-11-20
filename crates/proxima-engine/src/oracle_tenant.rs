@@ -54,8 +54,8 @@ mod tests {
     }
     #[test]
     fn rejects_identifier_injection_and_weak_password() {
-        assert_eq!(OracleTenant::new("A; DROP USER X", "a-long-random-test-password"), Err(OracleTenantError::InvalidTenantId));
-        assert_eq!(OracleTenant::new("tenant", "short"), Err(OracleTenantError::WeakPassword));
+        assert!(matches!(OracleTenant::new("A; DROP USER X", "a-long-random-test-password"), Err(OracleTenantError::InvalidTenantId)));
+        assert!(matches!(OracleTenant::new("tenant", "short"), Err(OracleTenantError::WeakPassword)));
     }
     #[test]
     fn escapes_quoted_password_characters() {
