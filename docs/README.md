@@ -11,7 +11,9 @@ The Proxima Engine documentation covers the Rust data plane, database protocol g
 - **[MariaDB documentation](MARIADB.md)** — provision MariaDB tenant databases, configure client identities, connect clients and run the MariaDB 11.4 integration suite.
 - **[CockroachDB compatibility](COCKROACHDB_COMPATIBILITY.md)** — CockroachDB 25.2+ using the PostgreSQL wire gateway, native RLS, tenant roles and transaction retry behavior.
 - **[MongoDB tenant isolation](MONGODB_TENANT_ISOLATION.md)** — restricted MongoDB 8 OP_MSG gateway, SCRAM-SHA-256, TLS, tenant database binding and feature limitations.
-- [SQL Server native tenant isolation](SQLSERVER_NATIVE_TENANCY.md) — dedicated database and least-privilege login per tenant; explicitly not a TDS proxy.\n- [Redis tenant gateway](REDIS_TENANT_GATEWAY.md) — restricted RESP2 TLS gateway, client identity binding, key namespace enforcement and Redis ACL configuration.\n- [SQL Server and Redis implementation plan](SQLSERVER_REDIS_IMPLEMENTATION_PLAN.md) — protocol feasibility decisions, security boundaries and acceptance criteria.
+- [SQL Server native tenant isolation](SQLSERVER_NATIVE_TENANCY.md) — dedicated database and least-privilege login per tenant; explicitly not a TDS proxy.
+- [Redis tenant gateway](REDIS_TENANT_GATEWAY.md) — restricted RESP2 TLS gateway, client identity binding, key namespace enforcement and Redis ACL configuration.
+- [SQL Server and Redis implementation plan](SQLSERVER_REDIS_IMPLEMENTATION_PLAN.md) — protocol feasibility decisions, security boundaries and acceptance criteria.
 - [Database production verification system](DATABASE_PRODUCTION_VERIFICATION.md) — target one-command real-database test runner, per-database acceptance suites, evidence reporting and production-confidence levels.
 - [Shared MySQL protocol authentication](MYSQL_GATEWAY_AUTH.md) — verifier formats and authentication behavior.
 - [Architecture](ARCHITECTURE.md) — request lifecycle, tenant identity, role routing and system boundaries.
