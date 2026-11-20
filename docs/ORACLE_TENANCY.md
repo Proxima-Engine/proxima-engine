@@ -34,6 +34,6 @@ This is schema-per-tenant isolation inside one Oracle database/PDB. It is not da
 
 ## Verification
 
-Run `bash scripts/test-oracle-tenant-isolation-ci.sh` with Docker available and `ORACLE_PASSWORD` set. The script starts a disposable Oracle Free 23 container, provisions two independent schema owners, verifies tenant-local create/read operations, checks that cross-schema queries do not return another tenant's data, inspects effective grants, and asserts that DBA role activation is denied. The script removes its disposable container on exit.
+Run `bash scripts/test-oracle-tenant-isolation-ci.sh` with Docker available and `ORACLE_PASSWORD` set. The script starts a disposable Oracle Free 23 container, provisions two independent schema owners, verifies tenant-local create/read operations, checks that cross-schema queries do not return another tenant's data, inspects effective grants, and asserts that the DBA role does not become active. The script removes its disposable container on exit.
 
 The Rust unit tests validate identifier injection rejection, derived usernames, least-privilege DDL and password quoting. CI runs the Rust tests and the real Oracle acceptance script.
