@@ -231,7 +231,7 @@ where
 
         // Establish the real upstream connection before accepting
         // authentication. All later work uses this exact connection.
-        let connection = match tokio::time::timeout(
+        let mut connection = match tokio::time::timeout(
             std::time::Duration::from_secs(UPSTREAM_CONNECT_TIMEOUT_SECS),
             pool.get_connection(),
         )
