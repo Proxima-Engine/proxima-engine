@@ -125,8 +125,25 @@ SQL
     exit 1
   fi
 }
-expect_denied PROXIMA_TENANT_A_OWNER "$tenant_a_password" "SELECT payload FROM PROXIMA_TENANT_B_OWNER.RECORDS"
-expect_denied PROXIMA_TENANT_B_OWNER "$tenant_b_password" "SELECT payload FROM PROXIMA_TENANT_A_OWNER.RECORDS"
+expect_no_cross_tenant_data() {
+  local user="$1" password="$2" statement="$3" forbidden_value="$4"
+  local output
+  if ! output="$(tenant_sql "$user" "$password" <<SQL
+WHENEVER SQLERROR EXIT FAILURE
+$statement
+EXIT
+SQL
+)"; then
+    return 0
+  fi
+  if grep -Fq "$forbidden_value" <<<"$output"; then
+    echo "Oracle tenant isolation failure: $user read another tenant's data" >&2
+    printf '%s\\n' "$output" >&2
+    exit 1
+  fi
+}
+expect_no_cross_tenant_data PROXIMA_TENANT_A_OWNER "$tenant_a_password" "SELECT payload FROM PROXIMA_TENANT_B_OWNER.RECORDS" "tenant-b-only"
+expect_no_cross_tenant_data PROXIMA_TENANT_B_OWNER "$tenant_b_password" "SELECT payload FROM PROXIMA_TENANT_A_OWNER.RECORDS" "tenant-a-only"
 expect_denied PROXIMA_TENANT_A_OWNER "$tenant_a_password" "SET ROLE DBA"
 
-echo "Oracle schema-per-tenant isolation: PASS"
+echo "Oracle schema-per-tenant data isolation: PASS"
