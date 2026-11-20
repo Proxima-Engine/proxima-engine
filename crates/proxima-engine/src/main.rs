@@ -1392,7 +1392,7 @@ mod attestation_ingest_url_tests {
 }
 #[cfg(test)]
 mod node_heartbeat_signature_tests {
-    use super::sign_node_heartbeat;
+    use super::{sign_node_heartbeat, sign_node_heartbeat_v2};
 
     #[test]
     fn heartbeat_signature_is_deterministic_for_the_same_payload() {
