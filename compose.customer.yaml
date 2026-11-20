@@ -34,7 +34,31 @@ services:
     tmpfs:
       - /tmp:size=16m,noexec,nosuid
 
+  mysql-gateway:
+    profiles: ["mysql"]
+    image: ghcr.io/proxima-engine/proxima-engine:${PROXIMA_ENGINE_VERSION:-latest}
+    build:
+      context: .
+      dockerfile: Dockerfile
+    entrypoint: ["/usr/local/bin/proxima-mysql-gateway"]
+    restart: unless-stopped
+    environment:
+      PROXIMA_MYSQL_IDENTITY_REGISTRY: /run/secrets/mysql_identity_registry
+      PROXIMA_MYSQL_LISTEN_ADDR: 0.0.0.0:3307
+      RUST_LOG: ${PROXIMA_MYSQL_RUST_LOG:-info}
+    ports:
+      - "${PROXIMA_MYSQL_BIND_ADDRESS:-127.0.0.1}:3307:3307"
+    secrets:
+      - mysql_identity_registry
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,noexec,nosuid
+
 secrets:
+  mysql_identity_registry:
+    file: ./secrets/mysql-identities.json
   node_enrollment_token:
     file: ./secrets/node_enrollment_token
 

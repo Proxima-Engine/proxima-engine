@@ -258,3 +258,32 @@ These tests are ignored by default because they require live database services a
 ## CI compatibility target
 
 The repository CI workflow currently provisions mysql:8.0. The integration suite validates tenant-local reads, cross-tenant read/write denial, database-switch denial, prepared statements and invalid-password rejection against that service. This is the tested CI target; rerun the suite before claiming compatibility with additional server versions.
+
+
+## 10. Run the gateway from the customer container image
+
+The customer image includes the PostgreSQL Engine, MySQL-compatible gateway, and MongoDB gateway executables. The default Compose profile starts only the PostgreSQL Engine. Enable the optional `mysql` profile when deploying a MySQL or MariaDB target.
+
+Create the private registry file at `secrets/mysql-identities.json` using the schema from section 6. Keep the file outside source control and restrict filesystem permissions. The file contains client password verifiers and tenant-specific upstream URLs, so treat it as a deployment secret.
+
+Start the MySQL gateway:
+
+~~~bash
+docker compose -f compose.customer.yaml --profile mysql up -d mysql-gateway
+~~~
+
+PowerShell:
+
+~~~powershell
+docker compose -f compose.customer.yaml --profile mysql up -d mysql-gateway
+~~~
+
+The gateway listens on container port 3307 and is published on host loopback port 3307 by default. To bind it to a private interface, set `PROXIMA_MYSQL_BIND_ADDRESS` to that interface's address and protect it with network policy. Do not bind the listener to a public interface without a reviewed TLS and network-access design.
+
+Inspect its logs:
+
+~~~bash
+docker compose -f compose.customer.yaml logs --tail 100 mysql-gateway
+~~~
+
+The MySQL gateway is a separate runtime from the PostgreSQL Engine service. It does not share the PostgreSQL listener or automatically inherit PostgreSQL tenant configuration. The identity registry and upstream account grants must be configured for the MySQL or MariaDB target. Cloud enrollment and remote configuration delivery for this gateway are separate Control Plane integration work.
