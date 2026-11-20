@@ -25,11 +25,11 @@ Proxima Engine is the open-source Rust data plane in Agata Proxima. It provides 
 | Database | Implementation | Verification |
 |---|---|---|
 | PostgreSQL | PostgreSQL wire-protocol Engine | PostgreSQL integration and tenant-isolation tests; PgBouncer transaction-pooling evidence |
-| MySQL 8 | MySQL-compatible protocol gateway | Real MySQL 8 integration test in CI: tenant separation, prepared statements and invalid-password rejection |
+| MySQL | MySQL-compatible protocol gateway | Real MySQL integration test in CI: tenant separation, prepared statements and invalid-password rejection |
 | MariaDB | Same MySQL-compatible protocol gateway | Real MariaDB integration test in CI: tenant separation, prepared statements and invalid-password rejection |
 | MongoDB | Separate development workstream | Policy and RBAC foundations; not part of the supported gateway matrix |
 
-MySQL 8 and MariaDB are independently exercised by the integration workflow. The MySQL gateway has its own listener, identity registry and tenant-specific upstream connection path; it is not enabled by the PostgreSQL Compose profile.
+MySQL and MariaDB are independently exercised by the integration workflow. The MySQL gateway has its own listener, identity registry and tenant-specific upstream connection path; it is not enabled by the PostgreSQL Compose profile.
 
 **Scope:** PostgreSQL and MySQL-compatible gateways are separate protocol implementations. Their configuration, authentication, database controls and integration tests are database-specific. One database's test results do not verify another database.
 
@@ -112,7 +112,7 @@ docker compose -f compose.dev.yaml down -v
 
 Continue with [Tenant isolation](docs/TENANT_ISOLATION.md) for tenant roles, signed context, PostgreSQL grants and Row-Level Security.
 
-## MySQL 8 and MariaDB gateway
+## MySQL and MariaDB gatewayss
 
 The MySQL-compatible gateway is a separate executable. Its default listener is 127.0.0.1:3307. It loads client identities from a JSON registry. Each authenticated client is bound to one immutable tenant principal and one dedicated upstream connection. Before accepting the session, the gateway validates that the live upstream database matches the registry assignment.
 
@@ -124,7 +124,7 @@ flowchart TD
   B --> S["Bind immutable session"]
   S --> Q["SQL AST admission"]
   Q --> U["Tenant-specific upstream"]
-  U --> DB[("MySQL 8 or MariaDB")]
+  U --> DB[("MySQL or MariaDB")]
 ~~~
 
 The initial admission policy accepts one parsed statement at a time: SELECT, INSERT, UPDATE or DELETE. It rejects unsupported statements, multi-statements, database switching, cross-database qualified relations, system-schema references and selected privileged or resource-intensive functions. Database grants remain the authorization boundary.
@@ -150,7 +150,7 @@ $env:RUST_LOG = "info"
 
 The registry contains client password verifiers and tenant-specific upstream URLs. Keep it outside version control, restrict file permissions and inject it through a secret-management process. Never commit it or package it into a public image.
 
-Follow the complete [MySQL 8 and MariaDB gateway guide](docs/MYSQL_MARIADB.md) for database provisioning, verifier generation, least-privilege grants, registry configuration, client connection examples, TLS and integration verification.
+Follow the complete [MySQL and MariaDB gateways guide](docs/MYSQL_MARIADB.md) for database provisioning, verifier generation, least-privilege grants, registry configuration, client connection examples, TLS and integration verification.
 
 ## Security model
 
@@ -175,14 +175,14 @@ cargo test --workspace --all-targets
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 ~~~
 
-The real MySQL 8 and MariaDB integration suites require disposable database services, client utilities, fixtures and a running gateway. GitHub Actions provisions those dependencies and runs both suites. The ignored test targets are:
+The real MySQL and MariaDB integration suites require disposable database services, client utilities, fixtures and a running gateway. GitHub Actions provisions MySQL 8.0 and MariaDB 11.4 separately and runs both suites. The ignored test targets are:
 
 ~~~bash
 cargo test -p proxima-engine --test mysql_gateway_integration -- --ignored --test-threads=1
 cargo test -p proxima-engine --test mariadb_gateway_integration -- --ignored --test-threads=1
 ~~~
 
-See [MySQL and MariaDB integration verification](docs/MYSQL_MARIADB.md#integration-verification) for the required fixture lifecycle.
+See the [MySQL integration guide](docs/MYSQL.md#integration-verification) and [MariaDB integration guide](docs/MARIADB.md#integration-verification) for their respective fixture lifecycles.
 
 ## Repository map
 
