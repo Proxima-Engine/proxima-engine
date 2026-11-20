@@ -238,6 +238,7 @@ fn sign_node_heartbeat_v2(
     Ok(hex::encode(mac.finalize().into_bytes()))
 }
 
+#[cfg(test)]
 fn sign_node_heartbeat(
     key: &[u8],
     node_id: &str,
