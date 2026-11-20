@@ -7,8 +7,8 @@ The Proxima Engine documentation covers the Rust data plane, database protocol g
 - **[Repository README](../README.md)** — product scope, database gateway matrix, architecture, clone instructions and quickstarts.
 - **[PostgreSQL documentation hub](POSTGRESQL.md)** — complete reference-database guide and navigation for setup, tenant isolation, drivers, deployment and evidence.
 - **[PostgreSQL quickstart](QUICKSTART.md)** — launch PostgreSQL and Proxima Engine, run SQL and inspect health and metrics.
-- **[MySQL gateway](MYSQL.md)** — provision MySQL tenant databases, configure client verifiers, connect clients and run the MySQL 8.0 integration suite.
-- **[MariaDB gateway](MARIADB.md)** — provision MariaDB tenant databases, configure client identities, connect clients and run the MariaDB 11.4 integration suite.
+- **[MySQL documentation](MYSQL.md)** — provision MySQL tenant databases, configure client verifiers, connect clients and run the MySQL 8.0 integration suite.
+- **[MariaDB documentation](MARIADB.md)** — provision MariaDB tenant databases, configure client identities, connect clients and run the MariaDB 11.4 integration suite.
 - [Shared MySQL protocol authentication](MYSQL_GATEWAY_AUTH.md) — verifier formats and authentication behavior.
 - [Architecture](ARCHITECTURE.md) — request lifecycle, tenant identity, role routing and system boundaries.
 - [Tenant isolation](TENANT_ISOLATION.md) — tenant roles, RLS, signed context and positive/negative access tests.
