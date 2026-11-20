@@ -2,7 +2,7 @@ name: Rust CI
 
 on:
   push:
-    branches: [main, feature/universal-database-gateways, feature/mongodb-enterprise-tenant-isolation, feature/mongodb-cockroachdb-completion, feature/sqlserver-redis-tenant-gateways, feature/sqlite-oracle-native-integrations]
+    branches: [main, feature/universal-database-gateways, feature/mongodb-enterprise-tenant-isolation, feature/mongodb-cockroachdb-completion, feature/sqlserver-redis-tenant-gateways, feature/sqlite-oracle-native-integrations, feature/dynamodb-cassandra-tenant-isolation]
   pull_request:
     branches: [main]
   # One scheduled run per day on the default branch. Keep the schedule
@@ -150,7 +150,7 @@ jobs:
         env:
           ORACLE_PASSWORD: CI-only-Oracle-Password-2026
         run: bash scripts/test-oracle-tenant-isolation-ci.sh
-      - name: Verify MongoDB tenant database isolation
+      - name: Verify Cassandra keyspace-per-tenant isolation\n        run: bash scripts/test-cassandra-tenant-isolation-ci.sh\n      - name: Verify MongoDB tenant database isolation
         env:
           PROXIMA_MONGODB_TEST_URI: mongodb://root:proxima-mongo-ci@127.0.0.1:27017/admin?authSource=admin&directConnection=true
         run: bash scripts/test-mongodb-tenant-isolation-ci.sh
