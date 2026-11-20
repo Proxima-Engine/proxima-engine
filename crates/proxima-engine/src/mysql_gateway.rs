@@ -20,11 +20,13 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::Arc;
 
 use tokio::net::TcpListener;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Semaphore};
 use tokio::task;
 use uuid::Uuid;
 
 const SERVER_VERSION: &str = "8.0.0-agata-proxima";
+const UPSTREAM_CONNECT_TIMEOUT_SECS: u64 = 10;
+const DEFAULT_MAX_CONNECTIONS: usize = 128;
 
 /// One upstream connection and its prepared statements belong to one
 /// authenticated client session. The pool is retained for the lifetime
@@ -224,10 +226,36 @@ where
 
         // Establish the real upstream connection before accepting
         // authentication. All later work uses this exact connection.
-        let connection = match pool.get_connection().await {
-            Ok(connection) => connection,
-            Err(_) => return false,
+        let connection = match tokio::time::timeout(
+            std::time::Duration::from_secs(UPSTREAM_CONNECT_TIMEOUT_SECS),
+            pool.get_connection(),
+        )
+        .await
+        {
+            Ok(Ok(connection)) => connection,
+            _ => return false,
         };
+
+        // Check the database selected by the live upstream session as a second
+        // guard against a registry/driver configuration mismatch.
+        let selected_database: Option<String> = match tokio::time::timeout(
+            std::time::Duration::from_secs(UPSTREAM_CONNECT_TIMEOUT_SECS),
+            connection.query_first("SELECT DATABASE()"),
+        )
+        .await
+        {
+            Ok(Ok(database)) => database,
+            _ => return false,
+        };
+        if selected_database.as_deref() != Some(principal.database.as_str()) {
+            tracing::warn!(
+                username = %principal.username,
+                expected_database = %principal.database,
+                selected_database = ?selected_database,
+                "MySQL upstream database did not match the tenant registry"
+            );
+            return false;
+        }
 
         if self.identity.bind_authenticated(principal).is_err() {
             return false;
@@ -628,18 +656,46 @@ pub async fn run_mysql_gateway(
         ));
     }
 
+    let max_connections = std::env::var("PROXIMA_MYSQL_MAX_CONNECTIONS")
+        .ok()
+        .map(|value| value.parse::<usize>())
+        .transpose()
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?
+        .unwrap_or(DEFAULT_MAX_CONNECTIONS);
+    if max_connections == 0 || max_connections > 65_536 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "PROXIMA_MYSQL_MAX_CONNECTIONS must be between 1 and 65536",
+        ));
+    }
+
     let listener = TcpListener::bind(address).await?;
+    let connection_slots = Arc::new(Semaphore::new(max_connections));
 
     tracing::info!(
         address = %listener.local_addr()?,
+        max_connections,
         "Proxima MySQL gateway listening"
     );
 
     loop {
         let (stream, peer) = listener.accept().await?;
+        let permit = match Arc::clone(&connection_slots).try_acquire_owned() {
+            Ok(permit) => permit,
+            Err(_) => {
+                tracing::warn!(
+                    peer = %peer,
+                    max_connections,
+                    "MySQL connection rejected because the gateway connection limit is reached"
+                );
+                drop(stream);
+                continue;
+            }
+        };
         let registry = Arc::clone(&registry);
 
         task::spawn(async move {
+            let _connection_permit = permit;
             let (reader, writer) = stream.into_split();
             let session = MysqlGatewaySession::new(registry);
 
