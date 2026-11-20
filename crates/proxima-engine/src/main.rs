@@ -223,7 +223,7 @@ fn sign_node_heartbeat_v2(
     artifact_digest: Option<&str>,
 ) -> Result<String, hmac::digest::InvalidLength> {
     let canonical = format!(
-        "proxima-node-heartbeat-v2\\n{}\\n{}\\n{}\\n{}\\n{}\\n{}\\n{}\\n{}",
+        "proxima-node-heartbeat-v2\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
         node_id,
         organization_id,
         timestamp,
