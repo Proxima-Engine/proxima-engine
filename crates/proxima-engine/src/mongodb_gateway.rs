@@ -282,8 +282,34 @@ async fn handle_connection(
                 write_frame(&mut upstream, &frame).await?;
             }
             "endSessions" => {
-                if !authenticated {
+                let Some(principal) = identity.as_ref() else {
                     send_command_error(&mut client, message.request_id, "admin", "authentication is required").await?;
+                    continue;
+                };
+                if !authenticated || message.body.get_str("$db").unwrap_or_default() != "admin" {
+                    send_command_error(&mut client, message.request_id, "admin", "endSessions requires an authenticated principal on the admin database").await?;
+                    continue;
+                }
+                let end_sessions = match message.body.get_array("endSessions") {
+                    Ok(values) if values.len() <= 10_000 => values,
+                    _ => {
+                        send_command_error(&mut client, message.request_id, "admin", "endSessions must contain at most 10000 logical session identifiers").await?;
+                        continue;
+                    }
+                };
+                let mut invalid_session = None;
+                for value in end_sessions {
+                    let Some(lsid) = value.as_document() else {
+                        invalid_session = Some("endSessions contains a non-document session identifier".to_owned());
+                        break;
+                    };
+                    if let Err(error) = sessions.release_if_owned(&principal.tenant_id, lsid) {
+                        invalid_session = Some(error.to_string());
+                        break;
+                    }
+                }
+                if let Some(error) = invalid_session {
+                    send_command_error(&mut client, message.request_id, "admin", &error).await?;
                     continue;
                 }
                 write_frame(&mut upstream, &frame).await?;
