@@ -7,6 +7,7 @@ description = "Agata Proxima security infrastructure engine"
 repository = "https://github.com/Agata-Proxima/proxima-engine"
 
 [dependencies]
+async-trait = "0.1"
 serde_json = "1"
 hex = "0.4"
 bytes = "1"
@@ -21,8 +22,15 @@ tokio-rustls = "0.26"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tokio-postgres = "0.7"
 uuid = { version = "1", features = ["v4"] }
-
+opensrv-mysql = { version = "0.7.0", default-features = false }
+sqlparser = "0.63"
+sha1 = "0.10"
+mysql_async = "0.37.1"
+futures-util = "0.3"
 [dev-dependencies]
 proptest = "1"
 tempfile = "3"
 serial_test = "3"
+
+sha1 = "0.10"
+

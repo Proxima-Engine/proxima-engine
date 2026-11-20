@@ -8,7 +8,12 @@ use tokio_postgres::{config::SslMode, Client, NoTls};
 type HmacSha256 = Hmac<Sha256>;
 
 const SECRET: &[u8] = b"01234567890123456789012345678901";
-const PROXIMA_PORT: u16 = 16432;
+fn allocate_proxima_port() -> Result<u16, Box<dyn Error>> {
+    let listener = std::net::TcpListener::bind(("127.0.0.1", 0))?;
+    let port = listener.local_addr()?.port();
+    drop(listener);
+    Ok(port)
+}
 
 fn token(tenant_id: &str) -> String {
     let expires_at = SystemTime::now()
@@ -101,11 +106,15 @@ async fn setup_database() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-async fn connect_tenant(tenant_id: &str, password: &str) -> Result<Client, Box<dyn Error>> {
+async fn connect_tenant(
+    tenant_id: &str,
+    password: &str,
+    port: u16,
+) -> Result<Client, Box<dyn Error>> {
     let mut config = tokio_postgres::Config::new();
     config
         .host("127.0.0.1")
-        .port(PROXIMA_PORT)
+        .port(port)
         .user("proxima")
         .password(password)
         .dbname("proxima_dev")
@@ -120,10 +129,10 @@ async fn connect_tenant(tenant_id: &str, password: &str) -> Result<Client, Box<d
     Ok(client)
 }
 
-fn start_proxima() -> Result<Child, Box<dyn Error>> {
+fn start_proxima(port: u16) -> Result<Child, Box<dyn Error>> {
     let binary = env!("CARGO_BIN_EXE_proxima-engine");
     let child = Command::new(binary)
-        .env("PROXIMA_LISTEN_ADDR", format!("127.0.0.1:{PROXIMA_PORT}"))
+        .env("PROXIMA_LISTEN_ADDR", format!("127.0.0.1:{port}"))
         .env("PROXIMA_UPSTREAM_ADDR", "127.0.0.1:5432")
         .env("PROXIMA_TENANT_SIGNING_KEY", std::str::from_utf8(SECRET)?)
         .env("RUST_LOG", "proxima_engine=warn")
@@ -131,9 +140,9 @@ fn start_proxima() -> Result<Child, Box<dyn Error>> {
     Ok(child)
 }
 
-async fn wait_for_port() -> Result<(), Box<dyn Error>> {
+async fn wait_for_port(port: u16) -> Result<(), Box<dyn Error>> {
     for _ in 0..50 {
-        if tokio::net::TcpStream::connect(("127.0.0.1", PROXIMA_PORT))
+        if tokio::net::TcpStream::connect(("127.0.0.1", port))
             .await
             .is_ok()
         {
@@ -149,12 +158,14 @@ async fn wait_for_port() -> Result<(), Box<dyn Error>> {
 async fn real_postgres_session_enforces_tenant_isolation() -> Result<(), Box<dyn Error>> {
     setup_database().await?;
 
-    let mut proxima = start_proxima()?;
-    let result = async {
-        wait_for_port().await?;
+    let proxima_port = allocate_proxima_port()?;
+    let mut proxima = start_proxima(proxima_port)?;
 
-        let tenant_a = connect_tenant("tenant_a", "tenant-a-password").await?;
-        let tenant_b = connect_tenant("tenant_b", "tenant-b-password").await?;
+    let result = async {
+        wait_for_port(proxima_port).await?;
+
+        let tenant_a = connect_tenant("tenant_a", "tenant-a-password", proxima_port).await?;
+        let tenant_b = connect_tenant("tenant_b", "tenant-b-password", proxima_port).await?;
 
         let a_visible = tenant_a
             .query_one(
