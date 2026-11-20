@@ -69,6 +69,8 @@ grep -q 'tenant-a-only' <<<"$a_output"
 grep -q 'tenant-b-only' <<<"$b_output"
 grep -q 'PROXIMA_TENANT_A_OWNER' <<<"$a_output"
 grep -q 'PROXIMA_TENANT_B_OWNER' <<<"$b_output"
+printf 'Oracle tenant A session diagnostics:\n%s\n' "$a_output"
+printf 'Oracle tenant B session diagnostics:\n%s\n' "$b_output"
 
 expect_denied() {
   local user="$1" password="$2" statement="$3"
