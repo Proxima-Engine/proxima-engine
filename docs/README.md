@@ -13,6 +13,8 @@ The Proxima Engine documentation covers the Rust data plane, database protocol g
 - **[MongoDB tenant isolation](MONGODB_TENANT_ISOLATION.md)** — restricted MongoDB 8 OP_MSG gateway, SCRAM-SHA-256, TLS, tenant database binding, opt-in customer Compose profile and feature limitations.
 - [SQL Server native tenant isolation](SQLSERVER_NATIVE_TENANCY.md) — dedicated database and least-privilege login per tenant; explicitly not a TDS proxy.
 - [Redis tenant gateway](REDIS_TENANT_GATEWAY.md) — restricted RESP2 TLS gateway, client identity binding, key namespace enforcement and Redis ACL configuration.
+- [SQLite tenant isolation](SQLITE_TENANCY.md) — embedded database-file-per-tenant storage, path safety and operating-system permissions.
+- [Oracle tenant isolation](ORACLE_TENANCY.md) — dedicated schema owners, bounded quota and least-privilege provisioning.
 - [SQL Server and Redis implementation plan](SQLSERVER_REDIS_IMPLEMENTATION_PLAN.md) — protocol feasibility decisions, security boundaries and acceptance criteria.
 - [Database production verification system](DATABASE_PRODUCTION_VERIFICATION.md) — target one-command real-database test runner, per-database acceptance suites, evidence reporting and production-confidence levels.
 - [Shared MySQL protocol authentication](MYSQL_GATEWAY_AUTH.md) — verifier formats and authentication behavior.
@@ -34,6 +36,8 @@ The Proxima Engine documentation covers the Rust data plane, database protocol g
 | MongoDB 8 | [Restricted gateway guide](MONGODB_TENANT_ISOLATION.md) | Separate OP_MSG gateway; SCRAM-SHA-256, TLS, database-per-tenant isolation; restricted preview, not full feature parity |
 | SQL Server | [Native tenant isolation](SQLSERVER_NATIVE_TENANCY.md) | Native database-per-tenant profile with dedicated SQL login; no Proxima TDS proxy or shared-database RLS gateway |
 | Redis | [Tenant gateway](REDIS_TENANT_GATEWAY.md) | Restricted RESP2 TLS gateway with immutable tenant sessions, namespace rewriting and upstream Redis ACL users; limited command compatibility |
+| SQLite | [Tenant isolation](SQLITE_TENANCY.md) | Native embedded storage; separate SQLite file per tenant with path and filesystem protections |
+| Oracle Database | [Tenant isolation](ORACLE_TENANCY.md) | Native schema-per-tenant profile with dedicated users and least-privilege grants |
 
 ## Developer tools
 
