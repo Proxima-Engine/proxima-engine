@@ -21,6 +21,7 @@ RUN apt-get update \
     && chown -R proxima:proxima /var/lib/proxima
 
 COPY --from=builder /src/target/release/proxima-engine /usr/local/bin/proxima-engine
+COPY --from=builder /src/target/release/proxima-mongodb-gateway /usr/local/bin/proxima-mongodb-gateway
 
 ENV PROXIMA_LISTEN_ADDR=0.0.0.0:6432 \
     PROXIMA_UPSTREAM_ADDR=127.0.0.1:5432 \
@@ -33,6 +34,6 @@ ENV PROXIMA_LISTEN_ADDR=0.0.0.0:6432 \
     PROXIMA_BREAK_GLASS_REPLAY_DIR=/var/lib/proxima/replays
 
 USER proxima:proxima
-EXPOSE 6432
+EXPOSE 6432 27018
 VOLUME ["/var/lib/proxima"]
 ENTRYPOINT ["/usr/local/bin/proxima-engine"]
