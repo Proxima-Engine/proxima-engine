@@ -3,220 +3,225 @@
 </p>
 
 <h1 align="center">Agata Proxima · Proxima Engine</h1>
-<p align="center"><strong>Database protocol gateways and tenant isolation enforced at the connection boundary.</strong></p>
+<p align="center"><strong>Multi-database tenant isolation, enforced at the database connection boundary.</strong></p>
+<p align="center">Proxima Engine is the open-source Rust data plane for PostgreSQL, MySQL and MariaDB. It authenticates database clients, binds sessions to tenant-specific upstream identities, applies protocol-aware admission controls and works with native database privileges.</p>
+
 <p align="center">
-  <a href="https://github.com/Proxima-Engine/proxima-engine/actions/workflows/ci.yml"><img alt="Rust CI" src="https://github.com/Proxima-Engine/proxima-engine/actions/workflows/ci.yml/badge.svg?branch=main"></a>
-  <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
+  <a href="https://github.com/Proxima-Engine/proxima-engine/actions/workflows/ci.yml">Continuous integration</a> ·
+  <a href="LICENSE">MIT license for covered Engine source</a> ·
+  <a href="https://agataproxima.com">Website</a> ·
+  <a href="https://discord.gg/xsYSuDMzg">Discord</a> ·
+  <a href="https://x.com/Worldtwins25">X</a> ·
+  <a href="https://www.linkedin.com/company/agata-proxima/">LinkedIn</a>
 </p>
-<p align="center"><a href="https://agataproxima.com">Website</a> · <a href="docs/README.md">Documentation</a> · <a href="https://github.com/Proxima-Engine/proxima-engine/issues">Issues</a> · <a href="https://discord.gg/xsYSuDMzg">Discord</a></p>
 
-## Watch the PostgreSQL engineering demonstration
+**Start:** [What is Agata Proxima?](#what-is-agata-proxima) · [Launch evaluation](docs/LAUNCH.md) · [Quickstart](docs/QUICKSTART.md) · [Local developer mode](docs/LOCAL_DEVELOPMENT.md) · [Engine CLI](docs/CLI.md) · [Documentation index](docs/README.md)
 
-The original PostgreSQL walkthrough remains part of the project documentation. It demonstrates tenant-bound PostgreSQL sessions, PgBouncer transaction pooling, deliberate Row-Level Security misconfiguration tests, signed-token validation, and Engine recovery.
-
-**[Watch the PostgreSQL tenant-isolation demonstration](https://github.com/user-attachments/assets/bca488eb-829c-4672-bbe9-b25878e5401c)** · [Read the engineering case study](docs/ENGINEERING_CASE_STUDY.md) · [Review recorded validation evidence](evidence/engineering-validation-2026-11-09.md)
+**Technical guides:** [Architecture](docs/ARCHITECTURE.md) · [Tenant isolation](docs/TENANT_ISOLATION.md) · [Driver integrations](docs/INTEGRATIONS.md) · [API and metrics](docs/API.md) · [Security](docs/SECURITY.md) · [Deployment](docs/DEPLOYMENT.md) · [Verification](docs/VERIFICATION.md)
 
 
 
-Proxima Engine is the open-source Rust data plane in Agata Proxima. It provides protocol-aware database gateways, immutable tenant-to-session binding, upstream identity validation, conservative SQL admission, connection controls and repeatable integration tests. It places tenant enforcement between an application and its database—not inside application conventions alone.
+## Watch: Zero-Trust Tenant Isolation in Action — PostgreSQL
 
-## Database gateway status
+**Proxima Engine enforces tenant identity at the PostgreSQL proxy boundary.** This recorded engineering demonstration shows the Engine under real database and connection-pooling conditions.
 
-| Database | Implementation | Verification |
-|---|---|---|
-| PostgreSQL | PostgreSQL wire-protocol Engine | PostgreSQL integration and tenant-isolation tests; PgBouncer transaction-pooling evidence |
-| MySQL | MySQL-compatible protocol gateway | MySQL 8.0 integration test in CI: tenant separation, prepared statements and invalid-password rejection |
-| MariaDB | Same MySQL-compatible protocol gateway | MariaDB 11.4 integration test in CI: tenant separation, prepared statements and invalid-password rejection |
-| MongoDB | Separate development workstream | Policy and RBAC foundations; not part of the supported gateway matrix |
+The walkthrough covers PgBouncer transaction pooling, deliberately misconfigured Row-Level Security scenarios, 1,000 distinct tenant identities with up to 50 concurrent clients, signed-token validation, and Engine recovery.
 
-MySQL and MariaDB are independently exercised by the integration workflow. The MySQL gateway has its own listener, identity registry and tenant-specific upstream connection path; it is not enabled by the PostgreSQL Compose profile.
+**Watch the full demonstration:**
 
-**Scope:** PostgreSQL and MySQL-compatible gateways are separate protocol implementations. Their configuration, authentication, database controls and integration tests are database-specific. One database's test results do not verify another database.
+https://github.com/user-attachments/assets/bca488eb-829c-4672-bbe9-b25878e5401c
 
-## Architecture
+**Read the engineering case study:** [Tenant isolation, PgBouncer pooling, 1,000-identity validation, RLS scenarios, and Engine recovery](docs/ENGINEERING_CASE_STUDY.md) · [Recorded validation evidence](evidence/engineering-validation-2026-11-09.md)
 
-~~~mermaid
+---
+
+## What is Agata Proxima?
+
+Agata Proxima provides multi-database security infrastructure for applications that serve multiple customers from shared database environments. Proxima Engine enforces tenant identity in the database connection path. PostgreSQL uses signed tenant context and tenant-specific PostgreSQL roles; MySQL and MariaDB use authenticated client identities bound to tenant-specific upstream accounts and databases.
+
+The product has two cooperating components:
+
+### Proxima Engine — public, open-source data plane
+
+Proxima Engine is a Rust service that sits between an application's existing database driver and its database server. It provides a PostgreSQL protocol listener and a separate MySQL-compatible protocol listener. Applications keep their existing database drivers and connect to the matching Engine endpoint.
+
+The Engine provides:
+
+- **Signed tenant-context verification.** Validates tenant tokens using HMAC-SHA256, including token format, tenant identifier, expiry, and signature. Missing or invalid context is rejected when tenant enforcement is enabled.
+- **Tenant-to-role routing.** Maps the verified tenant identity to a configured PostgreSQL role and establishes a tenant-bound upstream database session.
+- **PostgreSQL enforcement.** Verifies signed tenant context, maps the tenant to a dedicated PostgreSQL role, and relies on PostgreSQL grants and Row-Level Security (RLS).
+- **MySQL and MariaDB enforcement.** Authenticates the client against a protected identity registry, binds the session to one tenant principal, validates the assigned upstream database, and uses a dedicated least-privilege upstream account. The MySQL-compatible gateway has separate MySQL and MariaDB integration suites.
+- **Protocol and connection controls.** Handles PostgreSQL startup and authentication negotiation, connection limits, upstream timeouts, and configurable client/upstream TLS.
+- **Security operations.** Includes a peer-scoped violation breaker, short-lived break-glass tokens with replay protection, and a local signed attestation ledger.
+- **Operational visibility.** Exposes local health and status routes plus Prometheus metrics.
+- **Developer tooling.** Includes a Python local-development CLI, local identity bootstrap, signed tenant-token generation, driver integration examples, database-specific guides, customer installers, and repeatable integration tests.
+
+### Agata Proxima Cloud — hosted management product
+
+Agata Proxima Cloud is the separate hosted control plane for organization workflows, teams, plans, billing, registered nodes, and hosted management. It coordinates authorized Engine nodes while database traffic remains in the customer environment.
+
+The Cloud application and its private source are separate from this public Engine repository. The MIT license in this repository applies to the material covered by its license; it does not grant access to the hosted application's source code or hosted account features.
+
+## How the request path works
+
+```mermaid
 flowchart LR
-  A["Application"] -->|"native database protocol"| G["Proxima gateway"]
-  G --> I["Client authentication"]
-  I --> T["Immutable tenant session"]
-  T --> P["Protocol and SQL admission"]
-  P --> U["Tenant-specific upstream credentials"]
-  U --> D[("PostgreSQL / MySQL / MariaDB")]
-  D --> R["Database-native grants"]
-  G --> M["Metrics and operational signals"]
-~~~
+  App["Application + existing PostgreSQL driver"] -->|"PostgreSQL protocol + signed tenant context"| Engine["Proxima Engine · Rust"]
+  Engine -->|"Tenant-specific PostgreSQL role"| Pool["PgBouncer transaction pool (optional)"]
+  Pool --> PG[("PostgreSQL · grants + RLS")]
+  App -->|"MySQL client protocol"| MySQLGateway["Proxima MySQL-compatible gateway"]
+  MySQLGateway -->|"Tenant-specific upstream account"| MySQL[("MySQL or MariaDB")]
+  MySQL --> Privileges["Database grants"]
+  Engine --> Health["Health / status"]
+  Engine --> Metrics["Prometheus metrics"]
+  Cloud["Agata Proxima Cloud · hosted control plane"] -.->|"Authorized enrollment and management"| Engine
+```
 
-Database-native privileges remain mandatory. Each tenant must use a dedicated least-privilege upstream identity. SQL admission narrows accepted operations; it does not replace database authorization.
+Proxima Engine works alongside existing database deployments and drivers. PostgreSQL sessions carry signed tenant context and are mapped to dedicated database roles; PostgreSQL grants and RLS provide the database-native authorization layer. MySQL and MariaDB sessions authenticate through the MySQL-compatible listener and remain bound to the tenant's assigned database and least-privilege upstream account. Application authentication and organization membership checks remain in the trusted application backend.
 
-## Quickstart: clone and run PostgreSQL
+## Database guides — separate setup for each engine
 
-### Requirements
-- Git
-- Docker Desktop with Docker Compose v2, or Docker Engine and the Compose plugin
-- curl for health checks
-- Optional: stable Rust/Cargo and psql
+Each database has its own implementation guide, setup sequence, configuration, compatibility notes and verification instructions. The MySQL and MariaDB guides are intentionally separate because their upstream server versions, service provisioning and integration suites are distinct—even though both accept the same MySQL client protocol and use the same gateway executable.
 
-### 1. Clone
+| Database | Start here | Deep-dive documentation |
+|---|---|---|
+| **PostgreSQL** | [PostgreSQL quickstart](docs/QUICKSTART.md) | [PostgreSQL documentation hub](docs/POSTGRESQL.md) · [Tenant isolation and RLS](docs/TENANT_ISOLATION.md) · [Driver integrations](docs/INTEGRATIONS.md) · [PgBouncer and verification](docs/VERIFICATION.md) |
+| **MySQL** | [MySQL gateway guide](docs/MYSQL.md) | [Client authentication](docs/MYSQL_GATEWAY_AUTH.md) · [MySQL integration test](crates/proxima-engine/tests/mysql_gateway_integration.rs) |
+| **MariaDB** | [MariaDB gateway guide](docs/MARIADB.md) | [Client authentication](docs/MYSQL_GATEWAY_AUTH.md) · [MariaDB integration test](crates/proxima-engine/tests/mariadb_gateway_integration.rs) |
 
-~~~bash
+### What is a database gateway?
+
+A database gateway is a protocol-aware network service between an application and its database. The application continues using its normal database driver. The driver connects to the matching Proxima listener; Proxima authenticates the connection, binds it to one tenant identity and forwards it to the assigned upstream database using that tenant's credentials.
+
+The gateway does not replace PostgreSQL, MySQL or MariaDB. It does not turn the databases into one database engine, and it does not make their security features interchangeable. PostgreSQL uses its own wire-protocol listener and native roles/RLS. MySQL and MariaDB use the MySQL-compatible listener, tenant-specific upstream accounts, database grants and SQL admission controls.
+
+### PostgreSQL
+
+PostgreSQL is the reference integration and retains its complete walkthrough, including the local Compose stack, PgBouncer transaction pooling, signed tenant context, tenant-role provisioning, Row-Level Security, driver examples, deployment, verification and the original engineering demonstration.
+
+Start with [the PostgreSQL quickstart](docs/QUICKSTART.md), then complete [tenant isolation](docs/TENANT_ISOLATION.md) and [verification](docs/VERIFICATION.md).
+
+### MySQL
+
+The MySQL guide covers the MySQL-compatible listener, client authentication, tenant identity registry, tenant database and upstream-account provisioning, SQL admission, prepared statements, connection behavior, troubleshooting and its own integration suite.
+
+Start with [the dedicated MySQL guide](docs/MYSQL.md). The repository's CI currently tests against MySQL 8.0; that is the recorded CI compatibility target, not the product's database name or a blanket statement about every MySQL release.
+
+### MariaDB
+
+The MariaDB guide covers the MariaDB upstream service, tenant database and account provisioning, client authentication, identity registry, SQL admission, prepared statements, troubleshooting and its own integration suite.
+
+Start with [the dedicated MariaDB guide](docs/MARIADB.md). The repository's CI currently tests against MariaDB 11.4. MariaDB is documented and tested independently from MySQL even though both use the same MySQL-compatible client listener.
+
+## Developer tools, SDKs and downloads
+
+The Engine repository includes a Python local-development CLI for creating local node identity, generating signed tenant test tokens and inspecting local Engine health. It is separate from the downloadable Cloud API CLI on the website.
+
+For Cloud API integration, the website provides a standalone Node.js CLI archive and an integration starter kit containing a server-side JavaScript API client, Node.js examples, shell and PowerShell smoke scripts, webhook receiver example, Supabase and Firebase integration patterns, GitHub Actions and Vercel templates, Terraform check examples and a ChatGPT/MCP server example.
+
+- [Developer downloads](https://agataproxima.com/developers/downloads)
+- [Standalone Cloud API CLI](https://agataproxima.com/developers/cli)
+- [JavaScript API client guide](https://agataproxima.com/developers/sdks)
+- [Integration catalog](https://agataproxima.com/developers/integrations)
+- [Starter-kit inventory](https://github.com/Agata-Proxima/Agata-proxima/blob/main/download-kit/README.md)
+
+The JavaScript API client is bundled source code, not a published npm package. The Terraform material is an integration/check example, not a dedicated Terraform provider. Proxima database traffic uses the existing native database drivers; a separate Proxima SQL-driver SDK is not required.
+
+## Current Cloud management boundary
+
+The hosted Agata Proxima Cloud control plane currently manages its documented PostgreSQL-oriented node enrollment, tenant, policy, deployment, verification and evidence workflow. MySQL and MariaDB gateways can be built, configured and tested through their dedicated Engine guides, but Cloud does not yet provision database targets, deliver MySQL/MariaDB registry secrets, select engine-specific policies or orchestrate their gateway deployments and verification.
+
+The planned multi-database Cloud model is documented in [Database gateways in Agata Proxima Cloud](docs/CLOUD_CONTROL_PLANE.md). It defines database targets, gateway capabilities, tenant bindings, engine-specific policy compilation, deployment and per-engine verification. Do not treat a generic PostgreSQL Cloud node as a configured MySQL or MariaDB gateway.
+
+---
+
+## Get started
+
+Requirements: Git and Docker with Compose.
+
+```bash
 git clone https://github.com/Proxima-Engine/proxima-engine.git
 cd proxima-engine
-~~~
-
-### 2. Start the local stack
-
-~~~bash
 docker compose -f compose.dev.yaml up --build -d
-~~~
+```
 
-The development profile starts PostgreSQL, PgBouncer in transaction-pooling mode and Proxima Engine. Published ports bind to host loopback:
+The local profile starts PostgreSQL, PgBouncer in transaction-pooling mode, and Proxima Engine. Check the local listeners:
 
-| Service | Host address | Purpose |
-|---|---|---|
-| PostgreSQL gateway | 127.0.0.1:6432 | Application connections |
-| Status dashboard | 127.0.0.1:9080 | Local status |
-| Health and Prometheus metrics | 127.0.0.1:9090 | Health and metrics |
-| PostgreSQL | 127.0.0.1:5432 | Development database |
-| PgBouncer | 127.0.0.1:16432 | Transaction-pooling path |
-
-### 3. Verify health and query through Proxima
-
-~~~bash
+```bash
 curl -fsS http://127.0.0.1:9090/healthz
 curl -fsS http://127.0.0.1:9080/api/status
-docker compose -f compose.dev.yaml exec postgres psql "host=engine port=6432 dbname=appdb user=proxima password=local-only-change-me sslmode=disable" -c "SELECT current_user, current_database();"
-~~~
+```
 
-PowerShell:
+Windows PowerShell:
 
-~~~powershell
+```powershell
 Invoke-RestMethod http://127.0.0.1:9090/healthz
 Invoke-RestMethod http://127.0.0.1:9080/api/status
-~~~
+```
 
-The local credentials are disposable development credentials. Replace them before using any non-disposable environment.
+Then follow the [Quickstart](docs/QUICKSTART.md) to create a table, send a real SQL query through the Engine and PgBouncer, inspect metrics, and stop the local stack. The Compose profile uses disposable local credentials and synthetic data.
 
-### 4. Inspect metrics and stop
+## Verify tenant isolation
 
-~~~bash
-curl -fsS http://127.0.0.1:9090/metrics
-docker compose -f compose.dev.yaml down
-~~~
+The repository includes PostgreSQL-backed tenant tests and a dedicated [PgBouncer tenant-pool integration test](scripts/test-pgbouncer-pooling.sh), which is run by GitHub Actions.
 
-Delete local database data only when intended:
+The verification path covers:
 
-~~~bash
-docker compose -f compose.dev.yaml down -v
-~~~
+1. Tenant A authenticates and reads only Tenant A's row.
+2. Tenant B authenticates and reads only Tenant B's row.
+3. Cross-tenant reads return zero visible rows.
+4. Cross-tenant writes are rejected by PostgreSQL RLS.
+5. Missing or invalid signed tenant context is rejected when enforcement is enabled.
+6. Five sequential connections per tenant reuse that tenant role's backend PID, while the two tenant roles use separate backend PIDs through PgBouncer transaction pooling.
 
-Continue with [Tenant isolation](docs/TENANT_ISOLATION.md) for tenant roles, signed context, PostgreSQL grants and Row-Level Security.
+See [Tenant isolation](docs/TENANT_ISOLATION.md), [Verification](docs/VERIFICATION.md), and the [recorded PgBouncer transaction-pooling evidence](evidence/pgbouncer-transaction-pooling.txt).
 
-## MySQL and MariaDB gateways
+## Documentation
 
-The MySQL-compatible gateway is a separate executable. Its default listener is 127.0.0.1:3307. It loads client identities from a JSON registry. Each authenticated client is bound to one immutable tenant principal and one dedicated upstream connection. Before accepting the session, the gateway validates that the live upstream database matches the registry assignment.
-
-~~~mermaid
-flowchart TD
-  C["MySQL or MariaDB client"] --> L["Proxima MySQL listener"]
-  L --> A["Authenticate client"]
-  A --> B["Resolve tenant principal"]
-  B --> S["Bind immutable session"]
-  S --> Q["SQL AST admission"]
-  Q --> U["Tenant-specific upstream"]
-  U --> DB[("MySQL or MariaDB")]
-~~~
-
-The initial admission policy accepts one parsed statement at a time: SELECT, INSERT, UPDATE or DELETE. It rejects unsupported statements, multi-statements, database switching, cross-database qualified relations, system-schema references and selected privileged or resource-intensive functions. Database grants remain the authorization boundary.
-
-Build and start the gateway:
-
-~~~bash
-cargo build --release -p proxima-engine --bin proxima-mysql-gateway
-export PROXIMA_MYSQL_IDENTITY_REGISTRY=./secrets/mysql-identities.json
-export PROXIMA_MYSQL_LISTEN_ADDR=127.0.0.1:3307
-RUST_LOG=info ./target/release/proxima-mysql-gateway
-~~~
-
-PowerShell:
-
-~~~powershell
-cargo build --release -p proxima-engine --bin proxima-mysql-gateway
-$env:PROXIMA_MYSQL_IDENTITY_REGISTRY = ".\secrets\mysql-identities.json"
-$env:PROXIMA_MYSQL_LISTEN_ADDR = "127.0.0.1:3307"
-$env:RUST_LOG = "info"
-.\target\release\proxima-mysql-gateway.exe
-~~~
-
-The registry contains client password verifiers and tenant-specific upstream URLs. Keep it outside version control, restrict file permissions and inject it through a secret-management process. Never commit it or package it into a public image.
-
-Follow the separate [MySQL gateway guide](docs/MYSQL.md) and [MariaDB gateway guide](docs/MARIADB.md). Each has its own upstream setup, CI compatibility target, integration-test command and troubleshooting section. The MySQL-compatible gateway executable is shared; database fixtures and test results are separate.
-
-## Security model
-
-- **Immutable tenant binding:** each authenticated client session is bound once to its configured tenant principal.
-- **Separate upstream identities:** every tenant uses its own upstream database account and selected database.
-- **Live upstream validation:** the selected database is checked against the registry before authentication succeeds.
-- **Client authentication:** caching_sha2_password with a double-SHA-256 verifier; legacy mysql_native_password with a SHA-1 verifier.
-- **Constant-time verifier comparison:** fixed-size verifier bytes are compared without early-exit byte comparison.
-- **Fail-closed SQL admission:** malformed, multi-statement, unsupported and prohibited SQL is rejected before upstream execution.
-- **Bounded resources:** connection limits and upstream connection/query deadlines.
-- **Remote TLS requirement:** non-loopback MySQL upstreams must use verified TLS.
-- **Database-native authorization:** provision least-privilege grants for each tenant. Never share privileged upstream accounts.
-
-Read [Security](docs/SECURITY.md), [MySQL authentication](docs/MYSQL_GATEWAY_AUTH.md) and [Deployment](docs/DEPLOYMENT.md) before connecting sensitive workloads.
-
-## Build and verify
-
-~~~bash
-cargo fmt --all -- --check
-cargo check --workspace --all-targets
-cargo test --workspace --all-targets
-cargo clippy --workspace --all-targets --all-features -- -D warnings
-~~~
-
-The real MySQL and MariaDB integration suites require disposable database services, client utilities, fixtures and a running gateway. GitHub Actions provisions MySQL 8.0 and MariaDB 11.4 separately and runs both suites. The ignored test targets are:
-
-~~~bash
-cargo test -p proxima-engine --test mysql_gateway_integration -- --ignored --test-threads=1
-cargo test -p proxima-engine --test mariadb_gateway_integration -- --ignored --test-threads=1
-~~~
-
-See the [MySQL integration guide](docs/MYSQL.md#integration-verification) and [MariaDB integration guide](docs/MARIADB.md#integration-verification) for their respective fixture lifecycles.
-
-## Repository map
-
-| Path | Responsibility |
+| Guide | Purpose |
 |---|---|
-| crates/proxima-engine/src/ | Rust engine, protocol gateways, identity, policy and session logic |
-| crates/proxima-engine/src/bin/ | Standalone gateway executables |
-| crates/proxima-engine/tests/ | Real-database integration tests |
-| dashboard/ | Local Engine dashboard |
-| compose.dev.yaml | Disposable PostgreSQL development stack |
-| scripts/ | Integration and CI helpers |
-| docs/ | Architecture, configuration, deployment, security and database guides |
-| vendor/opensrv-mysql/ | Vendored MySQL protocol implementation and license notices |
+| [PostgreSQL quickstart](docs/QUICKSTART.md) | Start the local stack, query PostgreSQL through the Engine and inspect metrics |
+| [Local developer mode](docs/LOCAL_DEVELOPMENT.md) | Generate local node identity and signed tenant test tokens |
+| [Engine CLI](docs/CLI.md) | Bootstrap, token generation, diagnostics, and local status commands |
+| [Architecture](docs/ARCHITECTURE.md) | Request lifecycle, tenant context, source map, and control-plane boundary |
+| [Configuration](docs/CONFIGURATION.md) | Environment variables, defaults, and validation |
+| [Tenant isolation](docs/TENANT_ISOLATION.md) | PostgreSQL roles, RLS policies, signed context, and test results |
+| [Driver integrations](docs/INTEGRATIONS.md) | PostgreSQL connection examples for psql, Node.js, Python, and Rust |
+| [MySQL gateway](docs/MYSQL.md) | Dedicated MySQL upstream setup, identity registry, tenant accounts, client authentication and integration verification |
+| [MariaDB gateway](docs/MARIADB.md) | Dedicated MariaDB upstream setup, identity registry, tenant accounts, client authentication and integration verification |
+| [MySQL client authentication](docs/MYSQL_GATEWAY_AUTH.md) | Supported MySQL-compatible client verifier formats and authentication behavior |
+| [Database gateways in Cloud](docs/CLOUD_CONTROL_PLANE.md) | Current PostgreSQL Cloud boundary and the planned multi-database resource model |
+| [API reference](docs/API.md) | PostgreSQL endpoint, health/status routes, and Prometheus metrics |
+| [Node enrollment](docs/NODE_ENROLLMENT.md) | Engine-side node identity and enrollment contract |
+| [Deployment](docs/DEPLOYMENT.md) | Container build, TLS, networking, persistence, and deployment configuration |
+| [Operations](docs/OPERATIONS.md) | Health checks, logs, monitoring, recovery, and troubleshooting |
+| [Engineering case study](docs/ENGINEERING_CASE_STUDY.md) | PostgreSQL tenant isolation, RLS, PgBouncer, concurrency, authentication and recovery results |
+| [Verification](docs/VERIFICATION.md) | Rust tests, PostgreSQL verification, MySQL and MariaDB integration suites, CI and evidence review |
+| [Security model](docs/SECURITY.md) | Implemented controls and the configuration required to operate them |
+| [Developer security walkthrough](docs/DEVELOPER_SECURITY_DEMO.md) | Reproduce positive and negative tenant-access scenarios |
+| [Cloud control plane](docs/CLOUD_CONTROL_PLANE.md) | Hosted product and self-managed Engine responsibilities |
+| [Plans and billing](docs/BILLING.md) | Hosted plan and checkout information |
+| [Support](docs/SUPPORT.md) | Technical support, issue reporting, and contact routes |
+| [Contributing](CONTRIBUTING.md) | Development setup and pull-request process |
+| [Security policy](SECURITY.md) | Private vulnerability reporting |
+| [Code of Conduct](CODE_OF_CONDUCT.md) | Community participation standards |
+| [Copyright and brand](COPYRIGHT.md) | Source-license and brand-asset boundaries |
+| [Open-source scope](docs/OPEN_SOURCE_SCOPE.md) | MIT-licensed source, self-managed use, and support boundaries |
+
+## Hosted product and contact
+
+- **Website and hosted account:** [agataproxima.com](https://agataproxima.com)
+- **Plans and billing:** [Hosted plan information](docs/BILLING.md)
+- **Support:** [support@agataproxima.com](mailto:support@agataproxima.com)
+- **Security reports:** [Private vulnerability reporting instructions](SECURITY.md)
+- **Community:** [Discord](https://discord.gg/xsYSuDMzg)
+
+## Open-source scope
+
+The Proxima Engine source and covered documentation are distributed under the [MIT License](LICENSE). The hosted Cloud application, hosted account workflows, and private management source are separate products and are not included in this repository's license. The Agata Proxima name, orbit logo, and designated brand artwork are reserved brand assets; see [Copyright and brand](COPYRIGHT.md).
 
 ## Contribute
 
-1. Create a focused feature branch.
-2. Add tests for both permitted and denied behavior.
-3. Run formatting, compilation, unit tests and the relevant real-database integration suite.
-4. Update the relevant documentation and configuration examples.
-5. Open a pull request with database versions, environment details and test results.
+Use [GitHub Issues](https://github.com/Proxima-Engine/proxima-engine/issues) for reproducible Engine bugs and feature requests. Read [Contributing](CONTRIBUTING.md) before submitting a pull request. For vulnerabilities, use the private reporting process in [SECURITY.md](SECURITY.md).
 
-Use [GitHub Issues](https://github.com/Proxima-Engine/proxima-engine/issues) for reproducible defects and feature requests. Report vulnerabilities through [SECURITY.md](SECURITY.md), not a public issue.
-
-## Project links
-
-- [Agata Proxima website](https://agataproxima.com)
-- [Source code](https://github.com/Proxima-Engine/proxima-engine)
-- [CI workflows](https://github.com/Proxima-Engine/proxima-engine/actions)
-- [Issues](https://github.com/Proxima-Engine/proxima-engine/issues)
-- [Pull requests](https://github.com/Proxima-Engine/proxima-engine/pulls)
-- [Releases](https://github.com/Proxima-Engine/proxima-engine/releases)
-- [Discord](https://discord.gg/xsYSuDMzg)
-
-## License
-
-Proxima Engine is distributed under the [MIT License](LICENSE) for the source and materials covered by that license. Hosted services, private control-plane source and reserved brand assets are separate; see [Copyright and brand](COPYRIGHT.md).
+<p align="center">Built by Agata Proxima · <a href="https://agataproxima.com">agataproxima.com</a> · <a href="https://github.com/Proxima-Engine">GitHub organization</a></p>
