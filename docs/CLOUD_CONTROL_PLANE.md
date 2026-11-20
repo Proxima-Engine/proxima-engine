@@ -1,52 +1,107 @@
-# Agata Proxima Cloud and Proxima Engine
+# Database gateways in Agata Proxima Cloud
 
-Agata Proxima consists of a hosted management product and a public, open-source PostgreSQL data plane. They cooperate through an authenticated node-enrollment and evidence-delivery contract while retaining separate responsibilities and source boundaries.
+This document separates the current hosted Cloud contract from the multi-database architecture planned for Cloud management.
 
-## Two cooperating products
+## Current implementation boundary
 
-```mermaid
-flowchart TB
-  subgraph Hosted["Agata Proxima Cloud · private hosted product"]
-    Account["Account and organization"]
-    Team["Team membership and permissions"]
-    Plans["Plans, usage and billing"]
-    Registry["Authorized node registration"]
-  end
-  subgraph Customer["Customer-controlled environment"]
-    App["Application backend"]
-    Engine["Proxima Engine · public Rust data plane"]
-    DB[("PostgreSQL · roles + RLS")]
-    App --> Engine --> DB
-  end
-  Registry -. "Authenticated enrollment contract" .-> Engine
-```
+Agata Proxima Cloud currently exposes organization-scoped management workflows for tenants, policies, nodes, deployments, verification, audit and attestations. The published node-enrollment and signed-evidence contract is documented for the PostgreSQL Engine path.
 
-## Hosted workflow
+The public Proxima Engine repository also contains a separate MySQL-compatible gateway executable. Its local configuration uses a MySQL identity registry and tenant-specific upstream URLs. The repository CI workflow provisions MySQL 8.0 and MariaDB 11.4 independently and runs separate integration suites.
 
-1. Open [agataproxima.com](https://agataproxima.com).
-2. Sign in or create an account using the available hosted workflow.
-3. Select or create an organization your account is authorized to manage.
-4. Review the plan and node-registration options available to that organization.
-5. Configure the Engine using the [Node enrollment guide](NODE_ENROLLMENT.md).
-6. Verify database connectivity, tenant isolation, health monitoring, and operational alerts in the target environment.
+**The current hosted Cloud workflow does not yet provision, configure, deploy or verify MySQL/MariaDB gateway instances.** A MySQL or MariaDB developer can build and run the Engine gateway locally using the database-specific guides, but must not assume that creating a generic Cloud node automatically configures the MySQL listener, stores its registry or manages its upstream secrets.
 
-The hosted account interface is the source of truth for currently available screens, permissions, plans, and account actions.
+| Capability | PostgreSQL | MySQL | MariaDB |
+|---|---|---|---|
+| Public Engine gateway | Available | Available through the MySQL-compatible gateway | Available through the MySQL-compatible gateway |
+| Database-specific setup guide | Available | Available | Available |
+| Separate real-database integration suite in CI | Available | MySQL 8.0 | MariaDB 11.4 |
+| Local gateway configuration | PostgreSQL Engine settings | MySQL identity registry and listener settings | MySQL identity registry and listener settings |
+| Hosted Cloud database selection and provisioning | Existing documented path | Not implemented in Cloud | Not implemented in Cloud |
+| Hosted Cloud-managed gateway deployment and database-specific verification | Existing PostgreSQL-oriented contract; validate each environment | Not implemented in Cloud | Not implemented in Cloud |
 
-## Self-managed Engine
+## Intended multi-database Cloud resource model
 
-The public Engine can be inspected, built, and run independently of the hosted Cloud application. Local development includes node-identity generation and signed test-token tools; see [Local developer mode](LOCAL_DEVELOPMENT.md).
+The Cloud control plane should manage database gateways as explicit runtime targets rather than treating every database as a PostgreSQL connection. The intended hierarchy is:
 
-A self-managed Engine uses local credentials and PostgreSQL configuration. A hosted registered-node identity is issued by a compatible control plane through the enrollment contract documented in [Node enrollment](NODE_ENROLLMENT.md).
+~~~mermaid
+flowchart TD
+  Org[Organization] --> Project[Project / application]
+  Project --> Env[Environment: dev, staging, production]
+  Env --> Db[Database target: engine + endpoint + version]
+  Env --> Node[Gateway node / runtime deployment]
+  Node --> Bind[Database binding]
+  Bind --> Tenant[Tenant assignments]
+  Tenant --> Policy[Versioned database policy]
+  Policy --> Deploy[Deployment / rollout]
+  Deploy --> Verify[Engine-specific verification]
+  Verify --> Evidence[Signed evidence + audit history]
+~~~
 
-## Trust and responsibility boundaries
+### Organization and environment
 
-- The trusted application backend authenticates users and authorizes tenant membership before issuing signed tenant context.
-- The Engine verifies signed context and routes the session to a tenant-specific PostgreSQL role.
-- PostgreSQL grants and RLS policies enforce database access.
-- Cloud manages hosted account, organization, team, plan, billing, and registered-node workflows.
-- Keep signing keys, database credentials, node identity files, and enrollment tokens in protected runtime storage.
-- Keep local status and metrics listeners on loopback or behind a separately authenticated monitoring layer.
+An organization owns projects, environments, members, API credentials, usage and audit scope. Each environment separates development, staging and production configuration. A database target belongs to one environment and declares its engine type.
 
-## Hosted API and source boundary
+### Database target
 
-The public repository documents the Engine-side enrollment request and identity-persistence contract. Hosted management endpoints, account workflows, and the Cloud source remain part of the separate private hosted product. Use the hosted website for current account, plan, and node-management instructions.
+The database target records a typed engine identifier (postgresql, mysql, or mariadb), server compatibility version, network endpoint reference, TLS mode, and a secret-manager reference. The Cloud API must never return plaintext upstream passwords after creation. Credentials are injected into the gateway runtime through secret references and rotated independently.
+
+### Gateway node
+
+A node represents a running gateway runtime, not an individual tenant. The runtime advertises its gateway capability and version. The PostgreSQL listener and MySQL-compatible listener have separate protocol and configuration contracts. MySQL and MariaDB may use the same MySQL-compatible gateway binary, but their upstream target type and compatibility test remain distinct.
+
+A future enrollment contract must include the gateway capability, protocol, supported target engine, configuration revision and secret references. It must not silently interpret a MySQL/MariaDB target as PostgreSQL.
+
+### Tenant-to-database binding
+
+A tenant is assigned to a database target and a database/schema boundary. The gateway resolves an authenticated tenant identity to an immutable binding and tenant-specific least-privilege upstream credential. The control plane must validate that the binding belongs to the same organization and environment as the node and database target.
+
+For MySQL/MariaDB, the current gateway uses a local JSON identity registry with a client verifier, tenant ID, assigned database and tenant-specific upstream URL. Cloud integration must replace manual registry distribution with a versioned, encrypted secret/configuration delivery contract without weakening those checks.
+
+### Database-specific policies
+
+Policies must declare their target engine and policy capability set. PostgreSQL policies can include role attributes, grants and Row-Level Security. MySQL/MariaDB policies must use supported SQL admission rules, database grants, tenant-specific upstream users, selected database validation, prepared-statement handling and database-specific restrictions. A policy compiled for one engine must not be deployed to another engine without an explicit compatible policy compiler.
+
+### Deployment and verification
+
+A deployment record must identify the organization, environment, gateway node, database target, gateway build, configuration revision, policy version and secret references. Rollout steps should validate connectivity and health before switching traffic.
+
+Verification must select an engine-specific acceptance suite. The result must record the database engine and version, gateway build, policy digest, test-suite identifier, timestamp, expected and observed outcomes, and signed evidence reference. A PostgreSQL RLS result must never be presented as proof of MySQL or MariaDB isolation.
+
+### Cloud UI workflow
+
+The intended operator journey is:
+
+1. Create or select an organization and project.
+2. Create an environment.
+3. Register a database target and select PostgreSQL, MySQL or MariaDB.
+4. Add a gateway node with a compatible runtime capability.
+5. Bind tenant records to database targets and least-privilege credentials.
+6. Create an engine-specific policy.
+7. Deploy the matching gateway configuration.
+8. Run the matching database acceptance suite.
+9. Review verification, signed attestations and audit history.
+
+The UI must show a database-engine compatibility state and must block deployment when the node capability, target engine, policy compiler or verification suite does not match.
+
+## Implementation sequence for Cloud support
+
+1. **Contract and schema:** add database-engine enums, database targets, environment bindings, capability declarations and secret references with organization-scoped foreign keys.
+2. **API authorization:** enforce organization/environment ownership on target creation, credential changes, node binding, policy deployment and evidence ingestion.
+3. **Node enrollment:** issue engine-capability-scoped enrollment configuration and deliver only secret references or short-lived encrypted material.
+4. **Runtime configuration:** load versioned PostgreSQL or MySQL-compatible gateway profiles; validate configuration before applying it.
+5. **Policy compiler:** maintain engine-specific policy schemas and reject unsupported or cross-engine policy fields.
+6. **Deployment executor:** render and apply the correct gateway runtime profile, perform health checks, and support rollback.
+7. **Verification orchestration:** run the correct real-database suite and preserve per-engine evidence.
+8. **Dashboard:** expose database targets, gateway capabilities, tenant bindings, policies, deployment history and verification outcomes.
+9. **Acceptance:** test organization isolation, tenant isolation, secret rotation, rollback, node loss, database outage and control-plane recovery for each engine independently.
+
+## Related implementation guides
+
+- [PostgreSQL quickstart](QUICKSTART.md)
+- [PostgreSQL tenant isolation](TENANT_ISOLATION.md)
+- [MySQL gateway](MYSQL.md)
+- [MariaDB gateway](MARIADB.md)
+- [MySQL protocol authentication](MYSQL_GATEWAY_AUTH.md)
+- [Node enrollment](NODE_ENROLLMENT.md)
+- [Deployment](DEPLOYMENT.md)
+- [Verification](VERIFICATION.md)
