@@ -2,7 +2,7 @@ name: Rust CI
 
 on:
   push:
-    branches: [main, feature/universal-database-gateways]
+    branches: [main, feature/universal-database-gateways, feature/mongodb-enterprise-tenant-isolation]
   pull_request:
     branches: [main]
 
