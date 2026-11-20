@@ -5,6 +5,8 @@ set -euo pipefail
 CONTAINER="proxima-cockroach-ci"
 LISTEN_ADDR="127.0.0.1:16433"
 METRICS_ADDR="127.0.0.1:19091"
+# Use the runner UID/GID unless the workflow explicitly supplies a container user.
+DOCKER_USER="${DOCKER_USER:-$(id -u):$(id -g)}"
 # Generate short-lived CA, node, and root client certificates for a secure test cluster.
 # Bypass the image entrypoint: it creates FIFOs and a data directory in its
 # working directory, which is not writable when the CI runner UID is used.
