@@ -12,7 +12,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Semaphore;
 use tokio_rustls::{TlsAcceptor, TlsConnector};
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
 const OP_MSG: i32 = 2013;
 const MAX_MESSAGE_BYTES: usize = 48 * 1024 * 1024;
@@ -274,6 +274,13 @@ async fn handle_connection(
                 }
                 write_frame(&mut upstream, &frame).await?;
             }
+            "ping" => {
+                if !authenticated || message.body.get_str("$db").unwrap_or_default() != "admin" {
+                    send_command_error(&mut client, message.request_id, "admin", "ping requires an authenticated principal and the admin database").await?;
+                    continue;
+                }
+                write_frame(&mut upstream, &frame).await?;
+            }
             "endSessions" => {
                 if !authenticated {
                     send_command_error(&mut client, message.request_id, "admin", "authentication is required").await?;
@@ -324,7 +331,7 @@ async fn handle_connection(
                     Some(Bson::Int64(value)) => *value == 1,
                     _ => false,
                 };
-                if ok && reply.body.get_bool("done") == Ok(true) {
+                if ok && matches!(reply.body.get_bool("done"), Ok(true)) {
                     authenticated = true;
                 }
             }
@@ -365,7 +372,6 @@ fn decode_op_msg(frame: &[u8]) -> io::Result<MongoMessage> {
         return Err(io::Error::new(io::ErrorKind::InvalidData, "MongoDB OP_MSG length mismatch"));
     }
     let request_id = i32::from_le_bytes(frame[4..8].try_into().unwrap());
-    let response_to = i32::from_le_bytes(frame[8..12].try_into().unwrap());
     let opcode = i32::from_le_bytes(frame[12..16].try_into().unwrap());
     if opcode != OP_MSG {
         return Err(io::Error::new(io::ErrorKind::Unsupported, format!("MongoDB opcode {opcode} is not supported; only OP_MSG is accepted")));
