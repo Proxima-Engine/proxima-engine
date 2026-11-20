@@ -2,9 +2,13 @@ name: Rust CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, feature/universal-database-gateways, feature/mongodb-enterprise-tenant-isolation, feature/mongodb-cockroachdb-completion]
   pull_request:
     branches: [main]
+  # One scheduled run per day on the default branch. Keep the schedule
+  # lightweight by reusing the same integration matrix as push/PR CI.
+  schedule:
+    - cron: "23 3 * * *"
 
 permissions:
   contents: read
@@ -53,6 +57,18 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 30
+      mongo:
+        image: mongo:8.0
+        env:
+          MONGO_INITDB_ROOT_USERNAME: root
+          MONGO_INITDB_ROOT_PASSWORD: proxima-mongo-ci
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --username root --password proxima-mongo-ci --authenticationDatabase admin --eval 'db.adminCommand({ ping: 1 }).ok'"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -88,6 +104,8 @@ jobs:
         run: cargo build -p proxima-engine --release
       - name: Build MySQL protocol gateway
         run: cargo build -p proxima-engine --bin proxima-mysql-gateway
+      - name: Build MongoDB wire gateway
+        run: cargo build -p proxima-engine --bin proxima-mongodb-gateway
       - name: Install database clients for acceptance tests
         run: sudo apt-get update && sudo apt-get install -y postgresql-client default-mysql-client netcat-openbsd
       - name: Verify MySQL 8 and MariaDB tenant isolation
@@ -97,6 +115,12 @@ jobs:
         run: bash scripts/test-mysql-gateways-ci.sh
       - name: Verify two-tenant isolation against PostgreSQL
         run: bash scripts/test-two-tenants.sh
+      - name: Verify two-tenant isolation against CockroachDB 25.2
+        run: bash scripts/test-cockroachdb-tenant-isolation-ci.sh
+      - name: Verify MongoDB tenant database isolation
+        env:
+          PROXIMA_MONGODB_TEST_URI: mongodb://root:proxima-mongo-ci@127.0.0.1:27017/admin?authSource=admin&directConnection=true
+        run: bash scripts/test-mongodb-tenant-isolation-ci.sh
       - name: Build container image
         run: docker build -t proxima-engine:ci .
       - name: Verify PgBouncer tenant-pool isolation

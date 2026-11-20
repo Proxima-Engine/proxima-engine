@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT"
 description = "Agata Proxima security infrastructure engine"
-repository = "https://github.com/Proxima-Engine/proxima-engine"
+repository = "https://github.com/Agata-Proxima/proxima-engine"
 
 [dependencies]
 async-trait = "0.1"
@@ -27,6 +27,7 @@ sqlparser = { version = "0.63", features = ["visitor"] }
 sha1 = "0.10"
 mysql_async = { version = "0.37.1", features = ["rustls-tls", "ring"] }
 futures-util = "0.3"
+mongodb = { version = "3.3", default-features = false, features = ["rustls-tls", "bson-2", "compat-3-3-0"] }
 [dev-dependencies]
 proptest = "1"
 tempfile = "3"
