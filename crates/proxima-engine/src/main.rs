@@ -695,9 +695,9 @@ async fn pull_and_stage_database_config_once() -> Result<(), Box<dyn std::error:
         .unwrap_or_else(||PathBuf::from("data/database-targets.json"));
     let parent = output_path.parent().ok_or("invalid database config output path")?;
     fs::create_dir_all(parent)?;
-    if records.is_empty() && output_path.is_file() {
-        return Ok(());
-    }
+    // An authenticated empty bundle explicitly revokes this node's assignment.
+    // Replace the staged document with an empty assignment set so revoked
+    // credentials are not left on disk as if they were still current.
     let document = serde_json::json!({
         "schema_version":1,
         "node_id":node_id,
