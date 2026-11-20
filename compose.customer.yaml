@@ -56,6 +56,38 @@ services:
     tmpfs:
       - /tmp:size=16m,noexec,nosuid
 
+  mongodb-gateway:
+    profiles: ["mongodb"]
+    image: ghcr.io/proxima-engine/proxima-engine:${PROXIMA_ENGINE_VERSION:-latest}
+    build:
+      context: .
+      dockerfile: Dockerfile
+    entrypoint: ["/usr/local/bin/proxima-mongodb-gateway"]
+    restart: unless-stopped
+    environment:
+      PROXIMA_MONGODB_LISTEN_ADDR: 0.0.0.0:27018
+      PROXIMA_MONGODB_UPSTREAM_ADDR: ${PROXIMA_MONGODB_UPSTREAM_ADDR:?Set PROXIMA_MONGODB_UPSTREAM_ADDR in .env}
+      PROXIMA_MONGODB_IDENTITY_REGISTRY: /run/secrets/mongodb_identity_registry
+      PROXIMA_MONGODB_TLS_CERT_FILE: /run/secrets/mongodb_gateway_cert
+      PROXIMA_MONGODB_TLS_KEY_FILE: /run/secrets/mongodb_gateway_key
+      PROXIMA_MONGODB_UPSTREAM_TLS: ${PROXIMA_MONGODB_UPSTREAM_TLS:-true}
+      PROXIMA_MONGODB_UPSTREAM_TLS_CA_FILE: /run/secrets/mongodb_upstream_ca
+      PROXIMA_MONGODB_UPSTREAM_TLS_SERVER_NAME: ${PROXIMA_MONGODB_UPSTREAM_TLS_SERVER_NAME:?Set PROXIMA_MONGODB_UPSTREAM_TLS_SERVER_NAME in .env}
+      PROXIMA_MONGODB_MAX_CONNECTIONS: ${PROXIMA_MONGODB_MAX_CONNECTIONS:-256}
+      RUST_LOG: ${PROXIMA_MONGODB_RUST_LOG:-info}
+    ports:
+      - "${PROXIMA_MONGODB_BIND_ADDRESS:-127.0.0.1}:27018:27018"
+    secrets:
+      - mongodb_identity_registry
+      - mongodb_gateway_cert
+      - mongodb_gateway_key
+      - mongodb_upstream_ca
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,noexec,nosuid
+
   redis-gateway:
     profiles: ["redis"]
     image: ghcr.io/proxima-engine/proxima-engine:${PROXIMA_ENGINE_VERSION:-latest}
@@ -91,6 +123,14 @@ secrets:
     file: ./secrets/mysql-identities.json
   node_enrollment_token:
     file: ./secrets/node_enrollment_token
+  mongodb_identity_registry:
+    file: ./secrets/mongodb-identities.json
+  mongodb_gateway_cert:
+    file: ./secrets/mongodb-gateway-cert.pem
+  mongodb_gateway_key:
+    file: ./secrets/mongodb-gateway-key.pem
+  mongodb_upstream_ca:
+    file: ./secrets/mongodb-upstream-ca.pem
   redis_identity_registry:
     file: ./secrets/redis-identities.json
   redis_upstream_ca:
