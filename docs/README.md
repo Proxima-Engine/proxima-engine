@@ -47,7 +47,7 @@ The Proxima Engine documentation covers the Rust data plane, database protocol g
 - [Node identity and enrollment](NODE_ENROLLMENT.md) — node identity persistence and enrollment contract.
 - [Container deployment](DEPLOYMENT.md) — image build, networking, TLS, persistence and deployment checklist.
 - [Operations](OPERATIONS.md) — health checks, logs, monitoring, restart and recovery.
-- [Verification](VERIFICATION.md) — automated tests, PostgreSQL, MySQL, MariaDB, CockroachDB and MongoDB acceptance checks, Docker image build, PgBouncer isolation and evidence verification.
+- [Verification](VERIFICATION.md) — automated tests, PostgreSQL, MySQL, MariaDB, CockroachDB, MongoDB, Redis and SQL Server native-profile acceptance checks, Docker image build, PgBouncer isolation and evidence verification.
 - [Unified database verification target](DATABASE_PRODUCTION_VERIFICATION.md) — design for real-server tests across every supported database and consolidated JSON/Markdown evidence.
 - [Engineering validation evidence](../evidence/engineering-validation-2026-11-09.md) — recorded validation outputs.
 
