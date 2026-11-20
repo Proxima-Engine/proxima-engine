@@ -112,6 +112,14 @@ impl MysqlIdentityRegistry {
                 )));
             }
 
+            if !matches!(upstream_options.ip_or_hostname(), "localhost" | "127.0.0.1" | "::1")
+                && upstream_options.ssl_opts().is_none()
+            {
+                return Err(IdentityError::InvalidRegistry(format!(
+                    "users[{index}].upstream_url must require verified TLS for non-loopback upstream hosts (add require_ssl=true)"
+                )));
+            }
+
             if upstream_options.user().is_none() || upstream_options.pass().is_none() {
                 return Err(IdentityError::InvalidRegistry(format!(
                     "users[{index}].upstream_url must include explicit upstream credentials"
@@ -371,6 +379,21 @@ mod tests {
         );
 
         assert!(MysqlIdentityRegistry::from_json(&json).is_err());
+    }
+
+    #[test]
+    fn rejects_remote_upstream_without_tls() {
+        let json = registry_json().replace("127.0.0.1:3306", "db.example.com:3306");
+        assert!(MysqlIdentityRegistry::from_json(&json).is_err());
+    }
+
+    #[test]
+    fn accepts_remote_upstream_with_tls() {
+        let json = registry_json().replace(
+            "127.0.0.1:3306/tenant_a_db",
+            "db.example.com:3306/tenant_a_db?require_ssl=true"
+        );
+        assert!(MysqlIdentityRegistry::from_json(&json).is_ok());
     }
 
     #[test]
