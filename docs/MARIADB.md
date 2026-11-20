@@ -120,7 +120,7 @@ cat > secrets/mysql-identities.json <<'JSON'
       "username": "tenant_a_app",
       "tenant_id": "tenant-a",
       "database": "tenant_a",
-      "upstream_url": "mysql://tenant_a_gateway:REPLACE_WITH_UPSTREAM_SECRET@127.0.0.1:3306/tenant_a",
+      "upstream_url": "mysql://tenant_a_gateway:REPLACE_WITH_UPSTREAM_SECRET@127.0.0.1:3308/tenant_a",
       "auth_plugin": "caching_sha2_password",
       "password_sha256": "REPLACE_WITH_64_HEX_CHARACTER_VERIFIER"
     },
@@ -128,7 +128,7 @@ cat > secrets/mysql-identities.json <<'JSON'
       "username": "tenant_b_app",
       "tenant_id": "tenant-b",
       "database": "tenant_b",
-      "upstream_url": "mysql://tenant_b_gateway:REPLACE_WITH_UPSTREAM_SECRET@127.0.0.1:3306/tenant_b",
+      "upstream_url": "mysql://tenant_b_gateway:REPLACE_WITH_UPSTREAM_SECRET@127.0.0.1:3308/tenant_b",
       "auth_plugin": "caching_sha2_password",
       "password_sha256": "REPLACE_WITH_64_HEX_CHARACTER_VERIFIER"
     }
