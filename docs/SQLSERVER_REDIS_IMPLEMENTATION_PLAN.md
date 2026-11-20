@@ -33,7 +33,7 @@ SQL Server's native security remains authoritative:
 4. Define the supported TDS version, SQL Server edition/version, authentication mode, and explicitly unsupported protocol features before exposing a customer endpoint.
 5. If a safe TDS server cannot be implemented with a maintainable dependency and adequate test coverage, stop and document a native SQL Server enforcement integration as a separate, explicitly scoped alternative. Do not ship an incomplete or falsely advertised TDS gateway.
 
-Protocol research starting points: [Microsoft mssql-rs](https://github.com/microsoft/mssql-rs), [tds_protocol](https://docs.rs/tds_protocol/latest/tds_protocol/), and [Tiberius](https://github.com/tiberius-rs/tiberius). These are candidates for investigation, not a declaration that a ready-made server gateway exists.
+Protocol research starting points: [Microsoft mssql-rs](https://github.com/microsoft/mssql-rs), [tds-protocol crate](https://docs.rs/tds-protocol/latest/tds_protocol/), and [Tiberius](https://github.com/tiberius-rs/tiberius). These are client/protocol-layer candidates, not a declaration that a ready-made server gateway exists. The implementation must not proceed to a customer-facing TDS listener until a complete server-side design has been proven with real SQL Server clients and TLS.
 
 ### Minimum SQL Server acceptance matrix
 
