@@ -17,10 +17,9 @@ cleanup() {
 trap cleanup EXIT
 
 docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
-docker run --detach --name "$CONTAINER" \
-  --publish 127.0.0.1:26257:26257 \
+docker run --detach --name "$CONTAINER" --network host \
   cockroachdb/cockroach:v25.2.0 \
-  start-single-node --insecure --listen-addr=0.0.0.0:26257 --http-addr=0.0.0.0:8080 >/dev/null
+  start-single-node --insecure --listen-addr=127.0.0.1:26257 --http-addr=127.0.0.1:8080 >/dev/null
 
 ready=0
 for _ in $(seq 1 60); do
