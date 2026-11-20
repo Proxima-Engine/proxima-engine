@@ -9,6 +9,8 @@ The Proxima Engine documentation covers the Rust data plane, database protocol g
 - **[PostgreSQL quickstart](QUICKSTART.md)** — launch PostgreSQL and Proxima Engine, run SQL and inspect health and metrics.
 - **[MySQL documentation](MYSQL.md)** — provision MySQL tenant databases, configure client verifiers, connect clients and run the MySQL 8.0 integration suite.
 - **[MariaDB documentation](MARIADB.md)** — provision MariaDB tenant databases, configure client identities, connect clients and run the MariaDB 11.4 integration suite.
+- **[CockroachDB compatibility](COCKROACHDB_COMPATIBILITY.md)** — CockroachDB 25.2+ using the PostgreSQL wire gateway, native RLS, tenant roles and transaction retry behavior.
+- **[MongoDB tenant isolation](MONGODB_TENANT_ISOLATION.md)** — restricted MongoDB 8 OP_MSG gateway, SCRAM-SHA-256, TLS, tenant database binding and feature limitations.
 - [Shared MySQL protocol authentication](MYSQL_GATEWAY_AUTH.md) — verifier formats and authentication behavior.
 - [Architecture](ARCHITECTURE.md) — request lifecycle, tenant identity, role routing and system boundaries.
 - [Tenant isolation](TENANT_ISOLATION.md) — tenant roles, RLS, signed context and positive/negative access tests.
@@ -24,7 +26,8 @@ The Proxima Engine documentation covers the Rust data plane, database protocol g
 | PostgreSQL | [Documentation hub](POSTGRESQL.md), [quickstart](QUICKSTART.md), [tenant isolation](TENANT_ISOLATION.md), [driver integrations](INTEGRATIONS.md) | PostgreSQL wire-protocol Engine |
 | MySQL | [Dedicated guide](MYSQL.md), [authentication](MYSQL_GATEWAY_AUTH.md) | proxima-mysql-gateway; MySQL 8.0 integration suite in CI |
 | MariaDB | [Dedicated guide](MARIADB.md), [authentication](MYSQL_GATEWAY_AUTH.md) | MySQL-compatible client protocol gateway |
-| MongoDB | [MongoDB development pull request](https://github.com/Proxima-Engine/proxima-engine/pull/34) | Separate development track; not part of the supported gateway matrix |
+| CockroachDB 25.2+ | [Compatibility profile](COCKROACHDB_COMPATIBILITY.md) | PostgreSQL wire gateway with CockroachDB-native forced RLS and tenant-role acceptance test |
+| MongoDB 8 | [Restricted gateway guide](MONGODB_TENANT_ISOLATION.md) | Separate OP_MSG gateway; SCRAM-SHA-256, TLS, database-per-tenant isolation; restricted preview, not full feature parity |
 
 ## Developer tools
 
@@ -40,7 +43,7 @@ The Proxima Engine documentation covers the Rust data plane, database protocol g
 - [Node identity and enrollment](NODE_ENROLLMENT.md) — node identity persistence and enrollment contract.
 - [Container deployment](DEPLOYMENT.md) — image build, networking, TLS, persistence and deployment checklist.
 - [Operations](OPERATIONS.md) — health checks, logs, monitoring, restart and recovery.
-- [Verification](VERIFICATION.md) — automated tests, PostgreSQL integration, MySQL and MariaDB CI, and evidence verification.
+- [Verification](VERIFICATION.md) — automated tests, PostgreSQL, MySQL, MariaDB, CockroachDB and MongoDB acceptance checks, Docker image build, PgBouncer isolation and evidence verification.
 - [Engineering validation evidence](../evidence/engineering-validation-2026-11-09.md) — recorded validation outputs.
 
 ## Multi-database Cloud architecture
