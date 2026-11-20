@@ -77,7 +77,10 @@ pub async fn run_redis_gateway()->io::Result<()>{
 async fn session(socket:TcpStream,acceptor:TlsAcceptor,connector:TlsConnector,registry:Arc<RedisIdentityRegistry>,upstream_addr:&str,server_name:&str)->io::Result<()>{
  let mut client:Io=Box::new(timeout(Duration::from_secs(10),acceptor.accept(socket)).await.map_err(|_|io::ErrorKind::TimedOut)??);
  let mut input=Vec::new();
+ let mut auth_attempts=0usize;
  let principal=loop{
+  auth_attempts+=1;
+  if auth_attempts>3{return Err(io::Error::new(io::ErrorKind::PermissionDenied,"Redis authentication attempt limit reached"));}
   let args=timeout(Duration::from_secs(10),read_command(&mut *client,&mut input)).await.map_err(|_|io::Error::new(io::ErrorKind::TimedOut,"Redis authentication timed out"))??;
   let cmd=std::str::from_utf8(args.first().ok_or_else(||invalid("empty command"))?).map_err(invalid)?.to_ascii_uppercase();
   if cmd!="AUTH"{write_error(&mut *client,"authentication required").await?;continue;}
