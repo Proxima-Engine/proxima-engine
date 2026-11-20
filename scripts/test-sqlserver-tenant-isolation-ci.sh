@@ -19,6 +19,8 @@ tenant_a -Q "INSERT app.records VALUES(2,N'a-write'); UPDATE app.records SET pay
 tenant_b -Q "INSERT app.records VALUES(2,N'b-write'); UPDATE app.records SET payload=N'b-updated' WHERE id=2; DELETE app.records WHERE id=2"
 if tenant_a -Q "SELECT payload FROM proxima_tenant_b_db.app.records" >/dev/null 2>&1; then echo "tenant A crossed into tenant B database" >&2; exit 1; fi
 if tenant_b -Q "SELECT payload FROM proxima_tenant_a_db.app.records" >/dev/null 2>&1; then echo "tenant B crossed into tenant A database" >&2; exit 1; fi
+if tenant_a -Q "USE proxima_tenant_b_db; SELECT 1" >/dev/null 2>&1; then echo "tenant A switched to tenant B database" >&2; exit 1; fi
 if tenant_a -Q "CREATE TABLE app.unauthorized(id int)" >/dev/null 2>&1; then echo "tenant A created schema objects" >&2; exit 1; fi
 if tenant_a -Q "EXECUTE AS LOGIN='proxima_tenant_b'; SELECT 1" >/dev/null 2>&1; then echo "tenant A impersonated tenant B" >&2; exit 1; fi
+if "$SQLCMD" -C -S 127.0.0.1,1433 -U proxima_tenant_a -P wrong-password -d proxima_tenant_a_db -b -Q "SELECT 1" >/dev/null 2>&1; then echo "invalid SQL Server credentials unexpectedly succeeded" >&2; exit 1; fi
 echo "SQL Server native database-per-tenant isolation: PASS"
