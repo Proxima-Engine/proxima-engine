@@ -28,7 +28,9 @@ import hashlib,json,os
 p=os.environ["MYSQL_UPSTREAM_PORT"]
 users=[]
 for u,t,d,pw,up,upp in [("client_a","tenant-a","tenant_a","ClientPassA2026","tenant_a_gateway","TenantAUpstream2026!"),("client_b","tenant-b","tenant_b","ClientPassB2026","tenant_b_gateway","TenantBUpstream2026!")]:
- users.append({"username":u,"tenant_id":t,"database":d,"upstream_url":f"mysql://{up}:{upp}@127.0.0.1:{p}/{d}","password_sha1":hashlib.sha1(pw.encode()).hexdigest()})
+ stage1=hashlib.sha256(pw.encode()).digest()
+ stage2=hashlib.sha256(stage1).hexdigest()
+ users.append({"username":u,"tenant_id":t,"database":d,"upstream_url":f"mysql://{up}:{upp}@127.0.0.1:{p}/{d}","auth_plugin":"caching_sha2_password","password_sha256":stage2})
 with open("/tmp/proxima-mysql-registry.json","w") as f: json.dump({"users":users},f)
 PY
 }

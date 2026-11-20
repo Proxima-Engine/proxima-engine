@@ -292,11 +292,11 @@ where
     }
 
     fn default_auth_plugin(&self) -> &str {
-        "mysql_native_password"
+        "caching_sha2_password"
     }
 
-    async fn auth_plugin_for_username(&self, _user: &[u8]) -> &str {
-        "mysql_native_password"
+    async fn auth_plugin_for_username(&self, user: &[u8]) -> &str {
+        self.registry.auth_plugin_for_username(user)
     }
 
     fn salt(&self) -> [u8; 20] {
