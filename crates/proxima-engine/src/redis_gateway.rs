@@ -103,7 +103,7 @@ async fn session(socket:TcpStream,acceptor:TlsAcceptor,connector:TlsConnector,re
   let frame=encode_command(&args);
   if frame.len()>MAX_FRAME_BYTES{return Err(invalid("rewritten Redis frame exceeds limit"));}
   timeout(Duration::from_secs(10),upstream.write_all(&frame)).await.map_err(|_|io::Error::new(io::ErrorKind::TimedOut,"Redis upstream write timed out"))??;upstream.flush().await?;
-  let reply=read_resp_frame(&mut *upstream,0).await?;
+  let reply=timeout(Duration::from_secs(30),read_resp_frame(&mut *upstream,0)).await.map_err(|_|io::Error::new(io::ErrorKind::TimedOut,"Redis upstream response timed out"))??;
   client.write_all(&reply).await?;client.flush().await?;
  }
 }
