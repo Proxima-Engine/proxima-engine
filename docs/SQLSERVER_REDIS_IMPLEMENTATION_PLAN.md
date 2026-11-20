@@ -16,7 +16,7 @@ The current main branch has passing CI coverage for PostgreSQL, CockroachDB 25.2
 
 SQL Server speaks Tabular Data Stream (TDS), not PostgreSQL wire protocol. It has its own PRELOGIN negotiation, TLS transition, LOGIN7 authentication, packet framing, SQL batches, RPC calls, prepared statements, and session semantics. A PostgreSQL or MySQL gateway cannot be reused as a SQL Server listener.
 
-The target design is a dedicated TDS gateway with a narrow, explicitly documented compatibility surface. The gateway must authenticate a client identity, resolve it to exactly one tenant principal, establish an upstream SQL Server connection using that tenant's least-privilege database identity, and keep the downstream session bound to that identity until disconnect.
+**Decision:** do not implement or advertise a Proxima TDS gateway with the currently available Rust server-side ecosystem. The SQL Server deliverable is a native database-per-tenant security profile: each tenant receives a dedicated SQL Server database and least-privilege SQL login, with the login's default database set to that tenant database. This removes tenant predicates from application SQL and makes SQL Server's native database permissions the enforcement boundary. It is not a Proxima protocol gateway, does not provide gateway-side identity binding or shared-database RLS, and must be positioned separately from the gateway integrations.
 
 SQL Server's native security remains authoritative:
 - Tenant-specific SQL principals and database permissions.
@@ -25,7 +25,7 @@ SQL Server's native security remains authoritative:
 - Deny cross-tenant reads, writes, schema changes, impersonation, and privilege escalation.
 - Do not treat a client-supplied tenant ID or arbitrary SESSION_CONTEXT value as proof of identity.
 
-### Required engineering investigation before gateway implementation
+### TDS gateway feasibility outcome
 
 1. Evaluate the TDS protocol and Rust ecosystem for a maintained, production-usable server-side implementation. The Rust Tiberius project describes itself as a native SQL Server client, so it must not be mistaken for a TDS server. Microsoft’s mssql-rs project and the tds_protocol crate are protocol-layer candidates to audit; the existence of packet/token parsing or a mock TDS server does not itself establish production server support.
 2. Prove PRELOGIN/TLS negotiation, LOGIN7 parsing, authentication failure handling, packet framing, and clean disconnect behavior in a minimal protocol spike.
