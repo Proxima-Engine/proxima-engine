@@ -28,7 +28,6 @@ docker run --rm -v "$CERT_DIR:/certs" cockroachdb/cockroach:v25.2.0 \
   cert create-node localhost 127.0.0.1 --certs-dir=/certs --ca-key=/certs/ca.key
 docker run --rm -v "$CERT_DIR:/certs" cockroachdb/cockroach:v25.2.0 \
   cert create-client root --certs-dir=/certs --ca-key=/certs/ca.key
-chmod 644 "$CERT_DIR/ca.crt"
 
 docker run --detach --name "$CONTAINER" --network host -v "$CERT_DIR:/certs" \
   cockroachdb/cockroach:v25.2.0 \
