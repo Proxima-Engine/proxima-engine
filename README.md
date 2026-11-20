@@ -181,7 +181,7 @@ Then follow the [Quickstart](docs/QUICKSTART.md) to create a table, send a real 
 
 The repository includes PostgreSQL-backed tenant tests and a dedicated [PgBouncer tenant-pool integration test](scripts/test-pgbouncer-pooling.sh), which is run by GitHub Actions.
 
-The verification path covers PostgreSQL 17, MySQL 8.0, MariaDB 11.4, CockroachDB 25.2, MongoDB 8, the Docker image build, and PgBouncer tenant-pool isolation:
+The verification path covers PostgreSQL 17, MySQL 8.0, MariaDB 11.4, CockroachDB 25.2, MongoDB 8, the SQL Server native tenant profile, Redis RESP2 gateway, Docker image build, and PgBouncer tenant-pool isolation:
 
 1. Tenant A authenticates and reads only Tenant A's row.
 2. Tenant B authenticates and reads only Tenant B's row.
