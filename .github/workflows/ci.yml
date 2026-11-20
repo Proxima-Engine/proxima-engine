@@ -31,6 +31,28 @@ jobs:
           --health-interval 5s
           --health-timeout 3s
           --health-retries 12
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: proxima-mysql-ci
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -p${MYSQL_ROOT_PASSWORD}"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+      mariadb:
+        image: mariadb:11.4
+        env:
+          MARIADB_ROOT_PASSWORD: proxima-mariadb-ci
+        ports:
+          - 3308:3306
+        options: >-
+          --health-cmd "healthcheck.sh --connect --innodb_initialized"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -64,8 +86,15 @@ jobs:
         run: cargo test -p proxima-engine
       - name: Build release engine
         run: cargo build -p proxima-engine --release
-      - name: Install PostgreSQL client for acceptance test
-        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - name: Build MySQL protocol gateway
+        run: cargo build -p proxima-engine --bin proxima-mysql-gateway
+      - name: Install database clients for acceptance tests
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client default-mysql-client netcat-openbsd
+      - name: Verify MySQL 8 and MariaDB tenant isolation
+        env:
+          MYSQL_ROOT_PASSWORD: proxima-mysql-ci
+          MARIADB_ROOT_PASSWORD: proxima-mariadb-ci
+        run: bash scripts/test-mysql-gateways-ci.sh
       - name: Verify two-tenant isolation against PostgreSQL
         run: bash scripts/test-two-tenants.sh
       - name: Build container image
