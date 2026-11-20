@@ -27,11 +27,13 @@ SQL Server's native security remains authoritative:
 
 ### Required engineering investigation before gateway implementation
 
-1. Evaluate the TDS protocol and Rust ecosystem for a maintained, production-usable server-side implementation. Tiberius is an SQL Server client library; it must not be mistaken for a TDS server.
+1. Evaluate the TDS protocol and Rust ecosystem for a maintained, production-usable server-side implementation. The Rust Tiberius project describes itself as a native SQL Server client, so it must not be mistaken for a TDS server. Microsoft’s mssql-rs project and the tds_protocol crate are protocol-layer candidates to audit; the existence of packet/token parsing or a mock TDS server does not itself establish production server support.
 2. Prove PRELOGIN/TLS negotiation, LOGIN7 parsing, authentication failure handling, packet framing, and clean disconnect behavior in a minimal protocol spike.
 3. Decide whether the gateway will terminate client TLS and re-encrypt upstream TLS. Certificate validation must be enabled for upstream SQL Server connections. No plaintext credentials or TLS downgrade.
 4. Define the supported TDS version, SQL Server edition/version, authentication mode, and explicitly unsupported protocol features before exposing a customer endpoint.
 5. If a safe TDS server cannot be implemented with a maintainable dependency and adequate test coverage, stop and document a native SQL Server enforcement integration as a separate, explicitly scoped alternative. Do not ship an incomplete or falsely advertised TDS gateway.
+
+Protocol research starting points: [Microsoft mssql-rs](https://github.com/microsoft/mssql-rs), [tds_protocol](https://docs.rs/tds_protocol/latest/tds_protocol/), and [Tiberius](https://github.com/tiberius-rs/tiberius). These are candidates for investigation, not a declaration that a ready-made server gateway exists.
 
 ### Minimum SQL Server acceptance matrix
 
@@ -48,7 +50,7 @@ SQL Server's native security remains authoritative:
 
 ### Security and protocol model
 
-Redis uses RESP2/RESP3 and a command-oriented data model. Tenant isolation must be based on authenticated identity and an enforced key namespace, backed by Redis ACLs. Logical database numbers alone are not a tenant-security boundary.
+Redis uses RESP2/RESP3 and a command-oriented data model. Tenant isolation must be based on authenticated identity and an enforced key namespace, backed by Redis ACLs. Logical database numbers alone are not a tenant-security boundary. The official RESP specification documents binary-safe framing, pipelining, and RESP3; Redis command key specifications are the authoritative starting point for command key extraction. Redis ACLs constrain both commands and key patterns, but key patterns do not restrict keyless administrative commands, so the gateway must also maintain an explicit command policy.
 
 The target design is a dedicated RESP gateway:
 - Authenticate the client against a protected identity registry or supported Redis ACL identity.
@@ -68,6 +70,8 @@ The first release should deny or tightly gate:
 - MONITOR, arbitrary Pub/Sub, client tracking, replication, cluster administration, and commands that expose server-wide metadata.
 - Transactions until MULTI/EXEC/DISCARD state is bound to the same authenticated tenant and all queued commands are validated before execution.
 - Commands with dynamic/ambiguous key positions until covered by a tested command specification.
+
+Protocol and security references: [Redis RESP specification](https://redis.io/docs/latest/develop/reference/protocol-spec/), [Redis ACL documentation](https://redis.io/docs/latest/operate/oss_and_stack/management/security/acl/), and [command key specifications](https://redis.io/docs/latest/develop/reference/key-specs/).
 
 ### Minimum Redis acceptance matrix
 
