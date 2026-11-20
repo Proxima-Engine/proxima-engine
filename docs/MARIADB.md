@@ -14,7 +14,23 @@ The gateway is a separate executable from the PostgreSQL Engine listener. It aut
 
 The gateway does not install or provision a MariaDB server.
 
-## MariaDB server quickstart
+## 2. Clone and build
+
+~~~bash
+git clone https://github.com/Proxima-Engine/proxima-engine.git
+cd proxima-engine
+cargo build --release -p proxima-engine --bin proxima-mysql-gateway
+~~~
+
+PowerShell:
+
+~~~powershell
+git clone https://github.com/Proxima-Engine/proxima-engine.git
+Set-Location .\proxima-engine
+cargo build --release -p proxima-engine --bin proxima-mysql-gateway
+~~~
+
+## 3. Start a disposable MariaDB server
 
 For a disposable local server matching the repository's current CI target, start MariaDB 11.4 in Docker. Port 3308 keeps it separate from a local MySQL server using port 3306:
 
@@ -43,23 +59,7 @@ The MariaDB server listens on container port 3306 and is published on host loopb
 docker rm -f proxima-mariadb
 ~~~
 
-## 2. Clone and build
-
-~~~bash
-git clone https://github.com/Proxima-Engine/proxima-engine.git
-cd proxima-engine
-cargo build --release -p proxima-engine --bin proxima-mysql-gateway
-~~~
-
-PowerShell:
-
-~~~powershell
-git clone https://github.com/Proxima-Engine/proxima-engine.git
-Set-Location .\proxima-engine
-cargo build --release -p proxima-engine --bin proxima-mysql-gateway
-~~~
-
-## 3. Provision tenant databases and upstream accounts
+## 4. Provision tenant databases and upstream accounts
 
 Create one database and one restricted upstream account per tenant:
 
@@ -79,7 +79,7 @@ Create the application's tables in each tenant database. Do not grant either ten
 
 The database selected by the live upstream connection must exactly match the database field in the registry entry.
 
-## 4. Generate client password verifiers
+## 5. Generate client password verifiers
 
 The registry stores a one-way verifier, not the client's plaintext password. For new principals use caching_sha2_password and password_sha256, the hexadecimal encoding of SHA256(SHA256(password)).
 
@@ -106,7 +106,7 @@ Use a unique client password for each principal. Do not reuse the upstream datab
 
 For legacy compatibility, the registry accepts mysql_native_password with password_sha1 containing hexadecimal SHA1(password). Use caching_sha2_password for new clients.
 
-## 5. Create the identity registry
+## 6. Create the identity registry
 
 Create a private directory and registry file. Replace all placeholders with actual tenant identifiers, database names, client verifiers and upstream credentials:
 
@@ -152,7 +152,7 @@ Each principal must contain exactly one verifier. The authentication plugin must
 
 Add secrets/ to .gitignore. Never commit this file or expose its contents in logs.
 
-## 6. Start the gateway
+## 7. Start the gateway
 
 The default listener is 127.0.0.1:3307:
 
@@ -173,7 +173,7 @@ cargo run --release -p proxima-engine --bin proxima-mysql-gateway
 
 Keep the listener on loopback or a private network protected by firewall rules. Do not expose it directly to the public internet.
 
-## 7. Connect clients
+## 8. Connect clients
 
 Use the client-facing credentials from the registry. The gateway selects the upstream credentials from the authenticated principal:
 
@@ -196,7 +196,7 @@ mysql --protocol=TCP -h 127.0.0.1 -P 3307 -u tenant_b_app -p tenant_b
 
 Use a MariaDB-compatible client that supports the configured authentication plugin. The upstream URL must point to the MariaDB instance and assigned tenant database.
 
-## 8. Enforced controls
+## 9. Enforced controls
 
 - Client authentication uses the registry verifier and configured MySQL authentication plugin.
 - An authenticated principal is bound once to the client session and cannot be rebound.
@@ -211,7 +211,7 @@ Use a MariaDB-compatible client that supports the configured authentication plug
 
 SQL admission supplements database grants; it does not replace them. Keep upstream accounts least-privileged and isolated by tenant. Remote upstream TLS must validate the server certificate.
 
-## 9. Integration verification
+## 10. Integration verification
 
 The MariaDB-specific ignored integration test is crates/proxima-engine/tests/mariadb_gateway_integration.rs. CI provisions mariadb:11.4 and maps it to host port 3308.
 
@@ -227,7 +227,7 @@ cargo test -p proxima-engine --test mariadb_gateway_integration -- --ignored --t
 
 This integration test is ignored by default because it requires a live MariaDB service and a running MySQL-compatible Proxima gateway. The CI script provisions the disposable fixture, generates credentials and starts the gateway before running the test.
 
-## 10. Troubleshooting
+## 11. Troubleshooting
 
 | Symptom | Check |
 |---|---|
