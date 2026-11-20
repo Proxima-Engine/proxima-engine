@@ -1,13 +1,13 @@
 # MySQL gateway
 
-This guide configures Proxima's MySQL-compatible protocol gateway against a MySQL upstream server. The gateway uses the MySQL client wire protocol and the dedicated proxima-mysql-gateway executable. The CI compatibility target is MySQL.0; this is the tested CI version, not a restriction in the product name.
+This guide configures Proxima's MySQL-compatible protocol gateway against a MySQL upstream server. The gateway uses the MySQL client wire protocol and the dedicated proxima-mysql-gateway executable. The CI compatibility target is MySQL 8.0; this is the tested CI version, not a restriction in the product name.
 
 The gateway is a separate executable from the PostgreSQL Engine listener. It authenticates each client, binds the session to one immutable tenant principal, opens a dedicated upstream connection and validates the selected database before accepting the client session.
 
 ## 1. Requirements
 
 - Git and stable Rust/Cargo
-- MySQL server (the CI integration target is MySQL.0)
+- MySQL server (the CI integration target is MySQL 8.0)
 - MySQL-compatible client utilities (mysql and mysqladmin)
 - Python 3 for generating password verifiers
 - A private directory for the identity registry and upstream credentials
@@ -186,7 +186,7 @@ SQL admission supplements database grants; it does not replace them. Keep upstre
 
 The MySQL-specific ignored integration test is crates/proxima-engine/tests/mysql_gateway_integration.rs. CI provisions mysql:8.0 on port 3306.
 
-The CI runner provisions a disposable MySQL.0 service, creates two tenant databases and restricted upstream accounts, generates client verifiers, starts the gateway and runs the MySQL integration suite.
+The CI runner provisions a disposable MySQL 8.0 service, creates two tenant databases and restricted upstream accounts, generates client verifiers, starts the gateway and runs the MySQL integration suite.
 
 The tests verify correct authentication, rejection of incorrect caching SHA-2 credentials, tenant-local reads, denial of cross-tenant reads and writes, denial of database switching, persistent session binding after denied operations, and prepared SELECT/INSERT statements.
 
