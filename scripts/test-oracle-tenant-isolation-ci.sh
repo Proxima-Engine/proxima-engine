@@ -45,7 +45,7 @@ if [[ "$ready" != 1 ]]; then
 fi
 
 docker exec -i "$container" bash -lc 'sqlplus -L -s system/"$ORACLE_PASSWORD"@//localhost:1521/FREEPDB1' <<SQL
-WHENEVER SQLERROR EXIT SQL.SQLCODE
+WHENEVER SQLERROR EXIT FAILURE
 CREATE USER PROXIMA_TENANT_A_OWNER IDENTIFIED BY "$tenant_a_password" DEFAULT TABLESPACE USERS TEMPORARY TABLESPACE TEMP QUOTA 100M ON USERS;
 GRANT CREATE SESSION, CREATE TABLE, CREATE SEQUENCE, CREATE VIEW, CREATE PROCEDURE, CREATE TRIGGER TO PROXIMA_TENANT_A_OWNER;
 ALTER USER PROXIMA_TENANT_A_OWNER DEFAULT ROLE NONE;
@@ -62,7 +62,7 @@ tenant_sql() {
 }
 
 a_output="$(tenant_sql PROXIMA_TENANT_A_OWNER "$tenant_a_password" <<'SQL'
-WHENEVER SQLERROR EXIT SQL.SQLCODE
+WHENEVER SQLERROR EXIT FAILURE
 CREATE TABLE records (id NUMBER PRIMARY KEY, payload VARCHAR2(80) NOT NULL);
 INSERT INTO records VALUES (1, 'tenant-a-only');
 COMMIT;
@@ -75,7 +75,7 @@ EXIT
 SQL
 )"
 b_output="$(tenant_sql PROXIMA_TENANT_B_OWNER "$tenant_b_password" <<'SQL'
-WHENEVER SQLERROR EXIT SQL.SQLCODE
+WHENEVER SQLERROR EXIT FAILURE
 CREATE TABLE records (id NUMBER PRIMARY KEY, payload VARCHAR2(80) NOT NULL);
 INSERT INTO records VALUES (1, 'tenant-b-only');
 COMMIT;
@@ -84,6 +84,21 @@ SELECT USER FROM dual;
 EXIT
 SQL
 )"
+
+# Assert that neither schema owner nor PUBLIC has an ANY-table privilege or
+# an object grant on the other tenant's table before running negative probes.
+docker exec -i "$container" bash -lc 'sqlplus -L -s system/"$ORACLE_PASSWORD"@//localhost:1521/FREEPDB1' <<'SQL'
+WHENEVER SQLERROR EXIT FAILURE
+SELECT grantee, privilege FROM dba_sys_privs
+ WHERE grantee IN ('PROXIMA_TENANT_A_OWNER','PROXIMA_TENANT_B_OWNER','PUBLIC')
+   AND privilege IN ('SELECT ANY TABLE','READ ANY TABLE','INSERT ANY TABLE','UPDATE ANY TABLE','DELETE ANY TABLE');
+SELECT grantee, owner, table_name, privilege FROM dba_tab_privs
+ WHERE (owner='PROXIMA_TENANT_B_OWNER' AND table_name='RECORDS'
+        AND grantee IN ('PROXIMA_TENANT_A_OWNER','PUBLIC'))
+    OR (owner='PROXIMA_TENANT_A_OWNER' AND table_name='RECORDS'
+        AND grantee IN ('PROXIMA_TENANT_B_OWNER','PUBLIC'));
+EXIT
+SQL
 grep -q 'tenant-a-only' <<<"$a_output"
 grep -q 'tenant-b-only' <<<"$b_output"
 grep -q 'PROXIMA_TENANT_A_OWNER' <<<"$a_output"
@@ -95,7 +110,7 @@ expect_denied() {
   local user="$1" password="$2" statement="$3"
   local output
   if output="$(tenant_sql "$user" "$password" <<SQL
-WHENEVER SQLERROR EXIT SQL.SQLCODE
+WHENEVER SQLERROR EXIT FAILURE
 SELECT USER FROM dual;
 $statement
 EXIT
