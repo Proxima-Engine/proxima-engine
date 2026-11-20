@@ -21,7 +21,8 @@ impl RedisIdentityRegistry {
         let records=root.get("users").and_then(|v|v.as_array()).ok_or_else(||invalid("users array required"))?;
         if records.is_empty(){return Err(invalid("at least one Redis principal is required"));}
         let mut users=HashMap::new();
-        let mut tenant_users=HashMap::new();\n        let mut upstream_tenants=HashMap::new();
+        let mut tenant_users=HashMap::new();
+        let mut upstream_tenants=HashMap::new();
         for (i,r) in records.iter().enumerate(){
             let field=|k:&str|->io::Result<String>{r.get(k).and_then(|v|v.as_str()).map(str::trim).filter(|v|!v.is_empty()).map(str::to_owned).ok_or_else(||invalid(format!("users[{i}].{k} is required")))};
             let username=field("username")?; let tenant_id=field("tenant_id")?;
