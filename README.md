@@ -25,8 +25,8 @@ Proxima Engine is the open-source Rust data plane in Agata Proxima. It provides 
 | Database | Implementation | Verification |
 |---|---|---|
 | PostgreSQL | PostgreSQL wire-protocol Engine | PostgreSQL integration and tenant-isolation tests; PgBouncer transaction-pooling evidence |
-| MySQL | MySQL-compatible protocol gateway | Real MySQL integration test in CI: tenant separation, prepared statements and invalid-password rejection |
-| MariaDB | Same MySQL-compatible protocol gateway | Real MariaDB integration test in CI: tenant separation, prepared statements and invalid-password rejection |
+| MySQL | MySQL-compatible protocol gateway | MySQL 8.0 integration test in CI: tenant separation, prepared statements and invalid-password rejection |
+| MariaDB | Same MySQL-compatible protocol gateway | MariaDB 11.4 integration test in CI: tenant separation, prepared statements and invalid-password rejection |
 | MongoDB | Separate development workstream | Policy and RBAC foundations; not part of the supported gateway matrix |
 
 MySQL and MariaDB are independently exercised by the integration workflow. The MySQL gateway has its own listener, identity registry and tenant-specific upstream connection path; it is not enabled by the PostgreSQL Compose profile.
@@ -112,7 +112,7 @@ docker compose -f compose.dev.yaml down -v
 
 Continue with [Tenant isolation](docs/TENANT_ISOLATION.md) for tenant roles, signed context, PostgreSQL grants and Row-Level Security.
 
-## MySQL and MariaDB gatewayss
+## MySQL and MariaDB gateways
 
 The MySQL-compatible gateway is a separate executable. Its default listener is 127.0.0.1:3307. It loads client identities from a JSON registry. Each authenticated client is bound to one immutable tenant principal and one dedicated upstream connection. Before accepting the session, the gateway validates that the live upstream database matches the registry assignment.
 
@@ -150,7 +150,7 @@ $env:RUST_LOG = "info"
 
 The registry contains client password verifiers and tenant-specific upstream URLs. Keep it outside version control, restrict file permissions and inject it through a secret-management process. Never commit it or package it into a public image.
 
-Follow the complete [MySQL and MariaDB gateways guide](docs/MYSQL_MARIADB.md) for database provisioning, verifier generation, least-privilege grants, registry configuration, client connection examples, TLS and integration verification.
+Follow the separate [MySQL gateway guide](docs/MYSQL.md) and [MariaDB gateway guide](docs/MARIADB.md). Each has its own upstream setup, CI compatibility target, integration-test command and troubleshooting section. The MySQL-compatible gateway executable is shared; database fixtures and test results are separate.
 
 ## Security model
 
