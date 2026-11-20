@@ -9,8 +9,8 @@ SET @sql=N'USE '+QUOTENAME(@dbA)+N'; EXEC(N''CREATE SCHEMA app AUTHORIZATION dbo
 SET @sql=N'USE '+QUOTENAME(@dbB)+N'; EXEC(N''CREATE SCHEMA app AUTHORIZATION dbo;''); CREATE USER '+QUOTENAME(@loginB)+N' FOR LOGIN '+QUOTENAME(@loginB)+N'; CREATE TABLE app.records(id int NOT NULL PRIMARY KEY,payload nvarchar(100) NOT NULL); INSERT app.records VALUES(1,N''tenant-b''); GRANT SELECT,INSERT,UPDATE,DELETE ON SCHEMA::app TO '+QUOTENAME(@loginB)+N';'; EXEC(@sql);
 IF NOT EXISTS (SELECT 1 FROM sys.databases WHERE name=@dbA) THROW 51000, 'Tenant A database was not provisioned', 1;
 IF NOT EXISTS (SELECT 1 FROM sys.databases WHERE name=@dbB) THROW 51000, 'Tenant B database was not provisioned', 1;
-SET @sql=N'IF NOT EXISTS (SELECT 1 FROM '+QUOTENAME(@dbA)+N'.sys.tables WHERE name=N''records'' AND schema_id=SCHEMA_ID(N''app'')) THROW 51001, ''Tenant A table was not provisioned'', 1;';
+SET @sql=N'IF NOT EXISTS (SELECT 1 FROM '+QUOTENAME(@dbA)+N'.sys.tables t JOIN '+QUOTENAME(@dbA)+N'.sys.schemas s ON s.schema_id=t.schema_id WHERE t.name=N''records'' AND s.name=N''app'') THROW 51001, ''Tenant A table was not provisioned'', 1;';
 EXEC(@sql);
-SET @sql=N'IF NOT EXISTS (SELECT 1 FROM '+QUOTENAME(@dbB)+N'.sys.tables WHERE name=N''records'' AND schema_id=SCHEMA_ID(N''app'')) THROW 51002, ''Tenant B table was not provisioned'', 1;';
+SET @sql=N'IF NOT EXISTS (SELECT 1 FROM '+QUOTENAME(@dbB)+N'.sys.tables t JOIN '+QUOTENAME(@dbB)+N'.sys.schemas s ON s.schema_id=t.schema_id WHERE t.name=N''records'' AND s.name=N''app'') THROW 51002, ''Tenant B table was not provisioned'', 1;';
 EXEC(@sql);
 PRINT 'SQL Server tenant principals and isolated databases provisioned.';
