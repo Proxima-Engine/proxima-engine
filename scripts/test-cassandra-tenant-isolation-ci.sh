@@ -8,8 +8,8 @@ cleanup() { docker rm -f "$container" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 
 docker run -d --name "$container" -p 127.0.0.1:19042:9042 \
-  -e CASSANDRA_AUTHENTICATOR=PasswordAuthenticator \
-  -e CASSANDRA_AUTHORIZER=CassandraAuthorizer \
+  -e CASSANDRA_AUTHENTICATOR=org.apache.cassandra.auth.PasswordAuthenticator \
+  -e CASSANDRA_AUTHORIZER=org.apache.cassandra.auth.CassandraAuthorizer \
   cassandra:5.0 >/dev/null
 
 ready=0
