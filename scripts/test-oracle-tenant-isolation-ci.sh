@@ -74,13 +74,16 @@ printf 'Oracle tenant B session diagnostics:\n%s\n' "$b_output"
 
 expect_denied() {
   local user="$1" password="$2" statement="$3"
-  if tenant_sql "$user" "$password" <<SQL >/dev/null 2>&1
+  local output
+  if output="$(tenant_sql "$user" "$password" <<SQL
 WHENEVER SQLERROR EXIT SQL.SQLCODE
+SELECT USER FROM dual;
 $statement
 EXIT
 SQL
-  then
-    echo "Oracle tenant isolation failure: statement unexpectedly succeeded: $statement" >&2
+)"; then
+    echo "Oracle tenant isolation failure: statement unexpectedly succeeded for $user: $statement" >&2
+    printf '%s\n' "$output" >&2
     exit 1
   fi
 }
