@@ -5,9 +5,10 @@ The Proxima Engine documentation covers the Rust data plane, database protocol g
 ## Start here
 
 - **[Repository README](../README.md)** — product scope, database gateway matrix, architecture, clone instructions and quickstarts.
+- **[PostgreSQL documentation hub](POSTGRESQL.md)** — complete reference-database guide and navigation for setup, tenant isolation, drivers, deployment and evidence.
 - **[PostgreSQL quickstart](QUICKSTART.md)** — launch PostgreSQL and Proxima Engine, run SQL and inspect health and metrics.
-- **[MySQL gateway](MYSQL.md)** — provision MySQL tenant databases, configure client verifiers, connect clients and run the MySQL 8.0 integration suite.
-- **[MariaDB gateway](MARIADB.md)** — provision MariaDB tenant databases, configure client identities, connect clients and run the MariaDB 11.4 integration suite.
+- **[MySQL documentation](MYSQL.md)** — provision MySQL tenant databases, configure client verifiers, connect clients and run the MySQL 8.0 integration suite.
+- **[MariaDB documentation](MARIADB.md)** — provision MariaDB tenant databases, configure client identities, connect clients and run the MariaDB 11.4 integration suite.
 - [Shared MySQL protocol authentication](MYSQL_GATEWAY_AUTH.md) — verifier formats and authentication behavior.
 - [Architecture](ARCHITECTURE.md) — request lifecycle, tenant identity, role routing and system boundaries.
 - [Tenant isolation](TENANT_ISOLATION.md) — tenant roles, RLS, signed context and positive/negative access tests.
@@ -20,7 +21,7 @@ The Proxima Engine documentation covers the Rust data plane, database protocol g
 
 | Database | Guide | Implementation |
 |---|---|---|
-| PostgreSQL | [Quickstart](QUICKSTART.md), [tenant isolation](TENANT_ISOLATION.md), [driver integrations](INTEGRATIONS.md) | PostgreSQL wire-protocol Engine |
+| PostgreSQL | [Documentation hub](POSTGRESQL.md), [quickstart](QUICKSTART.md), [tenant isolation](TENANT_ISOLATION.md), [driver integrations](INTEGRATIONS.md) | PostgreSQL wire-protocol Engine |
 | MySQL | [Dedicated guide](MYSQL.md), [authentication](MYSQL_GATEWAY_AUTH.md) | proxima-mysql-gateway; MySQL 8.0 integration suite in CI |
 | MariaDB | [Dedicated guide](MARIADB.md), [authentication](MYSQL_GATEWAY_AUTH.md) | MySQL-compatible client protocol gateway |
 | MongoDB | [MongoDB development pull request](https://github.com/Proxima-Engine/proxima-engine/pull/34) | Separate development track; not part of the supported gateway matrix |

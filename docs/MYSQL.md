@@ -1,6 +1,6 @@
 # MySQL gateway
 
-This guide configures Proxima's MySQL-compatible protocol gateway against a MySQL upstream server. The gateway uses the MySQL client wire protocol and the dedicated proxima-mysql-gateway executable. The CI compatibility target is MySQL 8.0; this is the tested CI version, not a restriction in the product name.
+This guide configures Proxima's MySQL-compatible protocol gateway against a MySQL upstream server. The gateway uses the MySQL client wire protocol and the dedicated proxima-mysql-gateway executable. The product guide is named MySQL. The repository's current CI compatibility target is MySQL Server 8.0; the version is recorded as a test target, not as the product name.
 
 The gateway is a separate executable from the PostgreSQL Engine listener. It authenticates each client, binds the session to one immutable tenant principal, opens a dedicated upstream connection and validates the selected database before accepting the client session.
 
@@ -30,7 +30,36 @@ Set-Location .\proxima-engine
 cargo build --release -p proxima-engine --bin proxima-mysql-gateway
 ~~~
 
-## 3. Provision tenant databases and upstream accounts
+## 3. Start a disposable MySQL server
+
+For a disposable local server matching the repository's current CI target, start MySQL 8.0 in Docker:
+
+~~~bash
+docker run -d --name proxima-mysql \
+  -e MYSQL_ROOT_PASSWORD=proxima-mysql-local \
+  -p 127.0.0.1:3306:3306 \
+  mysql:8.0
+~~~
+
+Wait until the server is ready:
+
+~~~bash
+docker exec proxima-mysql mysqladmin ping -uroot -pproxima-mysql-local --silent
+~~~
+
+Confirm the upstream server identity before creating tenant fixtures:
+
+~~~bash
+docker exec proxima-mysql mysql -uroot -pproxima-mysql-local -e "SELECT VERSION(), @@version_comment;"
+~~~
+
+Use a disposable database only. The next section creates two separate tenant databases and dedicated least-privilege upstream users. Remove the local server when finished:
+
+~~~bash
+docker rm -f proxima-mysql
+~~~
+
+## 4. Provision tenant databases and upstream accounts
 
 Create one database and one restricted upstream account per tenant:
 
@@ -50,7 +79,7 @@ Create the application's tables in each tenant database. Do not grant either ten
 
 The database selected by the live upstream connection must exactly match the database field in the registry entry.
 
-## 4. Generate client password verifiers
+## 5. Generate client password verifiers
 
 The registry stores a one-way verifier, not the client's plaintext password. For new principals use caching_sha2_password and password_sha256, the hexadecimal encoding of SHA256(SHA256(password)).
 
@@ -77,7 +106,7 @@ Use a unique client password for each principal. Do not reuse the upstream datab
 
 For legacy compatibility, the registry accepts mysql_native_password with password_sha1 containing hexadecimal SHA1(password). Use caching_sha2_password for new clients.
 
-## 5. Create the identity registry
+## 6. Create the identity registry
 
 Create a private directory and registry file. Replace all placeholders with actual tenant identifiers, database names, client verifiers and upstream credentials:
 
@@ -123,7 +152,7 @@ Each principal must contain exactly one verifier. The authentication plugin must
 
 Add secrets/ to .gitignore. Never commit this file or expose its contents in logs.
 
-## 6. Start the gateway
+## 7. Start the gateway
 
 The default listener is 127.0.0.1:3307:
 
@@ -144,7 +173,7 @@ cargo run --release -p proxima-engine --bin proxima-mysql-gateway
 
 Keep the listener on loopback or a private network protected by firewall rules. Do not expose it directly to the public internet.
 
-## 7. Connect clients
+## 8. Connect clients
 
 Use the client-facing credentials from the registry. The gateway selects the upstream credentials from the authenticated principal:
 
@@ -167,7 +196,7 @@ mysql --protocol=TCP -h 127.0.0.1 -P 3307 -u tenant_b_app -p tenant_b
 
 Use a MySQL client that supports the configured authentication plugin. The upstream URL must point to the MySQL instance and assigned tenant database.
 
-## 8. Enforced controls
+## 9. Enforced controls
 
 - Client authentication uses the registry verifier and configured MySQL authentication plugin.
 - An authenticated principal is bound once to the client session and cannot be rebound.
@@ -182,7 +211,7 @@ Use a MySQL client that supports the configured authentication plugin. The upstr
 
 SQL admission supplements database grants; it does not replace them. Keep upstream accounts least-privileged and isolated by tenant. Remote upstream TLS must validate the server certificate.
 
-## 9. Integration verification
+## 10. Integration verification
 
 The MySQL-specific ignored integration test is crates/proxima-engine/tests/mysql_gateway_integration.rs. CI provisions mysql:8.0 on port 3306.
 
@@ -198,7 +227,7 @@ cargo test -p proxima-engine --test mysql_gateway_integration -- --ignored --tes
 
 These tests are ignored by default because they require live database services and a running gateway. The CI script is the reproducible reference for the fixture and process lifecycle.
 
-## 10. Troubleshooting
+## 11. Troubleshooting
 
 | Symptom | Check |
 |---|---|
