@@ -1,4 +1,3 @@
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OracleTenant { tenant_id: String, username: String, password: String }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -21,7 +20,7 @@ impl OracleTenant {
             || !tenant_id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') {
             return Err(OracleTenantError::InvalidTenantId);
         }
-        if password.len() < 24 || password.contains('\0') { return Err(OracleTenantError::WeakPassword); }
+        if password.len() < 24 || !password.bytes().all(|b| (33..=126).contains(&b)) { return Err(OracleTenantError::WeakPassword); }
         let tenant_id = tenant_id.to_ascii_uppercase();
         Ok(Self { username: format!("PROXIMA_{}_OWNER", tenant_id), tenant_id, password: password.to_owned() })
     }
