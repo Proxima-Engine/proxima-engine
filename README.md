@@ -143,11 +143,13 @@ For Cloud API integration, the website provides a standalone Node.js CLI archive
 
 The JavaScript API client is bundled source code, not a published npm package. The Terraform material is an integration/check example, not a dedicated Terraform provider. Proxima database traffic uses the existing native database drivers; a separate Proxima SQL-driver SDK is not required.
 
-## Current Cloud management boundary
+## Cloud-managed database configuration
 
-The hosted Agata Proxima Cloud control plane currently manages its documented PostgreSQL-oriented node enrollment, tenant, policy, deployment, verification and evidence workflow. MySQL and MariaDB gateways can be built, configured and tested through their dedicated Engine guides, but Cloud does not yet provision database targets, deliver MySQL/MariaDB registry secrets, select engine-specific policies or orchestrate their gateway deployments and verification.
+Agata Proxima Cloud now has a multi-provider database-target management foundation. It can register organization-scoped targets, protect stored credentials, track node assignments and revisions, and deliver a signed, node-bound encrypted configuration bundle to an enrolled Engine. The Engine-side worker verifies the bundle and stages it locally; its `staged` acknowledgement confirms receipt and persistence only.
 
-The planned multi-database Cloud model is documented in [Database gateways in Agata Proxima Cloud](docs/CLOUD_CONTROL_PLANE.md). It defines database targets, gateway capabilities, tenant bindings, engine-specific policy compilation, deployment and per-engine verification. Do not treat a generic PostgreSQL Cloud node as a configured MySQL or MariaDB gateway.
+**Staged configuration is not a running gateway.** The Engine branch currently does not claim that the staged target has been applied to a live gateway process. Before a Cloud target can be considered ready, the deployment must supervise the correct gateway process, load the intended target and tenant identity configuration, establish and verify the real upstream TLS connection, pass listener and upstream health checks, and send the final signed `applied` acknowledgement. Provider-specific tenant provisioning, least-privilege identities, policy deployment and executed cross-tenant isolation evidence are also required.
+
+The Cloud provider catalog is not a promise of uniform protocol support. PostgreSQL and CockroachDB use the PostgreSQL wire gateway with distinct database-native security profiles; MySQL and MariaDB use the MySQL-compatible gateway; MongoDB uses its restricted OP_MSG gateway; Redis is a restricted RESP2 preview; SQL Server is a native database-per-tenant preview and is not a Proxima TDS proxy. See [Database gateways in Cloud](docs/CLOUD_CONTROL_PLANE.md) and the provider-specific guides above.
 
 ---
 
