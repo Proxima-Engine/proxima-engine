@@ -430,37 +430,92 @@ impl MongoCursorRegistry {
     }
 }
 
+const SESSION_IDLE_TTL: std::time::Duration = std::time::Duration::from_secs(30 * 60);
+const MAX_SESSION_BINDINGS: usize = 100_000;
+
+struct SessionBinding {
+    tenant_id: String,
+    last_seen: std::time::Instant,
+}
+
 #[derive(Default)]
 pub struct MongoSessionRegistry {
-    sessions: Mutex<HashMap<Vec<u8>, String>>,
+    sessions: Mutex<HashMap<Vec<u8>, SessionBinding>>,
 }
 
 impl MongoSessionRegistry {
+    fn key(lsid: &Document) -> Result<Vec<u8>, MongoPolicyError> {
+        bson::to_vec(lsid).map_err(|_| MongoPolicyError::InvalidCommand("lsid could not be serialized".into()))
+    }
+
+    fn prune_expired(sessions: &mut HashMap<Vec<u8>, SessionBinding>, now: std::time::Instant) {
+        sessions.retain(|_, binding| now.saturating_duration_since(binding.last_seen) < SESSION_IDLE_TTL);
+    }
+
     pub fn bind(&self, tenant_id: &str, lsid: &Document) -> Result<(), MongoPolicyError> {
-        let key = bson::to_vec(lsid).map_err(|_| MongoPolicyError::InvalidCommand("lsid could not be serialized".into()))?;
+        let key = Self::key(lsid)?;
+        let now = std::time::Instant::now();
         let mut sessions = self.sessions.lock().map_err(|_| MongoPolicyError::RegistryUnavailable)?;
-        match sessions.get(&key) {
-            Some(owner) if owner != tenant_id => Err(MongoPolicyError::CrossTenantSession),
-            Some(_) => Ok(()),
-            None => { sessions.insert(key, tenant_id.to_owned()); Ok(()) }
+        Self::prune_expired(&mut sessions, now);
+        match sessions.get_mut(&key) {
+            Some(binding) if binding.tenant_id != tenant_id => Err(MongoPolicyError::CrossTenantSession),
+            Some(binding) => {
+                binding.last_seen = now;
+                Ok(())
+            }
+            None => {
+                if sessions.len() >= MAX_SESSION_BINDINGS {
+                    return Err(MongoPolicyError::RegistryUnavailable);
+                }
+                sessions.insert(key, SessionBinding { tenant_id: tenant_id.to_owned(), last_seen: now });
+                Ok(())
+            }
         }
     }
 
     pub fn authorize(&self, tenant_id: &str, lsid: &Document) -> Result<(), MongoPolicyError> {
-        let key = bson::to_vec(lsid).map_err(|_| MongoPolicyError::InvalidCommand("lsid could not be serialized".into()))?;
-        let sessions = self.sessions.lock().map_err(|_| MongoPolicyError::RegistryUnavailable)?;
-        match sessions.get(&key) {
-            Some(owner) if owner == tenant_id => Ok(()),
+        let key = Self::key(lsid)?;
+        let now = std::time::Instant::now();
+        let mut sessions = self.sessions.lock().map_err(|_| MongoPolicyError::RegistryUnavailable)?;
+        Self::prune_expired(&mut sessions, now);
+        match sessions.get_mut(&key) {
+            Some(binding) if binding.tenant_id == tenant_id => {
+                binding.last_seen = now;
+                Ok(())
+            }
             Some(_) => Err(MongoPolicyError::CrossTenantSession),
             None => Err(MongoPolicyError::UnknownSession),
         }
     }
 
+    pub fn release_if_owned(&self, tenant_id: &str, lsid: &Document) -> Result<(), MongoPolicyError> {
+        let key = Self::key(lsid)?;
+        let now = std::time::Instant::now();
+        let mut sessions = self.sessions.lock().map_err(|_| MongoPolicyError::RegistryUnavailable)?;
+        Self::prune_expired(&mut sessions, now);
+        match sessions.get(&key) {
+            Some(binding) if binding.tenant_id != tenant_id => Err(MongoPolicyError::CrossTenantSession),
+            Some(_) => {
+                sessions.remove(&key);
+                Ok(())
+            }
+            None => Ok(()),
+        }
+    }
+
     pub fn release(&self, tenant_id: &str, lsid: &Document) -> Result<(), MongoPolicyError> {
-        self.authorize(tenant_id, lsid)?;
-        let key = bson::to_vec(lsid).map_err(|_| MongoPolicyError::InvalidCommand("lsid could not be serialized".into()))?;
-        self.sessions.lock().map_err(|_| MongoPolicyError::RegistryUnavailable)?.remove(&key);
-        Ok(())
+        let key = Self::key(lsid)?;
+        let now = std::time::Instant::now();
+        let mut sessions = self.sessions.lock().map_err(|_| MongoPolicyError::RegistryUnavailable)?;
+        Self::prune_expired(&mut sessions, now);
+        match sessions.get(&key) {
+            Some(binding) if binding.tenant_id != tenant_id => Err(MongoPolicyError::CrossTenantSession),
+            Some(_) => {
+                sessions.remove(&key);
+                Ok(())
+            }
+            None => Err(MongoPolicyError::UnknownSession),
+        }
     }
 }
 
