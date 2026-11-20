@@ -3,8 +3,9 @@ FROM rust:1.89-slim-bookworm AS builder
 WORKDIR /src
 
 # These assets are embedded into the binary at compile time.
-COPY Cargo.toml ./
+COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
+COPY vendor ./vendor
 COPY dashboard ./dashboard
 COPY frontend/src/assets/agata-proxima-orbit.svg ./frontend/src/assets/agata-proxima-orbit.svg
 
