@@ -24,7 +24,7 @@ docker run --detach --name "$CONTAINER" \
 
 ready=0
 for _ in $(seq 1 60); do
-  if timeout 5s docker exec "$CONTAINER" cockroach sql --insecure --host=127.0.0.1:26257 --execute='SELECT 1' >/dev/null 2>&1; then
+  if timeout 5s docker exec "$CONTAINER" cockroach sql --insecure --host=127.0.0.1 --port=26257 --execute='SELECT 1' >/dev/null 2>&1; then
     ready=1
     break
   fi
@@ -36,7 +36,7 @@ if [[ "$ready" != "1" ]]; then
   exit 1
 fi
 
-timeout 90s docker exec "$CONTAINER" cockroach sql --insecure --host=127.0.0.1:26257 <<'SQL'
+timeout 90s docker exec "$CONTAINER" cockroach sql --insecure --host=127.0.0.1 --port=26257 <<'SQL'
 CREATE DATABASE proxima_dev;
 CREATE USER proxima_tenant_cli_a WITH PASSWORD 'tenant-a-password';
 CREATE USER proxima_tenant_cli_b WITH PASSWORD 'tenant-b-password';
