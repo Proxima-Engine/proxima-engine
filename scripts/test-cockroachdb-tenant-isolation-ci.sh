@@ -93,7 +93,7 @@ token_a="$(python3 scripts/agata.py token --config "$DEV_DIR/dev-config.json" --
 token_b="$(python3 scripts/agata.py token --config "$DEV_DIR/dev-config.json" --tenant cli_b --ttl 300)"
 run_tenant() {
   local token="$1" sql="$2"
-  timeout 20s env PGCONNECT_TIMEOUT=5 PGOPTIONS="-c statement_timeout=10000 -c proxima_tenant_token=$token" psql -X -A -t -v ON_ERROR_STOP=1 \
+  timeout 20s env -u PGPASSWORD PGCONNECT_TIMEOUT=5 PGOPTIONS="-c statement_timeout=10000 -c proxima_tenant_token=$token" psql -X -A -t -v ON_ERROR_STOP=1 \
     "host=127.0.0.1 port=16433 dbname=proxima_dev user=client sslmode=disable" -c "$sql"
 }
 
