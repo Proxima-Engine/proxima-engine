@@ -91,14 +91,21 @@ jobs:
           mkdir -p secrets
           printf 'test-enrollment-token' > secrets/node_enrollment_token
           printf '{"users":[]}' > secrets/mysql-identities.json
+          printf '{"users":[{"username":"tenant_a_gateway","tenant_id":"tenant-a","database":"tenant_a_db"}]}' > secrets/mongodb-identities.json
+          printf 'ci-only-gateway-cert' > secrets/mongodb-gateway-cert.pem
+          printf 'ci-only-gateway-key' > secrets/mongodb-gateway-key.pem
+          printf 'ci-only-upstream-ca' > secrets/mongodb-upstream-ca.pem
           cat > .env <<'EOF'
           PROXIMA_NODE_ID=00000000-0000-4000-8000-000000000001
           PROXIMA_NODE_ENROLLMENT_URL=https://api.agataproxima.com/api/v1/nodes/enroll
           PROXIMA_UPSTREAM_ADDR=127.0.0.1:5432
           PROXIMA_LISTEN_ADDR=0.0.0.0:6432
           PROXIMA_ENVIRONMENT=production
+          PROXIMA_MONGODB_UPSTREAM_ADDR=127.0.0.1:27017
+          PROXIMA_MONGODB_UPSTREAM_TLS_SERVER_NAME=localhost
           EOF
           docker compose -f compose.customer.yaml config --quiet
+          docker compose -f compose.customer.yaml --profile mongodb config --quiet
       - name: Run engine tests
         run: cargo test -p proxima-engine
       - name: Build release engine
