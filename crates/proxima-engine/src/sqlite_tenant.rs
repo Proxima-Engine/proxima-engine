@@ -40,6 +40,7 @@ impl SqliteTenantDatabase {
         let metadata = fs::symlink_metadata(&tenant_dir)?;
         if metadata.file_type().is_symlink() || !metadata.is_dir() { return Err(SqliteTenantError::UnsafePath); }
         let tenant_dir = fs::canonicalize(&tenant_dir)?;
+        set_private_dir_permissions(&tenant_dir)?;
         if !tenant_dir.starts_with(&root) { return Err(SqliteTenantError::UnsafePath); }
 
         let path = tenant_dir.join(DATABASE_FILE);
@@ -50,6 +51,7 @@ impl SqliteTenantDatabase {
         }
         let metadata = fs::symlink_metadata(&path)?;
         if metadata.file_type().is_symlink() || !metadata.is_file() { return Err(SqliteTenantError::UnsafePath); }
+        set_private_file_permissions(&path)?;
         let canonical_path = fs::canonicalize(&path)?;
         if !canonical_path.starts_with(&tenant_dir) { return Err(SqliteTenantError::UnsafePath); }
 
