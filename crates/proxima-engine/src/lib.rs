@@ -21,3 +21,5 @@ pub mod mysql_session;
 pub mod mysql_gateway;
 
 pub mod mongodb_policy;
+
+pub mod mongodb_gateway;
