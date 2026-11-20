@@ -57,6 +57,14 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 30
+      sqlserver:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: Y
+          MSSQL_PID: Developer
+          MSSQL_SA_PASSWORD: CI-only-NotASecret-2026!
+        ports:
+          - 1433:1433
       mongo:
         image: mongo:8.0
         env:
