@@ -60,6 +60,38 @@ mongodb://tenant_a_gateway:<password>@gateway.example:27018/tenant_a_db?authSour
 
 Client-to-gateway TLS is mandatory. Upstream TLS verification is enabled by default. Disabling upstream TLS is intended only for isolated local development and CI service containers.
 
+## Customer Docker Compose profile
+
+The customer Compose definition includes an opt-in `mongodb` profile. It runs the dedicated MongoDB gateway executable from the same versioned runtime image as the PostgreSQL Engine and MySQL gateway.
+
+Before starting the profile, create the secret files referenced by `compose.customer.yaml`:
+
+- `secrets/mongodb-identities.json`: the tenant-to-database identity registry shown above; it contains usernames and tenant/database bindings, never passwords.
+- `secrets/mongodb-gateway-cert.pem` and `secrets/mongodb-gateway-key.pem`: the gateway's client-facing TLS certificate and private key. Protect the private key as a secret.
+- `secrets/mongodb-upstream-ca.pem`: the CA certificate used to verify the upstream MongoDB server certificate.
+- `secrets/node_enrollment_token`: the one-time Proxima node enrollment token required by the default Engine service in this customer Compose stack.
+- `secrets/mysql-identities.json`: required by the optional MySQL profile definition.
+
+Set the upstream address and TLS server name in the Compose environment file:
+
+```dotenv
+PROXIMA_MONGODB_UPSTREAM_ADDR=mongodb.internal.example:27017
+PROXIMA_MONGODB_UPSTREAM_TLS=true
+PROXIMA_MONGODB_UPSTREAM_TLS_SERVER_NAME=mongodb.internal.example
+PROXIMA_MONGODB_BIND_ADDRESS=127.0.0.1
+```
+
+Start the gateway profile:
+
+```bash
+docker compose -f compose.customer.yaml --profile mongodb up -d --build mongodb-gateway
+docker compose -f compose.customer.yaml logs -f mongodb-gateway
+```
+
+The gateway listens on `127.0.0.1:27018` by default. Keep it bound to loopback when the application shares the host; if it must be reachable over a network, use a private interface, firewall rules and verified client TLS. Connect with `tls=true` and `directConnection=true` in the MongoDB driver URI. Do not publish the gateway on an unrestricted public interface.
+
+The profile requires a verified upstream TLS CA and server name. It does not create MongoDB users or databases; provision each upstream identity with the least-privilege role described in the security model before starting the gateway.
+
 ## Wire protocol and command policy
 
 The gateway parses MongoDB OP_MSG frames and BSON command documents. It removes speculative authentication and compression negotiation from hello messages so that commands remain inspectable. Document sequences for insert, update, and delete are decoded and included in policy validation.
