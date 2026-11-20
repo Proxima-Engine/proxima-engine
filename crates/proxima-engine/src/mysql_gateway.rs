@@ -590,7 +590,7 @@ where
                 }
             };
 
-            let values: Vec<Option<String>> = row
+            let values: Vec<Option<MysqlOutputValue>> = row
                 .unwrap()
                 .into_iter()
                 .map(upstream_value_to_output)
@@ -734,7 +734,7 @@ where
                 }
             };
 
-            let values: Vec<Option<String>> = row
+            let values: Vec<Option<MysqlOutputValue>> = row
                 .unwrap()
                 .into_iter()
                 .map(upstream_value_to_output)
