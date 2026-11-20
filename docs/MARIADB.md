@@ -196,7 +196,7 @@ To run a test manually, first provision the disposable fixtures and start the ga
 cargo test -p proxima-engine --test mariadb_gateway_integration -- --ignored --test-threads=1
 ~~~
 
-These tests are ignored by default because they require live database services and a running gateway. The CI script is the reproducible reference for the fixture and process lifecycle.
+This integration test is ignored by default because it requires a live MySQL service and a running gateway. The CI script provisions the disposable fixture, generates credentials and starts the gateway before running the test.
 
 ## 10. Troubleshooting
 
