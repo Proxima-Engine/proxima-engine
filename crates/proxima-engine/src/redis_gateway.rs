@@ -113,15 +113,15 @@ async fn session(socket:TcpStream,acceptor:TlsAcceptor,connector:TlsConnector,re
   client.write_all(&reply).await?;client.flush().await?;
  }
 }
-async fn read_command<R:AsyncRead+Unpin>(r:&mut R,buf:&mut Vec<u8>)->io::Result<Vec<Vec<u8>>>{
+async fn read_command<R:AsyncRead+Unpin+?Sized>(r:&mut R,buf:&mut Vec<u8>)->io::Result<Vec<Vec<u8>>>{
  loop{
   match parse_command(buf){Ok(Some((args,n)))=>{buf.drain(..n);return Ok(args)},Ok(None)=>{},Err(e)=>return Err(invalid(format!("invalid RESP command: {e:?}")))}
   if buf.len()>=MAX_FRAME_BYTES{return Err(invalid("RESP request exceeds frame limit"));}
   let mut chunk=[0u8;8192];let n=r.read(&mut chunk).await?;if n==0{return Err(io::ErrorKind::UnexpectedEof.into());}buf.extend_from_slice(&chunk[..n]);
  }
 }
-async fn line<R:AsyncRead+Unpin>(r:&mut R)->io::Result<Vec<u8>>{let mut v=Vec::new();loop{let b=r.read_u8().await?;v.push(b);if v.len()>128{return Err(invalid("RESP line too long"));}if v.ends_with(b"\r\n"){v.truncate(v.len()-2);return Ok(v);}}}
-fn read_resp_frame<'a,R:AsyncRead+Unpin+Send>(r:&'a mut R,depth:usize)->Pin<Box<dyn Future<Output=io::Result<Vec<u8>>>+Send+'a>>{Box::pin(async move {
+async fn line<R:AsyncRead+Unpin+?Sized>(r:&mut R)->io::Result<Vec<u8>>{let mut v=Vec::new();loop{let b=r.read_u8().await?;v.push(b);if v.len()>128{return Err(invalid("RESP line too long"));}if v.ends_with(b"\r\n"){v.truncate(v.len()-2);return Ok(v);}}}
+fn read_resp_frame<'a,R:AsyncRead+Unpin+Send+?Sized>(r:&'a mut R,depth:usize)->Pin<Box<dyn Future<Output=io::Result<Vec<u8>>>+Send+'a>>{Box::pin(async move {
  if depth>32{return Err(invalid("RESP nesting limit exceeded"));}
  let ty=r.read_u8().await?;let mut out=vec![ty];
  match ty{
@@ -132,7 +132,7 @@ fn read_resp_frame<'a,R:AsyncRead+Unpin+Send>(r:&'a mut R,depth:usize)->Pin<Box<
  }
  if out.len()>MAX_FRAME_BYTES{return Err(invalid("RESP reply too large"));}Ok(out)
 })}
-async fn write_error<W:AsyncWrite+Unpin>(w:&mut W,msg:&str)->io::Result<()>{let safe=msg.replace('\r'," ").replace('\n'," ");w.write_all(format!("-ERR {safe}\r\n").as_bytes()).await?;w.flush().await}
+async fn write_error<W:AsyncWrite+Unpin+?Sized>(w:&mut W,msg:&str)->io::Result<()>{let safe=msg.replace('\r'," ").replace('\n'," ");w.write_all(format!("-ERR {safe}\r\n").as_bytes()).await?;w.flush().await}
 fn server_tls(cert:&str,key:&str)->io::Result<ServerConfig>{
  let certs=rustls_pemfile::certs(&mut BufReader::new(File::open(cert)?)).collect::<Result<Vec<CertificateDer<'static>>,_>>().map_err(invalid)?;
  let key=rustls_pemfile::private_key(&mut BufReader::new(File::open(key)?)).map_err(invalid)?.ok_or_else(||invalid("TLS private key missing"))?;
