@@ -26,6 +26,7 @@ use uuid::Uuid;
 
 const SERVER_VERSION: &str = "8.0.0-agata-proxima";
 const UPSTREAM_CONNECT_TIMEOUT_SECS: u64 = 10;
+const QUERY_TIMEOUT_SECS: u64 = 30;
 const DEFAULT_MAX_CONNECTIONS: usize = 128;
 
 /// One upstream connection and its prepared statements belong to one
@@ -90,6 +91,35 @@ impl MysqlGatewaySession {
 /// Date/time binary parameter payloads are deliberately rejected until
 /// their complete binary encodings are explicitly validated and decoded.
 /// Treating binary date/time payloads as ordinary strings would be unsafe.
+fn decode_date_payload(bytes: &[u8]) -> Result<(u16, u8, u8), ()> {
+    if bytes.is_empty() { return Ok((0, 0, 0)); }
+    if bytes.len() != 4 { return Err(()); }
+    let year = u16::from_le_bytes([bytes[0], bytes[1]]);
+    let (month, day) = (bytes[2], bytes[3]);
+    if month > 12 || day > 31 { return Err(()); }
+    Ok((year, month, day))
+}
+
+fn decode_datetime_payload(bytes: &[u8]) -> Result<(u16, u8, u8, u8, u8, u8, u32), ()> {
+    if bytes.is_empty() { return Ok((0, 0, 0, 0, 0, 0, 0)); }
+    if !matches!(bytes.len(), 4 | 7 | 11) { return Err(()); }
+    let (year, month, day) = decode_date_payload(&bytes[..4])?;
+    let (hour, minute, second) = if bytes.len() >= 7 { (bytes[4], bytes[5], bytes[6]) } else { (0, 0, 0) };
+    let micros = if bytes.len() == 11 { u32::from_le_bytes(bytes[7..11].try_into().map_err(|_| ())?) } else { 0 };
+    if hour > 23 || minute > 59 || second > 59 || micros > 999_999 { return Err(()); }
+    Ok((year, month, day, hour, minute, second, micros))
+}
+
+fn decode_time_payload(bytes: &[u8]) -> Result<(bool, u32, u8, u8, u8, u32), ()> {
+    if bytes.is_empty() { return Ok((false, 0, 0, 0, 0, 0)); }
+    if !matches!(bytes.len(), 8 | 12) || bytes[0] > 1 { return Err(()); }
+    let days = u32::from_le_bytes(bytes[1..5].try_into().map_err(|_| ())?);
+    let (hours, minutes, seconds) = (bytes[5], bytes[6], bytes[7]);
+    let micros = if bytes.len() == 12 { u32::from_le_bytes(bytes[8..12].try_into().map_err(|_| ())?) } else { 0 };
+    if hours > 23 || minutes > 59 || seconds > 59 || micros > 999_999 { return Err(()); }
+    Ok((bytes[0] == 1, days, hours, minutes, seconds, micros))
+}
+
 fn convert_parameter(value: ValueInner<'_>) -> Result<UpstreamValue, ()> {
     match value {
         ValueInner::NULL => Ok(UpstreamValue::NULL),
@@ -97,7 +127,18 @@ fn convert_parameter(value: ValueInner<'_>) -> Result<UpstreamValue, ()> {
         ValueInner::Int(value) => Ok(UpstreamValue::Int(value)),
         ValueInner::UInt(value) => Ok(UpstreamValue::UInt(value)),
         ValueInner::Double(value) => Ok(UpstreamValue::Double(value)),
-        ValueInner::Date(_) | ValueInner::Time(_) | ValueInner::Datetime(_) => Err(()),
+        ValueInner::Date(bytes) => {
+            let (year, month, day) = decode_date_payload(bytes)?;
+            Ok(UpstreamValue::Date(year, month, day, 0, 0, 0, 0))
+        }
+        ValueInner::Datetime(bytes) => {
+            let (year, month, day, hour, minute, second, micros) = decode_datetime_payload(bytes)?;
+            Ok(UpstreamValue::Date(year, month, day, hour, minute, second, micros))
+        }
+        ValueInner::Time(bytes) => {
+            let (negative, days, hours, minutes, seconds, micros) = decode_time_payload(bytes)?;
+            Ok(UpstreamValue::Time(negative, days, hours, minutes, seconds, micros))
+        }
     }
 }
 
@@ -310,7 +351,7 @@ where
                 .await;
         };
 
-        let statement = match session.connection.prep(query).await {
+        let statement = match tokio::time::timeout(std::time::Duration::from_secs(QUERY_TIMEOUT_SECS), session.connection.prep(query)).await.unwrap_or_else(|_| Err(mysql_async::DriverError::ConnectionClosed.into())) {
             Ok(statement) => statement,
             Err(_) => {
                 return info
@@ -414,7 +455,7 @@ where
                 .await;
         }
 
-        let mut upstream_result = match session.connection.exec_iter(statement, values).await {
+        let mut upstream_result = match tokio::time::timeout(std::time::Duration::from_secs(QUERY_TIMEOUT_SECS), session.connection.exec_iter(statement, values)).await.unwrap_or_else(|_| Err(mysql_async::DriverError::ConnectionClosed.into())) {
             Ok(result) => result,
             Err(error) => {
                 tracing::warn!(
@@ -477,7 +518,7 @@ where
             }
         };
 
-        while let Some(row_result) = rows.next().await {
+        while let Some(row_result) = match tokio::time::timeout(std::time::Duration::from_secs(QUERY_TIMEOUT_SECS), rows.next()).await { Ok(next) => next, Err(_) => return output.finish_error(ErrorKind::ER_UNKNOWN_ERROR, &b"upstream row stream timed out".to_vec()).await } {
             let row = match row_result {
                 Ok(row) => row,
                 Err(_) => {
@@ -566,7 +607,7 @@ where
                 .await;
         };
 
-        let mut upstream_result = match session.connection.query_iter(query).await {
+        let mut upstream_result = match tokio::time::timeout(std::time::Duration::from_secs(QUERY_TIMEOUT_SECS), session.connection.query_iter(query)).await.unwrap_or_else(|_| Err(mysql_async::DriverError::ConnectionClosed.into())) {
             Ok(result) => result,
             Err(_) => {
                 return results
@@ -621,7 +662,7 @@ where
             }
         };
 
-        while let Some(row_result) = rows.next().await {
+        while let Some(row_result) = match tokio::time::timeout(std::time::Duration::from_secs(QUERY_TIMEOUT_SECS), rows.next()).await { Ok(next) => next, Err(_) => return output.finish_error(ErrorKind::ER_UNKNOWN_ERROR, &b"upstream row stream timed out".to_vec()).await } {
             let row = match row_result {
                 Ok(row) => row,
                 Err(_) => {
@@ -809,6 +850,30 @@ mod tests {
             convert_parameter(ValueInner::NULL),
             Ok(UpstreamValue::NULL)
         ));
+    }
+
+    #[test]
+    fn decodes_binary_date_parameter() {
+        assert_eq!(decode_date_payload(&[0xe8, 0x07, 11, 19]), Ok((2024, 11, 19)));
+    }
+
+    #[test]
+    fn decodes_binary_datetime_with_microseconds() {
+        let bytes = [0xe8, 0x07, 11, 19, 12, 30, 45, 0x40, 0x0d, 0x03, 0x00];
+        assert_eq!(decode_datetime_payload(&bytes), Ok((2024, 11, 19, 12, 30, 45, 200000)));
+    }
+
+    #[test]
+    fn decodes_binary_time_with_days_and_microseconds() {
+        let bytes = [1, 2, 0, 0, 0, 3, 4, 5, 0x40, 0x0d, 0x03, 0x00];
+        assert_eq!(decode_time_payload(&bytes), Ok((true, 2, 3, 4, 5, 200000)));
+    }
+
+    #[test]
+    fn rejects_invalid_binary_temporal_values() {
+        assert!(decode_date_payload(&[0xe8, 0x07, 13, 19]).is_err());
+        assert!(decode_datetime_payload(&[0; 5]).is_err());
+        assert!(decode_time_payload(&[2, 0, 0, 0, 0, 0, 0, 0]).is_err());
     }
 
     #[test]
