@@ -103,10 +103,19 @@ async fn verify_tenant(
     Ok(())
 }
 
+async fn verify_caching_sha2_rejects_wrong_password() -> Result<(), Box<dyn std::error::Error>> {
+    let pool = Pool::new(Opts::from_url("mysql://client_a:DefinitelyWrongPassword@127.0.0.1:3307/tenant_a")?);
+    assert!(pool.get_conn().await.is_err(), "gateway accepted an invalid caching_sha2_password response");
+    pool.disconnect().await?;
+    Ok(())
+}
+
 #[tokio::test]
 #[ignore = "requires disposable MariaDB and running Proxima MySQL-protocol gateway"]
 async fn mariadb_gateway_enforces_two_tenant_isolation_and_prepared_statements(
 ) -> Result<(), Box<dyn std::error::Error>> {
+    verify_caching_sha2_rejects_wrong_password().await?;
+
     verify_tenant(
         "client_a",
         "ClientPassA2026",
