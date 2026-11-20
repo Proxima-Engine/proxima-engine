@@ -97,9 +97,10 @@ async fn session(socket:TcpStream,acceptor:TlsAcceptor,connector:TlsConnector,re
   match cmd.as_str(){
    "PING"=>{if args.len()>2{write_error(&mut *client,"wrong number of arguments").await?;}else if args.len()==2{let mut out=b"$".to_vec();out.extend_from_slice(args[1].len().to_string().as_bytes());out.extend_from_slice(b"\r\n");out.extend_from_slice(&args[1]);out.extend_from_slice(b"\r\n");client.write_all(&out).await?;}else{client.write_all(b"+PONG\r\n").await?;}client.flush().await?;continue;},
    "QUIT"=>{client.write_all(b"+OK\r\n").await?;client.flush().await?;return Ok(());},
+   "CLIENT" if args.len()==4 && args[1].eq_ignore_ascii_case(b"SETINFO") && (args[2].eq_ignore_ascii_case(b"LIB-NAME") || args[2].eq_ignore_ascii_case(b"LIB-VER"))=>{client.write_all(b"+OK\r\n").await?;client.flush().await?;continue;},
    _=>{}
   }
-  rewrite_keys(&mut args,&principal.tenant_id).map_err(|_|io::Error::new(io::ErrorKind::PermissionDenied,"Redis command is not in the tenant-safe command allowlist"))?;
+  if rewrite_keys(&mut args,&principal.tenant_id).is_err(){write_error(&mut *client,"command is not in the tenant-safe allowlist").await?;continue;}
   let frame=encode_command(&args);
   if frame.len()>MAX_FRAME_BYTES{return Err(invalid("rewritten Redis frame exceeds limit"));}
   timeout(Duration::from_secs(10),upstream.write_all(&frame)).await.map_err(|_|io::Error::new(io::ErrorKind::TimedOut,"Redis upstream write timed out"))??;upstream.flush().await?;
