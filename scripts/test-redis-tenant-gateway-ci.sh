@@ -15,8 +15,8 @@ cp "$tmp/tls/server.crt" "$tmp/tls/gateway.crt"; cp "$tmp/tls/server.key" "$tmp/
 openssl req -newkey rsa:2048 -nodes -keyout "$tmp/tls/gateway.key" -out "$tmp/tls/gateway.csr" -subj "/CN=localhost" >/dev/null 2>&1
 openssl x509 -req -in "$tmp/tls/gateway.csr" -CA "$tmp/tls/ca.crt" -CAkey "$tmp/tls/ca.key" -CAcreateserial -out "$tmp/tls/gateway.crt" -days 1 -extfile "$tmp/tls/ext.cnf" >/dev/null 2>&1
 cat > "$tmp/tls/redis.conf" <<'CONF'\nport 0\ntls-port 6379\ntls-cert-file /tls/server.crt\ntls-key-file /tls/server.key\ntls-ca-cert-file /tls/ca.crt\ntls-auth-clients no\nuser default on >proxima-admin-ci ~* &* +@all\nCONF\ndocker run -d --name "$redis_id" -p 127.0.0.1:6389:6379 -v "$tmp/tls:/tls:ro" redis:7.4-alpine redis-server /tls/redis.conf >/dev/null
-for _ in $(seq 1 40); do redis-cli --tls --cacert "$tmp/tls/ca.crt" -h 127.0.0.1 -p 6389 PING >/dev/null 2>&1 && break; sleep 1; done
-redis-cli --tls --cacert "$tmp/tls/ca.crt" -h 127.0.0.1 -p 6389 ACL SETUSER tenant_a on '>upstream-a' '~proxima:{ca978112ca1bbdcafac231b39a23dc4d}:*' +get +set +del +exists +mget +mset +incr +expire +ttl +type +bitop >/dev/null
+for _ in $(seq 1 40); do redis-cli --tls --cacert "$tmp/tls/ca.crt" -h 127.0.0.1 -p 6389 -a proxima-admin-ci PING >/dev/null 2>&1 && break; sleep 1; done
+redis-cli --tls --cacert "$tmp/tls/ca.crt" -h 127.0.0.1 -p 6389 -a proxima-admin-ci ACL SETUSER tenant_a on '>upstream-a' '~proxima:{ca978112ca1bbdcafac231b39a23dc4d}:*' +get +set +del +exists +mget +mset +incr +expire +ttl +type +bitop >/dev/null
 redis-cli --tls --cacert "$tmp/tls/ca.crt" -h 127.0.0.1 -p 6389 ACL SETUSER tenant_b on '>upstream-b' '~proxima:{3e23e8160039594a33894f6564e1b134}:*' +get +set +del +exists +mget +mset +incr +expire +ttl +type +bitop >/dev/null
 hash_a="$(printf client-a | sha256sum | cut -d' ' -f1)"
 hash_b="$(printf client-b | sha256sum | cut -d' ' -f1)"
