@@ -111,6 +111,17 @@ The Engine reuses a valid saved identity on later starts, so the one-time enroll
 
 When the Engine has a registered node identity and a compatible heartbeat endpoint, it sends an HMAC-SHA256 signed liveness report every 30 seconds. The heartbeat uses the enrolled node signing key, is independent of the hourly attestation ledger, and does not assert tenant isolation. Fleet marks a node degraded after 90 seconds without a heartbeat and offline after five minutes. The control plane rejects stale, replayed, incorrectly signed, or revoked-node heartbeats.
 
+## 6. Receive assigned database configuration
+
+When `PROXIMA_NODE_HEARTBEAT_URL` is configured, the Engine also polls the matching Control Plane database-configuration endpoint. The pull request uses the enrolled node signing key, a fresh timestamp and a one-time nonce. The response bundle signature is verified before any credential is decrypted. Credential envelopes use AES-256-GCM with a node-derived key and associated data binding the node, target, configuration revision and credential revision.
+
+The Engine writes the decrypted, node-scoped configuration to `/var/lib/proxima/database-targets.json` in customer Compose deployments (or beside the configured identity file for local runs). On Unix the file is created with owner-only permissions. Set `PROXIMA_NODE_DATABASE_CONFIG_PATH` to override the path. Treat this file as a secret: it contains customer database credentials and must not be committed, copied into logs, or exposed to other users.
+
+After the file is durably written, the Engine sends a signed `staged` acknowledgement. This confirms authenticated receipt and persistence only. It deliberately does not mark the Cloud target ready or claim the gateway has been reconfigured. The assignment remains `applying` until a runtime supervisor configures the matching provider gateway, verifies its listener and upstream health, and sends a separate signed `applied` acknowledgement. The current gateway processes remain single-upstream runtimes; use one enrolled node per active target.
+
+The polling loop retries delivery when a staged configuration remains un-applied. An authenticated empty assignment bundle replaces the staged document with an empty assignment set, clearing revoked credentials from disk. This cleanup does not terminate or reconfigure an already-running gateway; that requires the runtime supervisor.
+
+
 ## 6. Credential reference
 
 | Variable or file | Purpose | Handling |
