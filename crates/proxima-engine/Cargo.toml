@@ -28,6 +28,7 @@ sha1 = "0.10"
 mysql_async = { version = "0.37.1", features = ["rustls-tls", "ring"] }
 futures-util = "0.3"
 mongodb = { version = "3.3", default-features = false, features = ["rustls-tls", "bson-2", "compat-3-3-0"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
 [dev-dependencies]
 proptest = "1"
 tempfile = "3"

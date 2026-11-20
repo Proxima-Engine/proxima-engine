@@ -1,6 +1,6 @@
 # Verification and test guide
 
-Use this guide to run the Engine test suite, exercise tenant isolation across PostgreSQL, MySQL, MariaDB, CockroachDB, MongoDB, Redis and SQL Server's native database-per-tenant profile, verify the Docker image build and PgBouncer transaction-pool separation, inspect runtime endpoints, and validate signed local evidence. Record the exact source commit and toolchain with each result.
+Use this guide to run the Engine test suite, exercise tenant isolation across PostgreSQL, MySQL, MariaDB, CockroachDB, MongoDB, Redis, SQLite, Oracle and SQL Server's native database-per-tenant profile, verify the Docker image build and PgBouncer transaction-pool separation, inspect runtime endpoints, and validate signed local evidence. Record the exact source commit and toolchain with each result.
 
 ## Verification workflow
 
@@ -146,7 +146,7 @@ The maximum lifetime is 900 seconds (15 minutes). The Engine records used nonces
 
 ## 8. CI workflow
 
-The [Rust CI workflow](https://github.com/Proxima-Engine/proxima-engine/actions/workflows/ci.yml) runs on pushes to `main` and pull requests targeting `main`. It provisions PostgreSQL 17, MySQL 8.0, MariaDB 11.4 and MongoDB 8; runs the Rust and CLI test suites; builds the release engine, MySQL gateway and MongoDB gateway; and executes real two-tenant acceptance tests for MySQL, MariaDB, PostgreSQL, CockroachDB 25.2 and MongoDB 8. It then builds the runtime Docker image and verifies PgBouncer tenant-pool isolation. The MongoDB gateway is a restricted profile, and CockroachDB uses its own native RLS compatibility profile.
+The [Rust CI workflow](https://github.com/Proxima-Engine/proxima-engine/actions/workflows/ci.yml) runs on pushes to `main` and pull requests targeting `main`. It provisions PostgreSQL 17, MySQL 8.0, MariaDB 11.4 and MongoDB 8; runs the Rust and CLI test suites; builds the release engine, MySQL gateway and MongoDB gateway; and executes real two-tenant acceptance tests for MySQL, MariaDB, PostgreSQL, CockroachDB 25.2 and MongoDB 8. It then builds the runtime Docker image and verifies PgBouncer tenant-pool isolation. SQLite is tested as an embedded file-per-tenant store; Oracle is tested as a schema-per-tenant profile against Oracle Free 23. The MongoDB and Redis protocol handlers remain restricted profiles, and CockroachDB uses its own native RLS compatibility profile.
 
 A green workflow run is direct evidence that those configured checks passed for its commit. For deployment acceptance, also verify the target environment's TLS, database roles/RLS, network policy, persistence, and recovery procedures.
 
@@ -185,3 +185,20 @@ The SQL Server profile is a native SQL Server security pattern, not a Proxima TD
 Set MSSQL_SA_PASSWORD to the disposable instance's administrator password. The test creates two dedicated databases and SQL logins, checks tenant-specific CRUD, and verifies that cross-database reads, database switching, schema creation, login impersonation, and invalid credentials are denied. It drops and recreates its named test databases and logins; never run it against production.
 
 The SQL Server profile does not provide Proxima gateway-side authentication, identity routing, shared-database RLS, or policy telemetry. Its tenant boundary is the unique SQL Server login and database assigned by a trusted provisioning process.
+
+
+## 10. Verify SQLite tenant-file isolation
+
+The SQLite profile uses a trusted application-resolved tenant ID and a separate database file for each tenant. Run the focused suite:
+
+    cargo test -p proxima-engine sqlite_tenant
+
+The tests verify independent tenant data files, traversal-resistant identifiers, symlink rejection, and owner-only Unix directory/file permissions. SQLite has no server-side database roles; do not expose the raw connection to untrusted callers or rely on filesystem permissions to isolate mutually hostile processes running under the same OS identity. See [SQLite tenant isolation](SQLITE_TENANCY.md).
+
+## 11. Verify Oracle schema-per-tenant isolation
+
+Run the real Oracle Free 23 acceptance fixture with Docker available:
+
+    ORACLE_PASSWORD='a-long-random-local-test-password' bash scripts/test-oracle-tenant-isolation-ci.sh
+
+The test creates two schema owners with separate credentials and bounded tablespace quotas, verifies each tenant's local CRUD, and confirms that cross-schema reads and DBA role activation are denied. It destroys the disposable Oracle container on exit. See [Oracle tenant isolation](ORACLE_TENANCY.md).
