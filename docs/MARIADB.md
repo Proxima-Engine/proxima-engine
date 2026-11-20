@@ -1,6 +1,6 @@
 # MariaDB gateway
 
-This guide configures Proxima's MySQL-compatible protocol gateway against a MariaDB upstream server. MariaDB accepts the MySQL client wire protocol, so clients use the dedicated proxima-mysql-gateway executable. The CI compatibility target is MariaDB 11.4.
+This guide configures Proxima's MySQL-compatible protocol gateway against a MariaDB upstream server. MariaDB accepts the MySQL client wire protocol, so clients use the dedicated proxima-mysql-gateway executable. The product guide is named MariaDB. The repository's current CI compatibility target is MariaDB Server 11.4; the version is recorded as a test target, not as the product name.
 
 The gateway is a separate executable from the PostgreSQL Engine listener. It authenticates each client, binds the session to one immutable tenant principal, opens a dedicated upstream connection and validates the selected database before accepting the client session.
 
@@ -13,6 +13,35 @@ The gateway is a separate executable from the PostgreSQL Engine listener. It aut
 - A private directory for the identity registry and upstream credentials
 
 The gateway does not install or provision a MariaDB server.
+
+## MariaDB server quickstart
+
+For a disposable local server matching the repository's current CI target, start MariaDB 11.4 in Docker. Port 3308 keeps it separate from a local MySQL server using port 3306:
+
+~~~bash
+docker run -d --name proxima-mariadb \
+  -e MARIADB_ROOT_PASSWORD=proxima-mariadb-local \
+  -p 127.0.0.1:3308:3306 \
+  mariadb:11.4
+~~~
+
+Wait until the server is ready:
+
+~~~bash
+docker exec proxima-mariadb healthcheck.sh --connect --innodb_initialized
+~~~
+
+Confirm the upstream server identity:
+
+~~~bash
+docker exec proxima-mariadb mariadb -uroot -pproxima-mariadb-local -e "SELECT VERSION(), @@version_comment;"
+~~~
+
+The MariaDB server listens on container port 3306 and is published on host loopback port 3308. Use a disposable database only. The next section creates two separate tenant databases and dedicated least-privilege upstream users. Remove the local server when finished:
+
+~~~bash
+docker rm -f proxima-mariadb
+~~~
 
 ## 2. Clone and build
 
@@ -196,7 +225,7 @@ To run a test manually, first provision the disposable fixtures and start the ga
 cargo test -p proxima-engine --test mariadb_gateway_integration -- --ignored --test-threads=1
 ~~~
 
-This integration test is ignored by default because it requires a live MySQL service and a running gateway. The CI script provisions the disposable fixture, generates credentials and starts the gateway before running the test.
+This integration test is ignored by default because it requires a live MariaDB service and a running MySQL-compatible Proxima gateway. The CI script provisions the disposable fixture, generates credentials and starts the gateway before running the test.
 
 ## 10. Troubleshooting
 
