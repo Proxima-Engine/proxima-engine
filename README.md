@@ -135,7 +135,7 @@ The planned multi-database Cloud model is documented in [Database gateways in Ag
 
 ---
 
-## Get started
+## PostgreSQL quickstart
 
 Requirements: Git and Docker with Compose.
 
