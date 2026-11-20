@@ -21,16 +21,17 @@ impl RedisIdentityRegistry {
         let records=root.get("users").and_then(|v|v.as_array()).ok_or_else(||invalid("users array required"))?;
         if records.is_empty(){return Err(invalid("at least one Redis principal is required"));}
         let mut users=HashMap::new();
-        let mut tenant_users=HashMap::new();
+        let mut tenant_users=HashMap::new();\n        let mut upstream_tenants=HashMap::new();
         for (i,r) in records.iter().enumerate(){
             let field=|k:&str|->io::Result<String>{r.get(k).and_then(|v|v.as_str()).map(str::trim).filter(|v|!v.is_empty()).map(str::to_owned).ok_or_else(||invalid(format!("users[{i}].{k} is required")))};
             let username=field("username")?; let tenant_id=field("tenant_id")?;
             let hash=hex::decode(field("client_password_sha256")?).map_err(invalid)?;
             let client_hash:[u8;32]=hash.try_into().map_err(|_|invalid(format!("users[{i}].client_password_sha256 must be 32 bytes")))?;
             let upstream_user=field("upstream_username")?; let upstream_password=field("upstream_password")?;
-            if username.len()>128 || tenant_id.len()>256 || upstream_user.len()>128 || username.bytes().any(|b|!b.is_ascii_graphic()) {return Err(invalid(format!("users[{i}] contains an invalid identifier")));}
+            if username.len()>128 || tenant_id.len()>256 || upstream_user.len()>128 || username.bytes().any(|b|!b.is_ascii_graphic()) || upstream_user.bytes().any(|b|!b.is_ascii_graphic()) {return Err(invalid(format!("users[{i}] contains an invalid identifier")));}
             if users.contains_key(&username){return Err(invalid("duplicate Redis gateway username"));}
             if let Some(old)=tenant_users.insert(tenant_id.clone(),upstream_user.clone()){if old!=upstream_user{return Err(invalid("one tenant cannot map to multiple upstream Redis ACL users"));}}
+            if let Some(old_tenant)=upstream_tenants.insert(upstream_user.clone(),tenant_id.clone()){if old_tenant!=tenant_id{return Err(invalid("upstream Redis ACL users must be unique per tenant"));}}
             users.insert(username,Principal{tenant_id,client_hash,upstream_user,upstream_password});
         }
         Ok(Self{users})
