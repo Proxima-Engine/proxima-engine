@@ -26,3 +26,6 @@ pub mod mongodb_gateway;
 
 pub mod redis_protocol;
 pub mod redis_gateway;
+
+pub mod sqlite_tenant;
+pub mod oracle_tenant;
