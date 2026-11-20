@@ -5,8 +5,20 @@ set -euo pipefail
 CONTAINER="proxima-cockroach-ci"
 LISTEN_ADDR="127.0.0.1:16433"
 METRICS_ADDR="127.0.0.1:19091"
+# Keep certificates and the disposable Proxima configuration isolated to this run.
+WORK_DIR="$(mktemp -d)"
+CERT_DIR="$WORK_DIR/certs"
+DEV_DIR="$WORK_DIR/dev"
+mkdir -p "$CERT_DIR" "$DEV_DIR"
 # Use the runner UID/GID unless the workflow explicitly supplies a container user.
 DOCKER_USER="${DOCKER_USER:-$(id -u):$(id -g)}"
+engine_pid=""
+cleanup() {
+  if [[ -n "$engine_pid" ]]; then kill "$engine_pid" 2>/dev/null || true; fi
+  docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
+  rm -rf "$WORK_DIR"
+}
+trap cleanup EXIT
 # Generate short-lived CA, node, and root client certificates for a secure test cluster.
 # Bypass the image entrypoint: it creates FIFOs and a data directory in its
 # working directory, which is not writable when the CI runner UID is used.
