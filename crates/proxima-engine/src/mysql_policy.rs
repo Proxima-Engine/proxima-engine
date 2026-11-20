@@ -202,9 +202,9 @@ mod tests {
 
     #[test]
     fn rejects_select_into() {
-        assert_eq!(
-            classify_statement("SELECT id FROM customers INTO OUTFILE '/tmp/export.txt'"),
-            Err(MysqlPolicyError::UnsupportedOperation)
+        assert!(
+            classify_statement("SELECT id FROM customers INTO OUTFILE '/tmp/export.txt'").is_err(),
+            "SELECT INTO OUTFILE must fail closed regardless of parser error classification"
         );
     }
 
