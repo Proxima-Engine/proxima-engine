@@ -48,6 +48,8 @@ The exact flags may change during implementation, but the one-command and per-da
 | MongoDB | Supported pinned MongoDB 8 image | SCRAM, TLS, OP_MSG command allowlist, database-per-tenant isolation, unsupported-command rejection |
 | SQL Server | Supported pinned SQL Server Linux image | TDS/TLS/login compatibility, tenant principals, RLS, cross-tenant denial, prepared/RPC/transaction scope and session isolation |
 | Redis | Supported pinned Redis image with ACL support | RESP framing, tenant key namespace, native ACLs, multi-key validation, command deny-list, pipelining and session binding |
+| SQLite | Bundled SQLite library and isolated temporary filesystem root | Separate tenant database files, tenant-ID validation, path traversal and symlink rejection, owner-only permissions, WAL and independent tenant data |
+| Oracle Database | Disposable Oracle Free 23 container | Dedicated schema owners, tenant-local DDL and CRUD, cross-schema read denial, no DBA role activation, and restricted grants |
 
 The runner must clearly distinguish PASS, FAIL, SKIP, and NOT_IMPLEMENTED. A not-yet-implemented database must never be silently counted as a pass.
 
@@ -108,4 +110,4 @@ A local or CI run can establish the first five levels within its tested scope. I
 
 ## Current implementation state
 
-This document specifies the target verification system. The unified runner and SQL Server/Redis suites are not yet implemented. Existing per-database scripts and CI checks remain authoritative until the unified runner is built and itself passes.
+This document specifies the target verification system. The unified all-database runner remains a separate follow-up. Per-database scripts and CI checks are authoritative. SQLite isolation is exercised by the Rust unit suite; Oracle isolation is exercised against a disposable Oracle Free 23 instance by scripts/test-oracle-tenant-isolation-ci.sh. A green run establishes only the documented profile and tested version, not universal production certification.
