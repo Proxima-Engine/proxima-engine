@@ -68,9 +68,34 @@ async fn mongo_database_credentials_prevent_cross_tenant_reads_and_writes() -> R
         }).await;
     assert!(cross_tenant_write.is_err(), "tenant A write into tenant B database unexpectedly succeeded");
 
-    let enumerate_databases = tenant_a.database("admin")
-        .run_command(doc! { "listDatabases": 1 }).await;
-    assert!(enumerate_databases.is_err(), "tenant A unexpectedly enumerated server databases");
+    // MongoDB's authenticated listDatabases behavior is intentionally
+    // filtered when authorizedDatabases is omitted/true. A tenant with
+    // database-scoped roles may receive a successful response containing
+    // only databases it is authorized to see; requiring the whole command
+    // to fail is incorrect and caused the previous CI assertion to fail.
+    let enumerate_authorized = tenant_a.database("admin")
+        .run_command(doc! { "listDatabases": 1, "authorizedDatabases": true }).await?;
+    let visible_databases = enumerate_authorized
+        .get_array("databases")?
+        .iter()
+        .filter_map(|entry| entry.as_document()?.get_str("name").ok())
+        .collect::<Vec<_>>();
+    assert!(
+        visible_databases.iter().any(|name| *name == "tenant_a_db"),
+        "tenant A should see its own authorized database"
+    );
+    assert!(
+        !visible_databases.iter().any(|name| *name == "tenant_b_db"),
+        "tenant A was shown tenant B's database"
+    );
+
+    // Explicitly disabling authorization filtering must remain forbidden.
+    let enumerate_all = tenant_a.database("admin")
+        .run_command(doc! { "listDatabases": 1, "authorizedDatabases": false }).await;
+    assert!(
+        enumerate_all.is_err(),
+        "tenant A unexpectedly enumerated unauthorized server databases"
+    );
 
     // Cleanup with the administrative identity; no tenant identity has elevated privileges.
     let _ = admin.run_command(doc! { "dropUser": "tenant_a_gateway" }).await;
