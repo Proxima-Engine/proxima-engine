@@ -6,6 +6,7 @@ CONTAINER="proxima-cockroach-ci"
 LISTEN_ADDR="127.0.0.1:16433"
 METRICS_ADDR="127.0.0.1:19091"
 COCKROACH_ADDR="127.0.0.1:26257"
+DEV_DIR="$(mktemp -d)"
 
 cleanup() {
   if [[ -n "${engine_pid:-}" ]]; then
@@ -13,6 +14,7 @@ cleanup() {
     wait "$engine_pid" 2>/dev/null || true
   fi
   docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
+  rm -rf "$DEV_DIR"
 }
 trap cleanup EXIT
 
@@ -65,9 +67,9 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE proxima_dev.public.records
   TO proxima_tenant_cli_a, proxima_tenant_cli_b;
 SQL
 
-python3 scripts/agata.py init
+python3 scripts/agata.py init --directory "$DEV_DIR"
 export PROXIMA_TENANT_SIGNING_KEY
-PROXIMA_TENANT_SIGNING_KEY="$(python3 -c 'import json; print(json.load(open(".proxima-dev/dev-config.json"))["tenant_signing_key"])')"
+PROXIMA_TENANT_SIGNING_KEY="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["tenant_signing_key"])' "$DEV_DIR/dev-config.json")"
 export PROXIMA_LISTEN_ADDR="$LISTEN_ADDR"
 export PROXIMA_UPSTREAM_ADDR="$COCKROACH_ADDR"
 export PROXIMA_UPSTREAM_TLS_MODE=disable
@@ -87,8 +89,8 @@ if ! curl -fsS "http://$METRICS_ADDR/healthz" >/dev/null; then
   exit 1
 fi
 
-token_a="$(python3 scripts/agata.py token --tenant cli_a --ttl 300)"
-token_b="$(python3 scripts/agata.py token --tenant cli_b --ttl 300)"
+token_a="$(python3 scripts/agata.py token --config "$DEV_DIR/dev-config.json" --tenant cli_a --ttl 300)"
+token_b="$(python3 scripts/agata.py token --config "$DEV_DIR/dev-config.json" --tenant cli_b --ttl 300)"
 run_tenant() {
   local token="$1" password="$2" sql="$3"
   timeout 20s env PGPASSWORD="$password" PGCONNECT_TIMEOUT=5 PGOPTIONS="-c statement_timeout=10000 -c proxima_tenant_token=$token" psql -X -A -t -v ON_ERROR_STOP=1 \
