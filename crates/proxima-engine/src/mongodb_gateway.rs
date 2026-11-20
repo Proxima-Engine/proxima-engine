@@ -250,30 +250,6 @@ async fn handle_connection(
                 }
                 write_frame(&mut upstream, &frame).await?;
             }
-            "commitTransaction" | "abortTransaction" => {
-                let Some(principal) = identity.as_ref() else {
-                    send_command_error(&mut client, message.request_id, "admin", "authentication is required").await?;
-                    continue;
-                };
-                if !authenticated || message.body.get_str("$db").unwrap_or_default() != "admin" {
-                    send_command_error(&mut client, message.request_id, "admin", "transaction control is not authorised").await?;
-                    continue;
-                }
-                if let Ok(lsid) = message.body.get_document("lsid") {
-                    if let Err(error) = sessions.authorize(&principal.tenant_id, lsid) {
-                        send_command_error(&mut client, message.request_id, "admin", &error.to_string()).await?;
-                        continue;
-                    }
-                } else {
-                    send_command_error(&mut client, message.request_id, "admin", "transaction control requires a tenant-bound logical session").await?;
-                    continue;
-                }
-                if message.body.get_i64("txnNumber").is_err() || !matches!(message.body.get_bool("autocommit"), Ok(false)) {
-                    send_command_error(&mut client, message.request_id, "admin", "invalid transaction control fields").await?;
-                    continue;
-                }
-                write_frame(&mut upstream, &frame).await?;
-            }
             "ping" => {
                 if !authenticated || message.body.get_str("$db").unwrap_or_default() != "admin" {
                     send_command_error(&mut client, message.request_id, "admin", "ping requires an authenticated principal and the admin database").await?;
@@ -328,6 +304,13 @@ async fn handle_connection(
                     send_command_error(&mut client, message.request_id, &principal.database, &error.to_string()).await?;
                     continue;
                 }
+                if matches!(policy_command.get_bool("startTransaction"), Ok(true))
+                    || matches!(policy_command.get_bool("autocommit"), Ok(false))
+                {
+                    send_command_error(&mut client, message.request_id, &principal.database,
+                        "MongoDB transactions are not supported by this gateway profile").await?;
+                    continue;
+                }
                 if let Ok(lsid) = policy_command.get_document("lsid") {
                     if let Err(error) = sessions.bind(&principal.tenant_id, lsid) {
                         send_command_error(&mut client, message.request_id, &principal.database, &error.to_string()).await?;
@@ -349,6 +332,14 @@ async fn handle_connection(
         }
 
         let response = read_frame(&mut upstream).await?;
+        if response.len() < 16 {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "truncated MongoDB upstream response"));
+        }
+        let response_to = i32::from_le_bytes(response[8..12].try_into().unwrap());
+        if response_to != message.request_id {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "MongoDB upstream response correlation mismatch"));
+        }
+
         if matches!(command_name.as_str(), "saslStart" | "saslContinue") {
             if let Ok(reply) = decode_op_msg(&response) {
                 let ok = match reply.body.get("ok") {
@@ -362,12 +353,38 @@ async fn handle_connection(
                 }
             }
         }
-        write_frame(&mut client, &response).await?;
+
+        let mut client_response = response;
+        if matches!(command_name.as_str(), "hello" | "isMaster") {
+            let mut reply = decode_op_msg(&client_response)?;
+            let writable_primary = matches!(reply.body.get_bool("isWritablePrimary"), Ok(true))
+                || matches!(reply.body.get_bool("ismaster"), Ok(true));
+            if !writable_primary {
+                send_command_error(&mut client, message.request_id, "admin",
+                    "configured MongoDB upstream is not a writable primary or standalone node").await?;
+                return Err(io::Error::new(io::ErrorKind::PermissionDenied, "MongoDB upstream is not writable"));
+            }
+            if matches!(reply.body.get_str("msg"), Ok("isdbgrid")) {
+                send_command_error(&mut client, message.request_id, "admin",
+                    "sharded MongoDB upstreams are not supported by this gateway profile").await?;
+                return Err(io::Error::new(io::ErrorKind::Unsupported, "sharded MongoDB upstream is not supported"));
+            }
+            for field in [
+                "compression", "speculativeAuthenticate", "hosts", "passives", "arbiters",
+                "primary", "setName", "setVersion", "electionId", "topologyVersion", "me",
+                "msg", "serviceId", "secondary", "arbiterOnly", "hidden", "passive",
+            ] {
+                reply.body.remove(field);
+            }
+            client_response = encode_op_msg(reply.request_id, reply.response_to, &reply.body)?;
+        }
+        write_frame(&mut client, &client_response).await?;
     }
 }
 
 struct MongoMessage {
     request_id: i32,
+    response_to: i32,
     body: Document,
     sequences: Vec<(String, Vec<Document>)>,
 }
@@ -398,6 +415,7 @@ fn decode_op_msg(frame: &[u8]) -> io::Result<MongoMessage> {
         return Err(io::Error::new(io::ErrorKind::InvalidData, "MongoDB OP_MSG length mismatch"));
     }
     let request_id = i32::from_le_bytes(frame[4..8].try_into().unwrap());
+    let response_to = i32::from_le_bytes(frame[8..12].try_into().unwrap());
     let opcode = i32::from_le_bytes(frame[12..16].try_into().unwrap());
     if opcode != OP_MSG {
         return Err(io::Error::new(io::ErrorKind::Unsupported, format!("MongoDB opcode {opcode} is not supported; only OP_MSG is accepted")));
@@ -457,7 +475,7 @@ fn decode_op_msg(frame: &[u8]) -> io::Result<MongoMessage> {
         }
     }
     let body = body.ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "MongoDB OP_MSG is missing its body section"))?;
-    Ok(MongoMessage { request_id, body, sequences })
+    Ok(MongoMessage { request_id, response_to, body, sequences })
 }
 
 fn read_bson_document(frame: &[u8], offset: usize, limit: usize) -> io::Result<(Document, usize)> {
@@ -605,6 +623,25 @@ mod tests {
         let parsed = decode_op_msg(&frame).unwrap();
         assert_eq!(parsed.request_id, 7);
         assert_eq!(parsed.body, command);
+    }
+
+    #[test]
+    fn hello_reply_removes_upstream_topology_addresses() {
+        let mut reply = doc! {
+            "ok": 1.0,
+            "isWritablePrimary": true,
+            "setName": "rs0",
+            "hosts": ["mongo-a.internal:27017", "mongo-b.internal:27017"],
+            "primary": "mongo-a.internal:27017",
+            "topologyVersion": { "counter": 1_i64 }
+        };
+        for field in ["hosts", "passives", "arbiters", "primary", "setName",
+            "setVersion", "electionId", "topologyVersion", "me", "msg", "serviceId"] {
+            reply.remove(field);
+        }
+        assert!(reply.get("hosts").is_none());
+        assert!(reply.get("setName").is_none());
+        assert_eq!(reply.get_bool("isWritablePrimary").unwrap(), true);
     }
 
     #[test]

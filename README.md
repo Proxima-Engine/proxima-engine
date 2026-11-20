@@ -4,7 +4,7 @@
 
 <h1 align="center">Agata Proxima</h1>
 <p align="center"><strong>Database security and tenant isolation for multi-tenant applications.</strong></p>
-<p align="center">Agata Proxima focuses on database access security and tenant isolation. Proxima Engine is its Rust PostgreSQL wire-protocol gateway, verifying signed tenant context and routing each database session to its tenant-specific PostgreSQL role. PostgreSQL is the current supported database integration.</p>
+<p align="center">Agata Proxima focuses on database access security and tenant isolation. Proxima Engine provides protocol-specific gateways and compatibility profiles: PostgreSQL (also used for CockroachDB 25.2+), MySQL/MariaDB, and a restricted MongoDB OP_MSG gateway. Each integration has its own security boundary and verification status.</p>
 
 <p align="center">
   <a href="https://github.com/Agata-Proxima/proxima-engine/actions/workflows/ci.yml">Continuous integration</a> ·
@@ -17,7 +17,7 @@
 
 **Start:** [What is Agata Proxima?](#what-is-agata-proxima) · [Customer Docker install](docs/NODE_ENROLLMENT.md#2-one-command-docker-installation-hosted-cloud) · [Guided customer install (Windows/Linux)](docs/CUSTOMER_DEPLOYMENT_EXECUTOR.md#install-the-engine-customer-node) · [Deployment executor](docs/CUSTOMER_DEPLOYMENT_EXECUTOR.md) · [Launch evaluation](docs/LAUNCH.md) · [Quickstart](docs/QUICKSTART.md) · [Local developer mode](docs/LOCAL_DEVELOPMENT.md) · [Engine CLI](docs/CLI.md) · [Documentation index](docs/README.md)
 
-**Technical guides:** [Architecture](docs/ARCHITECTURE.md) · [Tenant isolation](docs/TENANT_ISOLATION.md) · [Driver integrations](docs/INTEGRATIONS.md) · [API and metrics](docs/API.md) · [Security](docs/SECURITY.md) · [Deployment](docs/DEPLOYMENT.md) · [Verification](docs/VERIFICATION.md)
+**Technical guides:** [Architecture](docs/ARCHITECTURE.md) · [Tenant isolation](docs/TENANT_ISOLATION.md) · [Driver integrations](docs/INTEGRATIONS.md) · [MongoDB gateway](docs/MONGODB_TENANT_ISOLATION.md) · [CockroachDB profile](docs/COCKROACHDB_COMPATIBILITY.md) · [API and metrics](docs/API.md) · [Security](docs/SECURITY.md) · [Deployment](docs/DEPLOYMENT.md) · [Verification](docs/VERIFICATION.md)
 
 
 
@@ -37,7 +37,7 @@ https://github.com/user-attachments/assets/bca488eb-829c-4672-bbe9-b25878e5401c
 
 ## What is Agata Proxima?
 
-Agata Proxima provides database security infrastructure for applications that serve multiple customers and need enforceable tenant isolation. Its core job is to make tenant identity part of the database connection boundary. PostgreSQL is the current supported integration: Proxima Engine verifies each tenant session and routes it to a dedicated PostgreSQL role, where PostgreSQL privileges and Row-Level Security (RLS) enforce data access.
+Agata Proxima provides database security infrastructure for applications that serve multiple customers and need enforceable tenant isolation. Its core job is to make tenant identity part of the database connection boundary. PostgreSQL remains the reference integration; CockroachDB reuses its PostgreSQL wire path with CockroachDB-native RLS, MySQL/MariaDB use a separate protocol gateway, and MongoDB uses a restricted OP_MSG gateway with database-per-tenant isolation.
 
 The product has two cooperating components:
 
@@ -65,9 +65,10 @@ The Cloud application and its private source are separate from this public Engin
 
 Agata Proxima is being developed with a protocol-specific approach to database security. It does **not** claim universal database compatibility or production support for every database engine.
 
-- **PostgreSQL — supported.** The current Proxima Engine gateway implements the PostgreSQL wire protocol, signed tenant-context verification, tenant-to-role routing, and PostgreSQL-native grants and Row-Level Security (RLS). The repository includes PostgreSQL integration and tenant-isolation verification.
-- **MySQL — experimental development.** A separate MySQL gateway is under development. It is not a production-supported integration and must not be used for customer production traffic.
-- **MongoDB — early development.** Protocol and tenant-isolation foundations are being explored separately. MongoDB is not currently a supported production integration.
+- **PostgreSQL — reference integration.** The PostgreSQL wire gateway verifies signed tenant context, routes to tenant-specific roles, and relies on native grants and RLS. Real PostgreSQL and PgBouncer acceptance tests run in CI.
+- **CockroachDB 25.2+ — PostgreSQL-wire compatibility profile.** Reuses the PostgreSQL gateway and requires CockroachDB-native forced RLS plus least-privilege tenant roles. A real CockroachDB 25.2 service acceptance test is included in CI.
+- **MySQL 8 and MariaDB 11.4 — dedicated gateway.** The separate MySQL protocol gateway has database-backed tenant-isolation acceptance tests for both server families.
+- **MongoDB 8 — restricted preview gateway.** The separate OP_MSG gateway supports SCRAM-SHA-256, TLS, database-per-tenant identity mapping, a narrow command allowlist, cross-database pipeline denial, and session binding. It does not provide full MongoDB feature parity; transactions, sharded topologies, compression, and unsupported commands are denied.
 - **Other database systems — not currently supported.** Each integration requires its own protocol-aware implementation, security model, and independent verification.
 
 These capabilities address database security, database tenant isolation, multi-tenant database security, PostgreSQL security proxy deployments, Rust database gateways, signed tenant context, database access control, and PostgreSQL Row-Level Security (RLS).
@@ -116,7 +117,7 @@ Then follow the [Quickstart](docs/QUICKSTART.md) to create a table, send a real 
 
 The repository includes PostgreSQL-backed tenant tests and a dedicated [PgBouncer tenant-pool integration test](scripts/test-pgbouncer-pooling.sh), which is run by GitHub Actions.
 
-The verification path covers:
+The verification path covers PostgreSQL/PgBouncer, MySQL 8, MariaDB 11.4, CockroachDB 25.2+, and the restricted MongoDB gateway. Database-specific acceptance scripts run against disposable real database services in GitHub Actions.
 
 1. Tenant A authenticates and reads only Tenant A's row.
 2. Tenant B authenticates and reads only Tenant B's row.
@@ -137,6 +138,8 @@ See [Tenant isolation](docs/TENANT_ISOLATION.md), [Verification](docs/VERIFICATI
 | [Architecture](docs/ARCHITECTURE.md) | Request lifecycle, tenant context, source map, and control-plane boundary |
 | [Configuration](docs/CONFIGURATION.md) | Environment variables, defaults, and validation |
 | [Tenant isolation](docs/TENANT_ISOLATION.md) | PostgreSQL roles, RLS policies, signed context, and test results |
+| [MongoDB tenant isolation](docs/MONGODB_TENANT_ISOLATION.md) | Restricted MongoDB OP_MSG gateway, SCRAM identity mapping, command policy, and limitations |
+| [CockroachDB compatibility](docs/COCKROACHDB_COMPATIBILITY.md) | PostgreSQL-wire reuse, CockroachDB 25.2+ RLS, role grants, and retry semantics |
 | [Driver integrations](docs/INTEGRATIONS.md) | psql, Node.js, Python, and Rust connection examples |
 | [API reference](docs/API.md) | PostgreSQL endpoint, health/status routes, and Prometheus metrics |
 | [Node enrollment](docs/NODE_ENROLLMENT.md) | Customer Docker installation, one-time enrollment, signed heartbeat, and identity persistence |

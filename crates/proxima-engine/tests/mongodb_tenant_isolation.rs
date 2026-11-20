@@ -111,6 +111,21 @@ async fn mongo_database_credentials_prevent_cross_tenant_reads_and_writes() -> R
     let gateway_a = Client::with_uri_str(&gateway_uri("tenant_a_gateway", TENANT_A_PASSWORD, "tenant_a_db")).await?;
     let gateway_b = Client::with_uri_str(&gateway_uri("tenant_b_gateway", TENANT_B_PASSWORD, "tenant_b_db")).await?;
 
+    let hello = gateway_a.database("admin").run_command(doc! { "hello": 1 }).await?;
+    for field in ["hosts", "passives", "arbiters", "primary", "setName", "me", "topologyVersion", "serviceId"] {
+        assert!(hello.get(field).is_none(), "gateway leaked upstream topology field {field}");
+    }
+    assert_eq!(hello.get_bool("isWritablePrimary")?, true);
+
+    let gateway_transaction_attempt = gateway_a.database("tenant_a_db")
+        .run_command(doc! {
+            "find": "records",
+            "filter": {},
+            "startTransaction": true,
+            "autocommit": false
+        }).await;
+    assert!(gateway_transaction_attempt.is_err(), "gateway unexpectedly admitted an unverified transaction");
+
     let gateway_a_record = gateway_a.database("tenant_a_db")
         .collection::<Document>("records")
         .find_one(doc! {}).await?

@@ -16,7 +16,7 @@ trap cleanup EXIT
 openssl req -x509 -newkey rsa:2048 -nodes \
   -keyout "$cert_dir/gateway-key.pem" \
   -out "$cert_dir/gateway-cert.pem" \
-  -subj "/CN=localhost" -days 1 >/dev/null 2>&1
+  -subj "/CN=localhost" -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" -days 1 >/dev/null 2>&1
 
 cat > "$cert_dir/identities.json" <<'JSON'
 {

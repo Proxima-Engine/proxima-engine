@@ -55,7 +55,7 @@ A tenant may have more than one username, but a tenant maps to exactly one datab
 Connect with a normal MongoDB driver URI, pointing at the gateway and using the upstream user's credentials:
 
 ```text
-mongodb://tenant_a_gateway:<password>@gateway.example:27018/tenant_a_db?authSource=admin&tls=true
+mongodb://tenant_a_gateway:<password>@gateway.example:27018/tenant_a_db?authSource=admin&tls=true&directConnection=true
 ```
 
 Client-to-gateway TLS is mandatory. Upstream TLS verification is enabled by default. Disabling upstream TLS is intended only for isolated local development and CI service containers.
@@ -64,6 +64,8 @@ Client-to-gateway TLS is mandatory. Upstream TLS verification is enabled by defa
 
 The gateway parses MongoDB OP_MSG frames and BSON command documents. It removes speculative authentication and compression negotiation from hello messages so that commands remain inspectable. Document sequences for insert, update, and delete are decoded and included in policy validation.
 
+The gateway uses one configured upstream address. It removes upstream replica-set topology fields from hello replies so drivers cannot discover member addresses and bypass the gateway. Configure a standalone node or a stable writable-primary endpoint; multi-host discovery and gateway-managed failover are not implemented. Client URIs must use `directConnection=true`.
+
 The initial admitted data command set is deliberately narrow:
 
 - find, aggregate, insert, update, delete
@@ -71,13 +73,13 @@ The initial admitted data command set is deliberately narrow:
 - getMore, killCursors
 - listCollections, listIndexes
 
-Aggregation pipelines are inspected recursively. Cross-database lookup/union/graph traversal, output stages, JavaScript execution, change streams, server administration, user management, and unknown commands fail closed. Transaction commit/abort commands are accepted only for a previously tenant-bound logical session. Session bindings are bounded and expire after 30 minutes of inactivity. MongoDB's own user/cursor authorization remains required for cursor continuation.
+Aggregation pipelines are inspected recursively. Cross-database lookup/union/graph traversal, output stages, JavaScript execution, change streams, server administration, user management, and unknown commands fail closed. Logical session IDs are tenant-bound, bounded, and expire after 30 minutes of inactivity. Transaction start/commit/abort commands are denied because transaction pinning and failover behavior have not passed replica-set acceptance testing. MongoDB's own user/cursor authorization remains required for cursor continuation.
 
 ## Current protocol limitations
 
 This is a restricted wire gateway, not full MongoDB server feature parity. The initial implementation supports OP_MSG only, SCRAM-SHA-256 only, and `admin` as the SCRAM authentication source. OP_QUERY, OP_COMPRESSED, OP_MSG checksums, exhaust streams, speculative authentication, SCRAM-SHA-1, PLAIN, X.509, LDAP, and unsupported commands are not admitted. Compression is intentionally not negotiated.
 
-Transactions and cursor behavior must be validated against replica-set and sharded-cluster topologies before being advertised as production-supported. The initial CI acceptance test uses a real MongoDB 8 service and verifies SCRAM authentication, tenant database binding, cross-database denial, cross-database aggregation denial, database enumeration denial at the gateway, and cursor continuation.
+Transactions, replica-set failover, and sharded-cluster behavior are not supported by this initial profile. CI uses a real MongoDB 8 standalone service and verifies SCRAM authentication, tenant database binding, topology-field sanitization, cross-database denial, cross-database aggregation denial, transaction denial, database enumeration denial at the gateway, and cursor continuation.
 
 ## Defense in depth
 

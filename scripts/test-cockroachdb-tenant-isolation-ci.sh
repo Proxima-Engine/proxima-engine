@@ -48,6 +48,11 @@ CREATE TABLE proxima_dev.public.records (
 );
 INSERT INTO proxima_dev.public.records VALUES ('cli_a', 'A-secret'), ('cli_b', 'B-secret');
 
+REVOKE ALL ON DATABASE proxima_dev FROM public;
+GRANT CONNECT ON DATABASE proxima_dev TO proxima_tenant_cli_a, proxima_tenant_cli_b;
+REVOKE ALL ON SCHEMA proxima_dev.public FROM public;
+GRANT USAGE ON SCHEMA proxima_dev.public TO proxima_tenant_cli_a, proxima_tenant_cli_b;
+
 ALTER TABLE proxima_dev.public.records ENABLE ROW LEVEL SECURITY, FORCE ROW LEVEL SECURITY;
 CREATE POLICY isolate_a ON proxima_dev.public.records
   TO proxima_tenant_cli_a
