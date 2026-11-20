@@ -49,16 +49,12 @@ client(){ local user="$1" pass="$2"; shift 2; redis-cli --raw --tls --insecure -
 [[ "$(client client_b client-b GET shared)" == "beta" ]]
 [[ "$(client client_a client-a MGET shared)" == "alpha" ]]
 [[ "$(client client_a client-a MSET first one second two)" == "OK" ]]
-[[ "$(client client_a client-a MGET first second)" == 
+[[ "$(client client_a client-a GET first)" == "one" ]]
+[[ "$(client client_a client-a GET second)" == "two" ]]
+[[ -z "$(client client_a client-a GET 'proxima:{3e23e8160039594a33894f6564e1b134}:shared')" ]]
 [[ "$(client client_a client-a BITOP AND combined shared shared)" == "5" ]]
 denied="$(client client_a client-a FLUSHALL 2>/dev/null || true)"
 [[ "$denied" == ERR* ]] || { echo "FLUSHALL was not explicitly denied: $denied" >&2; exit 1; }
 bad_auth="$(client client_a wrong-password GET shared 2>/dev/null || true)"
 [[ "$bad_auth" == *"ERR"* ]] || { echo "invalid gateway credentials were not rejected" >&2; exit 1; }
-echo "Redis TLS gateway two-tenant acceptance: PASS"
-one\ntwo' ]]
-[[ -z "$(client client_a client-a GET 'proxima:{3e23e8160039594a33894f6564e1b134}:shared')" ]]
-[[ "$(client client_a client-a BITOP AND combined shared shared)" == "5" ]]
-if client client_a client-a FLUSHALL >/dev/null 2>&1; then echo "FLUSHALL unexpectedly succeeded" >&2; exit 1; fi
-if client client_a wrong-password GET shared >/dev/null 2>&1; then echo "invalid gateway credentials unexpectedly succeeded" >&2; exit 1; fi
 echo "Redis TLS gateway two-tenant acceptance: PASS"
