@@ -23,3 +23,5 @@ pub mod mysql_gateway;
 pub mod mongodb_policy;
 
 pub mod mongodb_gateway;
+
+pub mod redis_protocol;
