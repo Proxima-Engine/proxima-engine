@@ -17,6 +17,8 @@ use proxima_engine::{
     tenant::TenantTokenVerifier,
     tls::{accept_client_tls, client_acceptor, connect_upstream_tls, upstream_connector},
     runtime_reconciliation::{self, RuntimeRecord},
+    runtime_coordinator::RuntimeCoordinator,
+    gateway_runtime,
 };
 use sha2::{Digest, Sha256};
 use std::time::Instant;
@@ -561,7 +563,7 @@ async fn bootstrap_node_identity() -> Result<(), Box<dyn std::error::Error + Sen
     Ok(())
 }
 
-async fn pull_and_stage_database_config_once() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+async fn pull_and_stage_database_config_once(coordinator: &RuntimeCoordinator) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     use std::{env, fs, io::Write, path::PathBuf, time::{SystemTime, UNIX_EPOCH}};
     let node_id = env::var("PROXIMA_NODE_ID")?;
     let organization_id = env::var("PROXIMA_ORGANIZATION_ID")?;
@@ -726,9 +728,14 @@ async fn pull_and_stage_database_config_once() -> Result<(), Box<dyn std::error:
         fs::set_permissions(&output_path,fs::Permissions::from_mode(0o600))?;
     }
 
+    // The signed Cloud acknowledgement is derived from the actual runtime result.
+    // Preview providers remain staged; enabled MySQL/MariaDB assignments may activate.
+    let mut ack_status = "staged";
+    let mut ack_healthy = false;
+    let mut ack_error_code: Option<String> = None;
+
     // Persist the authenticated desired revision separately from the staged
-    // credential document. This is deliberately a Staged state: downloading,
-    // decrypting, and writing credentials must never imply runtime activation.
+    // credential document. A downloaded bundle is not an applied runtime.
     if let Some(record) = records.first() {
         let assignment_id = record.get("assignment_id").and_then(serde_json::Value::as_str)
             .ok_or("assignment ID missing")?;
@@ -742,7 +749,7 @@ async fn pull_and_stage_database_config_once() -> Result<(), Box<dyn std::error:
             .ok_or("credential revision missing")?;
         let state_path = env::var_os("PROXIMA_NODE_RUNTIME_STATE_PATH").map(PathBuf::from)
             .unwrap_or_else(|| output_path.with_file_name("runtime-state.json"));
-        let state = if state_path.exists() {
+        let mut state = if state_path.exists() {
             let mut current = runtime_reconciliation::load(&state_path)?;
             current.update_desired(
                 assignment_id, target_id, provider, revision, credential_revision
@@ -755,15 +762,63 @@ async fn pull_and_stage_database_config_once() -> Result<(), Box<dyn std::error:
             )?
         };
         runtime_reconciliation::persist(&state_path, &state)?;
-        // Do not mark Applied here. The provider runtime supervisor and
-        // provider-specific health/isolation verification must own that transition.
-        info!(
-            assignment_id,
-            target_id,
-            desired_revision = revision,
-            phase = "staged",
-            "authenticated database desired state persisted; runtime activation remains separate"
-        );
+
+        let cloud_state = record.get("cloud_integration_state")
+            .and_then(serde_json::Value::as_str).unwrap_or("preview");
+        let gateway_runtime_name = record.get("gateway_runtime")
+            .and_then(serde_json::Value::as_str).unwrap_or_default();
+
+        if cloud_state == "enabled" && matches!(gateway_runtime_name, "proxima-mysql-gateway") {
+            let staged_record = staged.first().ok_or("decrypted assignment was not staged")?;
+            match gateway_runtime::prepare_mysql(
+                record,
+                &staged_record["credentials"],
+                executable_dir,
+                parent,
+            ) {
+                Ok(prepared) => {
+                    let spec = prepared.spec.clone();
+                    match coordinator.activate(
+                        &state_path,
+                        &mut state,
+                        spec,
+                        || async move { prepared.verify_upstream().await },
+                    ).await {
+                        Ok(()) => {
+                            ack_status = "applied";
+                            ack_healthy = true;
+                            info!(assignment_id, target_id, desired_revision = revision,
+                                phase = "applied", "MySQL gateway started and authenticated upstream health check passed");
+                        }
+                        Err(error) => {
+                            ack_status = "failed";
+                            ack_error_code = Some("GATEWAY_ACTIVATION_FAILED".into());
+                            tracing::error!(assignment_id, target_id, %error,
+                                "MySQL gateway activation failed; runtime was rolled back");
+                        }
+                    }
+                }
+                Err(error) => {
+                    state.mark_failed("PROVIDER_RUNTIME_CONFIG_INVALID")?;
+                    runtime_reconciliation::persist(&state_path, &state)?;
+                    ack_status = "failed";
+                    ack_error_code = Some("PROVIDER_RUNTIME_CONFIG_INVALID".into());
+                    tracing::error!(assignment_id, target_id, %error,
+                        "provider runtime configuration rejected; gateway was not started");
+                }
+            }
+        } else if cloud_state == "enabled" && gateway_runtime_name != "proxima-engine" {
+            state.mark_failed("PROVIDER_RUNTIME_NOT_IMPLEMENTED")?;
+            runtime_reconciliation::persist(&state_path, &state)?;
+            ack_status = "failed";
+            ack_error_code = Some("PROVIDER_RUNTIME_NOT_IMPLEMENTED".into());
+            tracing::error!(assignment_id, target_id, gateway_runtime = gateway_runtime_name,
+                "provider runtime is not yet connected to the coordinator; refusing to claim Applied");
+        } else {
+            info!(assignment_id, target_id, desired_revision = revision,
+                phase = "staged", cloud_state,
+                "configuration securely staged; Cloud provider lifecycle does not permit activation");
+        }
     }
 
     for record in records {
@@ -772,9 +827,12 @@ async fn pull_and_stage_database_config_once() -> Result<(), Box<dyn std::error:
         let revision=record.get("config_revision").and_then(serde_json::Value::as_i64).ok_or("config revision missing")?;
         let ack_timestamp=SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
         let ack_nonce=uuid::Uuid::new_v4().to_string();
+        let health_label = if ack_healthy { "healthy" } else { "unhealthy" };
+        let error_code = ack_error_code.as_deref().unwrap_or("");
         let ack_canonical=format!(
-            "proxima-node-config-ack-v1\n{}\n{}\n{}\n{}\n{}\n{}\n{}\nstaged\nunhealthy\n",
-            node_id,organization_id,ack_nonce,assignment_id,target_id,revision,ack_timestamp
+            "proxima-node-config-ack-v1\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
+            node_id,organization_id,ack_nonce,assignment_id,target_id,revision,ack_timestamp,
+            ack_status,health_label,error_code
         );
         let mut ack_mac=hmac::Hmac::<Sha256>::new_from_slice(&signing_key)?;
         ack_mac.update(ack_canonical.as_bytes());
@@ -782,8 +840,8 @@ async fn pull_and_stage_database_config_once() -> Result<(), Box<dyn std::error:
         client.post(&ack_url).json(&serde_json::json!({
             "node_id":node_id,"nonce":ack_nonce,"assignment_id":assignment_id,
             "database_target_id":target_id,"config_revision":revision,
-            "timestamp":ack_timestamp,"status":"staged","runtime_health_passed":false,
-            "error_code":null,"signature":ack_signature
+            "timestamp":ack_timestamp,"status":ack_status,"runtime_health_passed":ack_healthy,
+            "error_code":ack_error_code,"signature":ack_signature
         })).send().await?.error_for_status()?;
     }
     info!(assignments=records.len(),path=%output_path.display(),"authenticated database configuration staged on node");
@@ -792,10 +850,11 @@ async fn pull_and_stage_database_config_once() -> Result<(), Box<dyn std::error:
 
 fn spawn_node_database_config_worker() {
     tokio::spawn(async {
+        let coordinator = RuntimeCoordinator::new();
         let mut interval=tokio::time::interval(std::time::Duration::from_secs(30));
         loop {
             interval.tick().await;
-            match pull_and_stage_database_config_once().await {
+            match pull_and_stage_database_config_once(&coordinator).await {
                 Ok(())=>{},
                 Err(error)=>tracing::warn!(%error,"database configuration pull/stage cycle failed; current gateway configuration is unchanged"),
             }
