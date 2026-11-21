@@ -77,7 +77,15 @@ impl fmt::Display for ProvisioningError {
 impl std::error::Error for ProvisioningError {}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TenantBinding { pub binding_id: Option<String>, pub tenant_id: String, pub namespace: String }
+pub struct TenantBinding {
+    pub binding_id: Option<String>,
+    pub tenant_id: String,
+    pub namespace: String,
+    pub existing_username: Option<String>,
+    pub existing_client_password: Option<Secret>,
+    pub existing_upstream_password: Option<Secret>,
+    pub rotate_credentials: bool,
+}
 
 pub struct ProvisioningStatement { pub purpose: &'static str, sql: Secret }
 impl ProvisioningStatement {
@@ -149,9 +157,29 @@ pub fn build_provisioning_plan(request: ProvisioningRequest<'_>) -> Result<Provi
         if !tenant_ids.insert(tenant_uuid) { return Err(ProvisioningError::DuplicateTenant); }
         if !namespaces.insert(binding.namespace.to_ascii_lowercase()) { return Err(ProvisioningError::DuplicateNamespace); }
 
-        let username = provider_username(provider, tenant_uuid);
-        let client_password = random_hex_secret(32)?;
-        let upstream_password = random_hex_secret(32)?;
+        let rotate = binding.rotate_credentials;
+        let username = if !rotate {
+            binding.existing_username.as_ref().cloned().unwrap_or_else(|| provider_username(provider, tenant_uuid))
+        } else {
+            provider_username(provider, tenant_uuid)
+        };
+        validate_username(provider, &username)?;
+        let client_password = if !rotate {
+            match binding.existing_client_password.as_ref() {
+                Some(secret) => Secret::new(secret.expose()?),
+                None => random_hex_secret(32)?,
+            }
+        } else {
+            random_hex_secret(32)?
+        };
+        let upstream_password = if !rotate {
+            match binding.existing_upstream_password.as_ref() {
+                Some(secret) => Secret::new(secret.expose()?),
+                None => random_hex_secret(32)?,
+            }
+        } else {
+            random_hex_secret(32)?
+        };
         let tenant_database = if provider.is_mysql_family() { binding.namespace.clone() } else { request.database_name.to_owned() };
         let schema = if provider.is_mysql_family() { None } else { Some(binding.namespace.clone()) };
 
@@ -570,7 +598,7 @@ fn mysql_options(
 mod tests {
     use super::*;
     fn binding(tenant: &str, namespace: &str) -> TenantBinding {
-        TenantBinding { binding_id: None, tenant_id: tenant.into(), namespace: namespace.into() }
+        TenantBinding { binding_id: None, tenant_id: tenant.into(), namespace: namespace.into(), existing_username: None, existing_client_password: None, existing_upstream_password: None, rotate_credentials: false }
     }
 
     #[test]
