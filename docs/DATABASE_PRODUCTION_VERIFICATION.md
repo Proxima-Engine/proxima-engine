@@ -49,7 +49,7 @@ The exact flags may change during implementation, but the one-command and per-da
 | SQL Server | Supported pinned SQL Server Linux image | TDS/TLS/login compatibility, tenant principals, RLS, cross-tenant denial, prepared/RPC/transaction scope and session isolation |
 | Redis | Supported pinned Redis image with ACL support | RESP framing, tenant key namespace, native ACLs, multi-key validation, command deny-list, pipelining and session binding |
 | SQLite | Bundled SQLite library and isolated temporary filesystem root | Separate tenant database files, tenant-ID validation, path traversal and symlink rejection, owner-only permissions, WAL and independent tenant data |
-| Oracle Database | Disposable Oracle Free 23 container | Dedicated schema owners, tenant-local DDL and CRUD, cross-schema read denial, no DBA role activation, and restricted grants |
+| Oracle Database | Disposable Oracle Free 23 container | Dedicated schema owners, tenant-local DDL and CRUD, cross-schema read denial, no DBA role activation, and restricted grants |\n| DynamoDB | Real AWS account and isolated test table | IAM `dynamodb:LeadingKeys` for exact tenant partition keys; deny missing/mismatched keys, Scan, table administration and cross-tenant requests; DynamoDB Local is not sufficient IAM evidence |\n| Apache Cassandra | Pinned disposable Cassandra cluster with authentication enabled | Separate keyspace and login role per tenant, SELECT/MODIFY-only privileges, cross-keyspace denial, credential rotation/revocation and TLS; execute generated CQL through a separate admin session |\n| Elasticsearch | Pinned Elasticsearch cluster with the exact security feature entitlement | Dedicated index namespace, role and API key per tenant; DLS/FLS where supported; test aliases, data streams, bulk, reindex, aggregations and forbidden cluster privileges |\n| OpenSearch | Pinned OpenSearch cluster with Security plugin enabled | Separate Security-plugin role/backend-role/API-key path; index namespace, DLS/FLS where supported; independently test aliases, data streams, bulk, reindex, aggregations and forbidden cluster privileges |
 
 The runner must clearly distinguish PASS, FAIL, SKIP, and NOT_IMPLEMENTED. A not-yet-implemented database must never be silently counted as a pass.
 
@@ -91,7 +91,7 @@ The Markdown report should summarize the same facts and link to the detailed log
 - Use ephemeral service containers and unique test credentials.
 - Run the full database matrix on pull requests affecting gateway, policy, identity, deployment, or shared protocol code, and on scheduled main-branch verification.
 - Preserve the existing PostgreSQL, CockroachDB, MySQL, MariaDB, MongoDB and PgBouncer checks.
-- Add SQL Server and Redis to the matrix only after their real-server suites exist.
+- Add SQL Server, Redis, Cassandra, DynamoDB, Elasticsearch and OpenSearch to the matrix only after their provider-specific real-service suites exist; do not count helper-only checks as provider acceptance.
 - Fail CI if a database marked implemented has no acceptance suite, or if an expected suite is skipped.
 - Keep build-only and mock-only tests separate from real-server acceptance results.
 
@@ -110,4 +110,4 @@ A local or CI run can establish the first five levels within its tested scope. I
 
 ## Current implementation state
 
-This document specifies the target verification system. The unified all-database runner remains a separate follow-up. Per-database scripts and CI checks are authoritative. SQLite isolation is exercised by the Rust unit suite; Oracle isolation is exercised against a disposable Oracle Free 23 instance by scripts/test-oracle-tenant-isolation-ci.sh. A green run establishes only the documented profile and tested version, not universal production certification.
+This document specifies the target verification system. The unified all-database runner remains a separate follow-up. Per-database scripts and CI checks are authoritative. DynamoDB AWS IAM and Elasticsearch/OpenSearch cluster acceptance are external provider gates until their live-service suites and provisioning executors are implemented. SQLite isolation is exercised by the Rust unit suite; Oracle isolation is exercised against a disposable Oracle Free 23 instance by scripts/test-oracle-tenant-isolation-ci.sh. A green run establishes only the documented profile and tested version, not universal production certification.
