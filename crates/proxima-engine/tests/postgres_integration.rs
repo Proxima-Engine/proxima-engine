@@ -133,6 +133,8 @@ fn start_proxima(port: u16) -> Result<Child, Box<dyn Error>> {
     let binary = env!("CARGO_BIN_EXE_proxima-engine");
     let child = Command::new(binary)
         .env("PROXIMA_LISTEN_ADDR", format!("127.0.0.1:{port}"))
+        .env("PROXIMA_METRICS_LISTEN_ADDR", "127.0.0.1:0")
+        .env("PROXIMA_DASHBOARD_ENABLED", "false")
         .env("PROXIMA_UPSTREAM_ADDR", "127.0.0.1:5432")
         .env("PROXIMA_TENANT_SIGNING_KEY", std::str::from_utf8(SECRET)?)
         .env("RUST_LOG", "proxima_engine=warn")

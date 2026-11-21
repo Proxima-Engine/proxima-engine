@@ -24,14 +24,14 @@ pub mod mongodb_policy;
 
 pub mod mongodb_gateway;
 
-pub mod redis_protocol;
 pub mod redis_gateway;
+pub mod redis_protocol;
 
-pub mod sqlite_tenant;
 pub mod oracle_tenant;
+pub mod sqlite_tenant;
 
-pub mod dynamodb_tenant;
 pub mod cassandra_tenant;
+pub mod dynamodb_tenant;
 
 pub mod elasticsearch_tenant;
 pub mod opensearch_tenant;
@@ -39,3 +39,7 @@ pub mod opensearch_tenant;
 pub mod runtime_reconciliation;
 
 pub mod kubernetes_reconciler;
+
+pub mod runtime_activation;
+
+pub mod runtime_coordinator;

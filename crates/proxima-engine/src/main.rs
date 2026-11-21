@@ -12,11 +12,11 @@ use proxima_engine::{
     dashboard,
     metrics::{self, QueryLatencyTracker},
     protocol::SSL_REQUEST_CODE,
+    runtime_reconciliation::{self, RuntimeRecord},
     security_breaker::{BreakerConfig, SecurityBreaker},
     session::{establish, BoxedPgStream},
     tenant::TenantTokenVerifier,
     tls::{accept_client_tls, client_acceptor, connect_upstream_tls, upstream_connector},
-    runtime_reconciliation::{self, RuntimeRecord},
 };
 use sha2::{Digest, Sha256};
 use std::time::Instant;
@@ -166,7 +166,9 @@ fn runtime_capability_report_from(
     let directory = executable.parent();
     let has_gateway = |name: &str| {
         directory.is_some_and(|directory| {
-            directory.join(format!("{}{}", name, std::env::consts::EXE_SUFFIX)).is_file()
+            directory
+                .join(format!("{}{}", name, std::env::consts::EXE_SUFFIX))
+                .is_file()
         })
     };
 
@@ -243,9 +245,14 @@ mod runtime_capability_report_tests {
         let (without_redis, caps_without, digest) = runtime_capability_report_from(&engine);
         assert!(!without_redis.iter().any(|key| key == "redis"));
         assert_eq!(caps_without["protocols"]["redis_resp2"], false);
-        assert!(digest.as_deref().is_some_and(|value| value.starts_with("sha256:")));
+        assert!(digest
+            .as_deref()
+            .is_some_and(|value| value.starts_with("sha256:")));
 
-        let redis = directory.join(format!("proxima-redis-gateway{}", std::env::consts::EXE_SUFFIX));
+        let redis = directory.join(format!(
+            "proxima-redis-gateway{}",
+            std::env::consts::EXE_SUFFIX
+        ));
         fs::write(&redis, b"synthetic redis gateway artifact").unwrap();
         let (with_redis, caps_with, _) = runtime_capability_report_from(&engine);
         assert!(with_redis.windows(2).all(|pair| pair[0] < pair[1]));
@@ -380,7 +387,9 @@ async fn bootstrap_node_identity() -> Result<(), Box<dyn std::error::Error + Sen
 
         if let Some(tenant_key) = value["tenant_signing_key"].as_str() {
             if hex::decode(tenant_key)?.len() != 32 {
-                return Err("Organization tenant signing key must be exactly 32 bytes (hex encoded)".into());
+                return Err(
+                    "Organization tenant signing key must be exactly 32 bytes (hex encoded)".into(),
+                );
             }
             // This is an organization-scoped key derived by the Control Plane.
             // The Control Plane master secret is never sent to the customer node.
@@ -443,11 +452,14 @@ async fn bootstrap_node_identity() -> Result<(), Box<dyn std::error::Error + Sen
                 return Err("Node signing key must be exactly 32 bytes".into());
             }
 
-            let heartbeat_url = env::var("PROXIMA_NODE_HEARTBEAT_URL").ok().or_else(|| {
-                env::var("PROXIMA_NODE_ENROLLMENT_URL")
-                    .ok()
-                    .map(|url| url.replace("/api/v1/nodes/enroll", "/api/v1/nodes/heartbeat"))
-            }).ok_or("Missing PROXIMA_NODE_HEARTBEAT_URL for organization-key refresh")?;
+            let heartbeat_url = env::var("PROXIMA_NODE_HEARTBEAT_URL")
+                .ok()
+                .or_else(|| {
+                    env::var("PROXIMA_NODE_ENROLLMENT_URL")
+                        .ok()
+                        .map(|url| url.replace("/api/v1/nodes/enroll", "/api/v1/nodes/heartbeat"))
+                })
+                .ok_or("Missing PROXIMA_NODE_HEARTBEAT_URL for organization-key refresh")?;
             let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
             let version = env!("CARGO_PKG_VERSION");
             let runtime_status = "running";
@@ -478,7 +490,9 @@ async fn bootstrap_node_identity() -> Result<(), Box<dyn std::error::Error + Sen
                 .as_str()
                 .ok_or("Control Plane identity refresh response is missing tenant_signing_key")?;
             if hex::decode(tenant_key)?.len() != 32 {
-                return Err("Control Plane returned an invalid organization tenant signing key".into());
+                return Err(
+                    "Control Plane returned an invalid organization tenant signing key".into(),
+                );
             }
             identity["tenant_signing_key"] = serde_json::Value::String(tenant_key.to_owned());
             persist_identity(&identity_path, &identity)?;
@@ -502,8 +516,8 @@ async fn bootstrap_node_identity() -> Result<(), Box<dyn std::error::Error + Sen
     }
 
     let url = env::var("PROXIMA_NODE_ENROLLMENT_URL").ok();
-    let enrollment_token_file = env::var_os("PROXIMA_NODE_ENROLLMENT_TOKEN_FILE")
-        .map(PathBuf::from);
+    let enrollment_token_file =
+        env::var_os("PROXIMA_NODE_ENROLLMENT_TOKEN_FILE").map(PathBuf::from);
     let token = if let Some(path) = enrollment_token_file.as_ref() {
         Some(fs::read_to_string(path)?.trim().to_owned())
     } else {
@@ -562,7 +576,8 @@ async fn bootstrap_node_identity() -> Result<(), Box<dyn std::error::Error + Sen
 }
 
 fn validate_tenant_bindings(record: &serde_json::Value) -> Result<(), &'static str> {
-    let bindings = record.get("tenant_bindings")
+    let bindings = record
+        .get("tenant_bindings")
         .and_then(serde_json::Value::as_array)
         .ok_or("tenant database bindings are missing or invalid")?;
     if bindings.len() > 10_000 {
@@ -571,18 +586,29 @@ fn validate_tenant_bindings(record: &serde_json::Value) -> Result<(), &'static s
     let mut tenant_ids = std::collections::HashSet::new();
     let mut namespaces = std::collections::HashSet::new();
     for binding in bindings {
-        let tenant_id = binding.get("tenant_id").and_then(serde_json::Value::as_str)
-            .filter(|value| !value.is_empty()).ok_or("tenant binding has no tenant ID")?;
-        let namespace = binding.get("namespace").and_then(serde_json::Value::as_str)
-            .filter(|value| !value.is_empty()).ok_or("tenant binding has no namespace")?;
-        let status = binding.get("status").and_then(serde_json::Value::as_str)
+        let tenant_id = binding
+            .get("tenant_id")
+            .and_then(serde_json::Value::as_str)
+            .filter(|value| !value.is_empty())
+            .ok_or("tenant binding has no tenant ID")?;
+        let namespace = binding
+            .get("namespace")
+            .and_then(serde_json::Value::as_str)
+            .filter(|value| !value.is_empty())
+            .ok_or("tenant binding has no namespace")?;
+        let status = binding
+            .get("status")
+            .and_then(serde_json::Value::as_str)
             .ok_or("tenant binding has no lifecycle status")?;
         if !matches!(status, "pending" | "provisioning" | "active") {
             return Err("tenant binding lifecycle status is not deployable");
         }
-        if tenant_id.len() > 128 || namespace.len() > 255
+        if tenant_id.len() > 128
+            || namespace.len() > 255
             || !tenant_id.bytes().all(|byte| byte.is_ascii_graphic())
-            || !namespace.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'))
+            || !namespace
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'))
             || namespace.contains("..")
         {
             return Err("tenant binding contains an invalid tenant ID or namespace");
@@ -597,20 +623,30 @@ fn validate_tenant_bindings(record: &serde_json::Value) -> Result<(), &'static s
 /// The Engine's native PostgreSQL listener has one upstream, but gateway
 /// assignments are independent Kubernetes workloads and therefore each gets
 /// its own process. Do not impose the native listener's cardinality on gateways.
-fn validate_assignment_runtime_cardinality(records: &[serde_json::Value]) -> Result<(), &'static str> {
+fn validate_assignment_runtime_cardinality(
+    records: &[serde_json::Value],
+) -> Result<(), &'static str> {
     let mut native_engine_assignments = 0usize;
     let mut assignment_ids = std::collections::HashSet::new();
     for record in records {
-        let id = record.get("assignment_id").and_then(serde_json::Value::as_str)
-            .filter(|value| !value.trim().is_empty()).ok_or("assignment ID missing")?;
+        let id = record
+            .get("assignment_id")
+            .and_then(serde_json::Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or("assignment ID missing")?;
         if !assignment_ids.insert(id) {
             return Err("configuration bundle contains duplicate assignment IDs");
         }
-        let runtime = record.get("gateway_runtime").and_then(serde_json::Value::as_str)
+        let runtime = record
+            .get("gateway_runtime")
+            .and_then(serde_json::Value::as_str)
             .ok_or("gateway runtime is missing")?;
         if runtime == "proxima-engine" {
             native_engine_assignments += 1;
-        } else if !matches!(runtime, "proxima-mysql-gateway" | "proxima-mongodb-gateway" | "proxima-redis-gateway") {
+        } else if !matches!(
+            runtime,
+            "proxima-mysql-gateway" | "proxima-mongodb-gateway" | "proxima-redis-gateway"
+        ) {
             return Err("assigned gateway runtime is not supported");
         }
     }
@@ -620,12 +656,20 @@ fn validate_assignment_runtime_cardinality(records: &[serde_json::Value]) -> Res
     Ok(())
 }
 
-async fn pull_and_stage_database_config_once() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    use std::{env, fs, io::Write, path::PathBuf, time::{SystemTime, UNIX_EPOCH}};
+async fn pull_and_stage_database_config_once(
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    use std::{
+        env, fs,
+        io::Write,
+        path::PathBuf,
+        time::{SystemTime, UNIX_EPOCH},
+    };
     let node_id = env::var("PROXIMA_NODE_ID")?;
     let organization_id = env::var("PROXIMA_ORGANIZATION_ID")?;
     let signing_key = hex::decode(env::var("PROXIMA_NODE_SIGNING_KEY_HEX")?)?;
-    if signing_key.len() != 32 { return Err("node signing key must be 32 bytes".into()); }
+    if signing_key.len() != 32 {
+        return Err("node signing key must be 32 bytes".into());
+    }
     let heartbeat_url = env::var("PROXIMA_NODE_HEARTBEAT_URL")?;
     let pull_url = env::var("PROXIMA_NODE_CONFIG_PULL_URL").unwrap_or_else(|_| {
         heartbeat_url.replace("/api/v1/nodes/heartbeat", "/api/v1/nodes/config/pull")
@@ -633,12 +677,18 @@ async fn pull_and_stage_database_config_once() -> Result<(), Box<dyn std::error:
     let ack_url = env::var("PROXIMA_NODE_CONFIG_ACK_URL").unwrap_or_else(|_| {
         heartbeat_url.replace("/api/v1/nodes/heartbeat", "/api/v1/nodes/config/ack")
     });
-    if !pull_url.contains("/api/v1/nodes/config/pull") || !ack_url.contains("/api/v1/nodes/config/ack") {
+    if !pull_url.contains("/api/v1/nodes/config/pull")
+        || !ack_url.contains("/api/v1/nodes/config/ack")
+    {
         return Err("configure PROXIMA_NODE_CONFIG_PULL_URL and PROXIMA_NODE_CONFIG_ACK_URL or a canonical node heartbeat URL".into());
     }
     if !attestation_ingest_url_allowed(&pull_url, false)
-        || !attestation_ingest_url_allowed(&ack_url, false) {
-        return Err("node configuration endpoints must use HTTPS (or loopback for local development)".into());
+        || !attestation_ingest_url_allowed(&ack_url, false)
+    {
+        return Err(
+            "node configuration endpoints must use HTTPS (or loopback for local development)"
+                .into(),
+        );
     }
 
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
@@ -650,16 +700,32 @@ async fn pull_and_stage_database_config_once() -> Result<(), Box<dyn std::error:
     let mut mac = hmac::Hmac::<Sha256>::new_from_slice(&signing_key)?;
     mac.update(canonical.as_bytes());
     let signature = hex::encode(mac.finalize().into_bytes());
-    let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(15)).build()?;
-    let response = client.post(&pull_url).json(&serde_json::json!({
-        "node_id":node_id,"timestamp":timestamp,"nonce":nonce,"signature":signature
-    })).send().await?.error_for_status()?;
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()?;
+    let response = client
+        .post(&pull_url)
+        .json(&serde_json::json!({
+            "node_id":node_id,"timestamp":timestamp,"nonce":nonce,"signature":signature
+        }))
+        .send()
+        .await?
+        .error_for_status()?;
     let response: serde_json::Value = response.json().await?;
-    let bundle = response.get("bundle").cloned().ok_or("Control Plane response has no configuration bundle")?;
-    let bundle_signature = response.get("signature").and_then(serde_json::Value::as_str)
+    let bundle = response
+        .get("bundle")
+        .cloned()
+        .ok_or("Control Plane response has no configuration bundle")?;
+    let bundle_signature = response
+        .get("signature")
+        .and_then(serde_json::Value::as_str)
         .ok_or("Control Plane response has no bundle signature")?;
     if bundle.get("node_id").and_then(serde_json::Value::as_str) != Some(node_id.as_str())
-        || bundle.get("organization_id").and_then(serde_json::Value::as_str) != Some(organization_id.as_str()) {
+        || bundle
+            .get("organization_id")
+            .and_then(serde_json::Value::as_str)
+            != Some(organization_id.as_str())
+    {
         return Err("configuration bundle identity does not match this enrolled node".into());
     }
     let bundle_bytes = bundle.to_string();
@@ -672,72 +738,136 @@ async fn pull_and_stage_database_config_once() -> Result<(), Box<dyn std::error:
     let envelope_key = derive.finalize().into_bytes();
     let decryptor = ring::aead::LessSafeKey::new(
         ring::aead::UnboundKey::new(&ring::aead::AES_256_GCM, &envelope_key)
-            .map_err(|_| io::Error::other("invalid database configuration envelope key"))?
+            .map_err(|_| io::Error::other("invalid database configuration envelope key"))?,
     );
     let mut staged = Vec::new();
-    let records = bundle.get("assignments").and_then(serde_json::Value::as_array)
+    let records = bundle
+        .get("assignments")
+        .and_then(serde_json::Value::as_array)
         .ok_or("configuration bundle assignments must be an array")?;
     validate_assignment_runtime_cardinality(records)?;
     let executable = env::current_exe()?;
-    let executable_dir = executable.parent().ok_or("Engine executable directory is unavailable")?;
+    let executable_dir = executable
+        .parent()
+        .ok_or("Engine executable directory is unavailable")?;
     for record in records {
         validate_tenant_bindings(record)
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
         if record.get("tls_mode").and_then(serde_json::Value::as_str) != Some("verify-full") {
-            return Err("assigned database target does not require full upstream TLS verification".into());
+            return Err(
+                "assigned database target does not require full upstream TLS verification".into(),
+            );
         }
-        let gateway_runtime = record.get("gateway_runtime").and_then(serde_json::Value::as_str)
+        let gateway_runtime = record
+            .get("gateway_runtime")
+            .and_then(serde_json::Value::as_str)
             .ok_or("gateway runtime is missing")?;
         let runtime_available = match gateway_runtime {
             "proxima-engine" => true,
-            "proxima-mysql-gateway" => executable_dir.join(format!("proxima-mysql-gateway{}", env::consts::EXE_SUFFIX)).is_file(),
-            "proxima-mongodb-gateway" => executable_dir.join(format!("proxima-mongodb-gateway{}", env::consts::EXE_SUFFIX)).is_file(),
-            "proxima-redis-gateway" => executable_dir.join(format!("proxima-redis-gateway{}", env::consts::EXE_SUFFIX)).is_file(),
+            "proxima-mysql-gateway" => executable_dir
+                .join(format!("proxima-mysql-gateway{}", env::consts::EXE_SUFFIX))
+                .is_file(),
+            "proxima-mongodb-gateway" => executable_dir
+                .join(format!(
+                    "proxima-mongodb-gateway{}",
+                    env::consts::EXE_SUFFIX
+                ))
+                .is_file(),
+            "proxima-redis-gateway" => executable_dir
+                .join(format!("proxima-redis-gateway{}", env::consts::EXE_SUFFIX))
+                .is_file(),
             _ => false,
         };
         if !runtime_available {
-            return Err(format!("assigned gateway runtime is not packaged: {gateway_runtime}").into());
+            return Err(
+                format!("assigned gateway runtime is not packaged: {gateway_runtime}").into(),
+            );
         }
-        let target_id = record.get("database_target_id").and_then(serde_json::Value::as_str)
+        let target_id = record
+            .get("database_target_id")
+            .and_then(serde_json::Value::as_str)
             .ok_or("database target ID missing")?;
-        let config_revision = record.get("config_revision").and_then(serde_json::Value::as_i64)
+        let config_revision = record
+            .get("config_revision")
+            .and_then(serde_json::Value::as_i64)
             .ok_or("configuration revision missing")?;
-        let credential_revision = record.get("credential_revision").and_then(serde_json::Value::as_i64)
+        let credential_revision = record
+            .get("credential_revision")
+            .and_then(serde_json::Value::as_i64)
             .ok_or("credential revision missing")?;
-        let expected_aad = format!("{node_id}\n{target_id}\n{config_revision}\n{credential_revision}");
-        let envelope = record.get("credential_envelope").ok_or("credential envelope missing")?;
-        if envelope.get("algorithm").and_then(serde_json::Value::as_str) != Some("AES-256-GCM") {
+        let expected_aad =
+            format!("{node_id}\n{target_id}\n{config_revision}\n{credential_revision}");
+        let envelope = record
+            .get("credential_envelope")
+            .ok_or("credential envelope missing")?;
+        if envelope
+            .get("algorithm")
+            .and_then(serde_json::Value::as_str)
+            != Some("AES-256-GCM")
+        {
             return Err("unsupported database credential envelope algorithm".into());
         }
-        let ciphertext = hex::decode(envelope.get("ciphertext").and_then(serde_json::Value::as_str)
-            .ok_or("credential envelope ciphertext missing")?)?;
-        let nonce_bytes: [u8; 12] = hex::decode(envelope.get("nonce").and_then(serde_json::Value::as_str)
-            .ok_or("credential envelope nonce missing")?)?.try_into().map_err(|_| "invalid credential envelope nonce")?;
-        let aad = envelope.get("aad").and_then(serde_json::Value::as_str).ok_or("credential envelope AAD missing")?;
+        let ciphertext = hex::decode(
+            envelope
+                .get("ciphertext")
+                .and_then(serde_json::Value::as_str)
+                .ok_or("credential envelope ciphertext missing")?,
+        )?;
+        let nonce_bytes: [u8; 12] = hex::decode(
+            envelope
+                .get("nonce")
+                .and_then(serde_json::Value::as_str)
+                .ok_or("credential envelope nonce missing")?,
+        )?
+        .try_into()
+        .map_err(|_| "invalid credential envelope nonce")?;
+        let aad = envelope
+            .get("aad")
+            .and_then(serde_json::Value::as_str)
+            .ok_or("credential envelope AAD missing")?;
         if aad != expected_aad {
             return Err("credential envelope associated data does not match the assigned target and revisions".into());
         }
         let mut plaintext = ciphertext;
-        let credentials = decryptor.open_in_place(
-            ring::aead::Nonce::assume_unique_for_key(nonce_bytes),
-            ring::aead::Aad::from(aad.as_bytes()),
-            &mut plaintext
-        ).map_err(|_| io::Error::other("database credential envelope authentication failed"))?;
+        let credentials = decryptor
+            .open_in_place(
+                ring::aead::Nonce::assume_unique_for_key(nonce_bytes),
+                ring::aead::Aad::from(aad.as_bytes()),
+                &mut plaintext,
+            )
+            .map_err(|_| io::Error::other("database credential envelope authentication failed"))?;
         let credentials: serde_json::Value = serde_json::from_slice(credentials)?;
-        let username = credentials.get("username").and_then(serde_json::Value::as_str)
-            .filter(|value| !value.trim().is_empty()).ok_or("database target username is missing")?;
-        let password = credentials.get("password").and_then(serde_json::Value::as_str)
-            .filter(|value| !value.is_empty()).ok_or("database target password is missing")?;
+        let username = credentials
+            .get("username")
+            .and_then(serde_json::Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or("database target username is missing")?;
+        let password = credentials
+            .get("password")
+            .and_then(serde_json::Value::as_str)
+            .filter(|value| !value.is_empty())
+            .ok_or("database target password is missing")?;
         if username.len() > 128 || password.len() > 4096 {
             return Err("database target credentials exceed supported limits".into());
         }
-        let endpoint = record.get("endpoint").ok_or("database target endpoint is missing")?;
-        let host = endpoint.get("host").and_then(serde_json::Value::as_str)
-            .filter(|value| !value.trim().is_empty()).ok_or("database target host is missing")?;
-        let port = endpoint.get("port").and_then(serde_json::Value::as_u64)
-            .filter(|value| (1..=65535).contains(value)).ok_or("database target port is invalid")?;
-        let database_name = record.get("database_name").and_then(serde_json::Value::as_str)
-            .filter(|value| !value.trim().is_empty()).ok_or("database target database name is missing")?;
+        let endpoint = record
+            .get("endpoint")
+            .ok_or("database target endpoint is missing")?;
+        let host = endpoint
+            .get("host")
+            .and_then(serde_json::Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or("database target host is missing")?;
+        let port = endpoint
+            .get("port")
+            .and_then(serde_json::Value::as_u64)
+            .filter(|value| (1..=65535).contains(value))
+            .ok_or("database target port is invalid")?;
+        let database_name = record
+            .get("database_name")
+            .and_then(serde_json::Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or("database target database name is missing")?;
         if host.len() > 255 || database_name.len() > 255 || port == 0 {
             return Err("database target endpoint exceeds supported limits".into());
         }
@@ -746,18 +876,34 @@ async fn pull_and_stage_database_config_once() -> Result<(), Box<dyn std::error:
         // controller, so persist routing metadata only. Never place decrypted
         // database usernames/passwords on the controller-readable PVC; the
         // authenticated credential envelope is validated above and then dropped.
-        item.as_object_mut().ok_or("assignment entry must be an object")?.remove("credential_envelope");
+        item.as_object_mut()
+            .ok_or("assignment entry must be an object")?
+            .remove("credential_envelope");
         item.as_object_mut().unwrap().remove("credentials");
         staged.push(item);
     }
 
-    let identity_path = env::var_os("PROXIMA_NODE_IDENTITY_PATH").map(PathBuf::from)
-        .or_else(|| env::var_os("LOCALAPPDATA").map(|base|PathBuf::from(base).join("AgataProxima").join("node-identity.json")))
-        .unwrap_or_else(||PathBuf::from("data/node-identity.json"));
-    let output_path = env::var_os("PROXIMA_NODE_DATABASE_CONFIG_PATH").map(PathBuf::from)
-        .or_else(||identity_path.parent().map(|parent|parent.join("database-targets.json")))
-        .unwrap_or_else(||PathBuf::from("data/database-targets.json"));
-    let parent = output_path.parent().ok_or("invalid database config output path")?;
+    let identity_path = env::var_os("PROXIMA_NODE_IDENTITY_PATH")
+        .map(PathBuf::from)
+        .or_else(|| {
+            env::var_os("LOCALAPPDATA").map(|base| {
+                PathBuf::from(base)
+                    .join("AgataProxima")
+                    .join("node-identity.json")
+            })
+        })
+        .unwrap_or_else(|| PathBuf::from("data/node-identity.json"));
+    let output_path = env::var_os("PROXIMA_NODE_DATABASE_CONFIG_PATH")
+        .map(PathBuf::from)
+        .or_else(|| {
+            identity_path
+                .parent()
+                .map(|parent| parent.join("database-targets.json"))
+        })
+        .unwrap_or_else(|| PathBuf::from("data/database-targets.json"));
+    let parent = output_path
+        .parent()
+        .ok_or("invalid database config output path")?;
     fs::create_dir_all(parent)?;
     // An authenticated empty bundle explicitly revokes this node's assignment.
     // Replace the staged document with an empty assignment set so revoked
@@ -770,23 +916,31 @@ async fn pull_and_stage_database_config_once() -> Result<(), Box<dyn std::error:
         "assignments":staged
     });
     let temporary = output_path.with_extension("json.tmp");
-    if temporary.exists() { fs::remove_file(&temporary)?; }
+    if temporary.exists() {
+        fs::remove_file(&temporary)?;
+    }
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        let mut file=fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&temporary)?;
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&temporary)?;
         file.write_all(serde_json::to_string_pretty(&document)?.as_bytes())?;
         file.sync_all()?;
     }
     #[cfg(not(unix))]
-    fs::write(&temporary,serde_json::to_vec_pretty(&document)?)?;
+    fs::write(&temporary, serde_json::to_vec_pretty(&document)?)?;
     #[cfg(windows)]
-    if output_path.exists(){fs::remove_file(&output_path)?;}
-    fs::rename(&temporary,&output_path)?;
+    if output_path.exists() {
+        fs::remove_file(&output_path)?;
+    }
+    fs::rename(&temporary, &output_path)?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&output_path,fs::Permissions::from_mode(0o600))?;
+        fs::set_permissions(&output_path, fs::Permissions::from_mode(0o600))?;
     }
 
     // Persist each assignment independently. A node may receive multiple
@@ -794,54 +948,97 @@ async fn pull_and_stage_database_config_once() -> Result<(), Box<dyn std::error:
     // the first assignment in the bundle.
     let state_dir = env::var_os("PROXIMA_NODE_RUNTIME_STATE_DIR")
         .map(PathBuf::from)
-        .or_else(|| output_path.parent().map(|parent| parent.join("runtime-state")))
+        .or_else(|| {
+            output_path
+                .parent()
+                .map(|parent| parent.join("runtime-state"))
+        })
         .unwrap_or_else(|| PathBuf::from("data/runtime-state"));
     fs::create_dir_all(&state_dir)?;
     for record in &staged {
-        let assignment_id = record.get("assignment_id").and_then(serde_json::Value::as_str)
+        let assignment_id = record
+            .get("assignment_id")
+            .and_then(serde_json::Value::as_str)
             .ok_or("assignment ID missing")?;
-        let target_id = record.get("database_target_id").and_then(serde_json::Value::as_str)
+        let target_id = record
+            .get("database_target_id")
+            .and_then(serde_json::Value::as_str)
             .ok_or("target ID missing")?;
-        let provider = record.get("provider_key").and_then(serde_json::Value::as_str)
+        let provider = record
+            .get("provider_key")
+            .and_then(serde_json::Value::as_str)
             .ok_or("provider key missing")?;
-        let revision = record.get("config_revision").and_then(serde_json::Value::as_u64)
+        let revision = record
+            .get("config_revision")
+            .and_then(serde_json::Value::as_u64)
             .ok_or("configuration revision missing")?;
-        let credential_revision = record.get("credential_revision").and_then(serde_json::Value::as_u64)
+        let credential_revision = record
+            .get("credential_revision")
+            .and_then(serde_json::Value::as_u64)
             .ok_or("credential revision missing")?;
         let state_path = state_dir.join(format!("{assignment_id}.json"));
         let state = if state_path.exists() {
             let mut current = runtime_reconciliation::load(&state_path)?;
-            current.update_desired(assignment_id, target_id, provider, revision, credential_revision)?;
+            current.update_desired(
+                assignment_id,
+                target_id,
+                provider,
+                revision,
+                credential_revision,
+            )?;
             current
         } else {
-            RuntimeRecord::staged(assignment_id.to_owned(), target_id.to_owned(), provider.to_owned(), revision, credential_revision)?
+            RuntimeRecord::staged(
+                assignment_id.to_owned(),
+                target_id.to_owned(),
+                provider.to_owned(),
+                revision,
+                credential_revision,
+            )?
         };
         runtime_reconciliation::persist(&state_path, &state)?;
         info!(
-            assignment_id, target_id, desired_revision = revision, phase = "staged",
+            assignment_id,
+            target_id,
+            desired_revision = revision,
+            phase = "staged",
             "authenticated database desired state persisted; runtime activation remains separate"
         );
     }
 
     for record in records {
-        let assignment_id=record.get("assignment_id").and_then(serde_json::Value::as_str).ok_or("assignment ID missing")?;
-        let target_id=record.get("database_target_id").and_then(serde_json::Value::as_str).ok_or("target ID missing")?;
-        let revision=record.get("config_revision").and_then(serde_json::Value::as_i64).ok_or("config revision missing")?;
-        let ack_timestamp=SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
-        let ack_nonce=uuid::Uuid::new_v4().to_string();
-        let ack_canonical=format!(
+        let assignment_id = record
+            .get("assignment_id")
+            .and_then(serde_json::Value::as_str)
+            .ok_or("assignment ID missing")?;
+        let target_id = record
+            .get("database_target_id")
+            .and_then(serde_json::Value::as_str)
+            .ok_or("target ID missing")?;
+        let revision = record
+            .get("config_revision")
+            .and_then(serde_json::Value::as_i64)
+            .ok_or("config revision missing")?;
+        let ack_timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
+        let ack_nonce = uuid::Uuid::new_v4().to_string();
+        let ack_canonical = format!(
             "proxima-node-config-ack-v1\n{}\n{}\n{}\n{}\n{}\n{}\n{}\nstaged\nunhealthy\n",
-            node_id,organization_id,ack_nonce,assignment_id,target_id,revision,ack_timestamp
+            node_id, organization_id, ack_nonce, assignment_id, target_id, revision, ack_timestamp
         );
-        let mut ack_mac=hmac::Hmac::<Sha256>::new_from_slice(&signing_key)?;
+        let mut ack_mac = hmac::Hmac::<Sha256>::new_from_slice(&signing_key)?;
         ack_mac.update(ack_canonical.as_bytes());
-        let ack_signature=hex::encode(ack_mac.finalize().into_bytes());
-        client.post(&ack_url).json(&serde_json::json!({
-            "node_id":node_id,"nonce":ack_nonce,"assignment_id":assignment_id,
-            "database_target_id":target_id,"config_revision":revision,
-            "timestamp":ack_timestamp,"status":"staged","runtime_health_passed":false,
-            "error_code":null,"signature":ack_signature
-        })).send().await?.error_for_status()?;
+        let ack_signature = hex::encode(ack_mac.finalize().into_bytes());
+        client
+            .post(&ack_url)
+            .json(&serde_json::json!({
+                "node_id":node_id,"nonce":ack_nonce,"assignment_id":assignment_id,
+                "database_target_id":target_id,"config_revision":revision,
+                "timestamp":ack_timestamp,"status":"staged","runtime_health_passed":false,
+                "error_code":null,"signature":ack_signature
+            }))
+            .send()
+            .await?
+            .error_for_status()?;
     }
     info!(assignments=records.len(),path=%output_path.display(),"authenticated database configuration staged on node");
     Ok(())
@@ -849,12 +1046,14 @@ async fn pull_and_stage_database_config_once() -> Result<(), Box<dyn std::error:
 
 fn spawn_node_database_config_worker() {
     tokio::spawn(async {
-        let mut interval=tokio::time::interval(std::time::Duration::from_secs(30));
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
         loop {
             interval.tick().await;
             match pull_and_stage_database_config_once().await {
-                Ok(())=>{},
-                Err(error)=>tracing::warn!(%error,"database configuration pull/stage cycle failed; current gateway configuration is unchanged"),
+                Ok(()) => {}
+                Err(error) => {
+                    tracing::warn!(%error,"database configuration pull/stage cycle failed; current gateway configuration is unchanged")
+                }
             }
         }
     });
@@ -1825,24 +2024,11 @@ mod node_heartbeat_signature_tests {
     #[test]
     fn heartbeat_signature_is_deterministic_for_the_same_payload() {
         let key = [7u8; 32];
-        let first = sign_node_heartbeat(
-            &key,
-            "node-a",
-            "org-a",
-            1_800_000_000,
-            "0.1.0",
-            "running",
-        )
-        .unwrap();
-        let second = sign_node_heartbeat(
-            &key,
-            "node-a",
-            "org-a",
-            1_800_000_000,
-            "0.1.0",
-            "running",
-        )
-        .unwrap();
+        let first = sign_node_heartbeat(&key, "node-a", "org-a", 1_800_000_000, "0.1.0", "running")
+            .unwrap();
+        let second =
+            sign_node_heartbeat(&key, "node-a", "org-a", 1_800_000_000, "0.1.0", "running")
+                .unwrap();
         assert_eq!(first, second);
         assert_eq!(first.len(), 64);
     }
@@ -1853,52 +2039,57 @@ mod node_heartbeat_signature_tests {
         let providers = vec!["cockroachdb".to_owned(), "postgresql".to_owned()];
         let capabilities = serde_json::json!({"engine_version":"0.1.0","postgresql_wire":true});
         let signature = sign_node_heartbeat_v2(
-            &key, "node-a", "org-a", 1_800_000_000, "0.1.0", "running",
-            &providers, &capabilities, Some("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-        ).unwrap();
+            &key,
+            "node-a",
+            "org-a",
+            1_800_000_000,
+            "0.1.0",
+            "running",
+            &providers,
+            &capabilities,
+            Some("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+        )
+        .unwrap();
         let changed = sign_node_heartbeat_v2(
-            &key, "node-a", "org-a", 1_800_000_000, "0.1.0", "running",
-            &providers, &capabilities, Some("sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
-        ).unwrap();
+            &key,
+            "node-a",
+            "org-a",
+            1_800_000_000,
+            "0.1.0",
+            "running",
+            &providers,
+            &capabilities,
+            Some("sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+        )
+        .unwrap();
         let changed_provider = sign_node_heartbeat_v2(
-            &key, "node-a", "org-a", 1_800_000_000, "0.1.0", "running",
-            &["cockroachdb".to_owned()], &capabilities, Some("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-        ).unwrap();
+            &key,
+            "node-a",
+            "org-a",
+            1_800_000_000,
+            "0.1.0",
+            "running",
+            &["cockroachdb".to_owned()],
+            &capabilities,
+            Some("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+        )
+        .unwrap();
         assert_ne!(signature, changed);
         assert_ne!(signature, changed_provider);
     }
 
     fn heartbeat_signature_changes_when_signed_fields_change() {
         let key = [7u8; 32];
-        let baseline = sign_node_heartbeat(
-            &key,
-            "node-a",
-            "org-a",
-            1_800_000_000,
-            "0.1.0",
-            "running",
-        )
-        .unwrap();
-        let other_node = sign_node_heartbeat(
-            &key,
-            "node-b",
-            "org-a",
-            1_800_000_000,
-            "0.1.0",
-            "running",
-        )
-        .unwrap();
-        let other_time = sign_node_heartbeat(
-            &key,
-            "node-a",
-            "org-a",
-            1_800_000_001,
-            "0.1.0",
-            "running",
-        )
-        .unwrap();
+        let baseline =
+            sign_node_heartbeat(&key, "node-a", "org-a", 1_800_000_000, "0.1.0", "running")
+                .unwrap();
+        let other_node =
+            sign_node_heartbeat(&key, "node-b", "org-a", 1_800_000_000, "0.1.0", "running")
+                .unwrap();
+        let other_time =
+            sign_node_heartbeat(&key, "node-a", "org-a", 1_800_000_001, "0.1.0", "running")
+                .unwrap();
         assert_ne!(baseline, other_node);
         assert_ne!(baseline, other_time);
     }
-
 }

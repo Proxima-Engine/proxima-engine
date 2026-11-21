@@ -1,12 +1,22 @@
-pub struct OracleTenant { tenant_id: String, username: String, password: String }
+pub struct OracleTenant {
+    tenant_id: String,
+    username: String,
+    password: String,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum OracleTenantError { InvalidTenantId, WeakPassword }
+pub enum OracleTenantError {
+    InvalidTenantId,
+    WeakPassword,
+}
 impl std::fmt::Display for OracleTenantError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::InvalidTenantId => write!(f, "invalid Oracle tenant identifier"),
-            Self::WeakPassword => write!(f, "Oracle tenant password must contain at least 24 characters"),
+            Self::WeakPassword => write!(
+                f,
+                "Oracle tenant password must contain at least 24 characters"
+            ),
         }
     }
 }
@@ -16,17 +26,33 @@ impl std::error::Error for OracleTenantError {}
 /// user as its schema owner; provisioning SQL runs only on a trusted admin session.
 impl OracleTenant {
     pub fn new(tenant_id: &str, password: &str) -> Result<Self, OracleTenantError> {
-        if tenant_id.is_empty() || tenant_id.len() > 24
-            || !tenant_id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') {
+        if tenant_id.is_empty()
+            || tenant_id.len() > 24
+            || !tenant_id
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'_')
+        {
             return Err(OracleTenantError::InvalidTenantId);
         }
-        if password.len() < 24 || !password.bytes().all(|b| (33..=126).contains(&b)) { return Err(OracleTenantError::WeakPassword); }
+        if password.len() < 24 || !password.bytes().all(|b| (33..=126).contains(&b)) {
+            return Err(OracleTenantError::WeakPassword);
+        }
         let tenant_id = tenant_id.to_ascii_uppercase();
-        Ok(Self { username: format!("PROXIMA_{}_OWNER", tenant_id), tenant_id, password: password.to_owned() })
+        Ok(Self {
+            username: format!("PROXIMA_{}_OWNER", tenant_id),
+            tenant_id,
+            password: password.to_owned(),
+        })
     }
-    pub fn tenant_id(&self) -> &str { &self.tenant_id }
-    pub fn username(&self) -> &str { &self.username }
-    pub fn connect_user(&self) -> &str { &self.username }
+    pub fn tenant_id(&self) -> &str {
+        &self.tenant_id
+    }
+    pub fn username(&self) -> &str {
+        &self.username
+    }
+    pub fn connect_user(&self) -> &str {
+        &self.username
+    }
 
     /// Statements create a schema owner with bounded tablespace quota and no
     /// elevated roles or cross-schema ANY privileges.
@@ -49,13 +75,20 @@ mod tests {
         assert_eq!(t.username(), "PROXIMA_CUSTOMER_01_OWNER");
         let sql = t.provisioning_sql().join("\n");
         assert!(sql.contains("GRANT CREATE SESSION, CREATE TABLE"));
-        assert!(!sql.contains("DBA")); assert!(!sql.contains("ANY TABLE"));
+        assert!(!sql.contains("DBA"));
+        assert!(!sql.contains("ANY TABLE"));
         assert!(sql.contains("DEFAULT ROLE NONE"));
     }
     #[test]
     fn rejects_identifier_injection_and_weak_password() {
-        assert!(matches!(OracleTenant::new("A; DROP USER X", "a-long-random-test-password"), Err(OracleTenantError::InvalidTenantId)));
-        assert!(matches!(OracleTenant::new("tenant", "short"), Err(OracleTenantError::WeakPassword)));
+        assert!(matches!(
+            OracleTenant::new("A; DROP USER X", "a-long-random-test-password"),
+            Err(OracleTenantError::InvalidTenantId)
+        ));
+        assert!(matches!(
+            OracleTenant::new("tenant", "short"),
+            Err(OracleTenantError::WeakPassword)
+        ));
     }
     #[test]
     fn escapes_quoted_password_characters() {

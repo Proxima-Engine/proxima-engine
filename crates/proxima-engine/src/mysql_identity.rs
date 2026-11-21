@@ -83,27 +83,59 @@ impl MysqlIdentityRegistry {
             let tenant_id = field("tenant_id")?;
             let database = field("database")?;
             let upstream_url = field("upstream_url")?;
-            let password_sha1_hex = user.get("password_sha1").and_then(serde_json::Value::as_str).map(str::trim).filter(|v| !v.is_empty());
-            let password_sha256_hex = user.get("password_sha256").and_then(serde_json::Value::as_str).map(str::trim).filter(|v| !v.is_empty());
+            let password_sha1_hex = user
+                .get("password_sha1")
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                .filter(|v| !v.is_empty());
+            let password_sha256_hex = user
+                .get("password_sha256")
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                .filter(|v| !v.is_empty());
             if password_sha1_hex.is_some() == password_sha256_hex.is_some() {
                 return Err(IdentityError::InvalidRegistry(format!(
                     "users[{index}] must contain exactly one of password_sha1 or password_sha256"
                 )));
             }
-            let auth_plugin = user.get("auth_plugin").and_then(serde_json::Value::as_str).unwrap_or(
-                if password_sha256_hex.is_some() { "caching_sha2_password" } else { "mysql_native_password" }
-            );
-            let (password_sha1, password_sha256, expected_plugin) = if let Some(hash) = password_sha1_hex {
-                let decoded = hex::decode(hash).map_err(|_| IdentityError::InvalidRegistry(format!("users[{index}].password_sha1 must be hexadecimal")))?;
-                let hash: [u8; 20] = decoded.try_into().map_err(|_| IdentityError::InvalidRegistry(format!("users[{index}].password_sha1 must contain exactly 20 bytes")))?;
-                (Some(hash), None, "mysql_native_password")
-            } else {
-                let decoded = hex::decode(password_sha256_hex.unwrap()).map_err(|_| IdentityError::InvalidRegistry(format!("users[{index}].password_sha256 must be hexadecimal")))?;
-                let hash: [u8; 32] = decoded.try_into().map_err(|_| IdentityError::InvalidRegistry(format!("users[{index}].password_sha256 must contain exactly 32 bytes")))?;
-                (None, Some(hash), "caching_sha2_password")
-            };
+            let auth_plugin = user
+                .get("auth_plugin")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or(if password_sha256_hex.is_some() {
+                    "caching_sha2_password"
+                } else {
+                    "mysql_native_password"
+                });
+            let (password_sha1, password_sha256, expected_plugin) =
+                if let Some(hash) = password_sha1_hex {
+                    let decoded = hex::decode(hash).map_err(|_| {
+                        IdentityError::InvalidRegistry(format!(
+                            "users[{index}].password_sha1 must be hexadecimal"
+                        ))
+                    })?;
+                    let hash: [u8; 20] = decoded.try_into().map_err(|_| {
+                        IdentityError::InvalidRegistry(format!(
+                            "users[{index}].password_sha1 must contain exactly 20 bytes"
+                        ))
+                    })?;
+                    (Some(hash), None, "mysql_native_password")
+                } else {
+                    let decoded = hex::decode(password_sha256_hex.unwrap()).map_err(|_| {
+                        IdentityError::InvalidRegistry(format!(
+                            "users[{index}].password_sha256 must be hexadecimal"
+                        ))
+                    })?;
+                    let hash: [u8; 32] = decoded.try_into().map_err(|_| {
+                        IdentityError::InvalidRegistry(format!(
+                            "users[{index}].password_sha256 must contain exactly 32 bytes"
+                        ))
+                    })?;
+                    (None, Some(hash), "caching_sha2_password")
+                };
             if auth_plugin != expected_plugin {
-                return Err(IdentityError::InvalidRegistry(format!("users[{index}].auth_plugin does not match its verifier format")));
+                return Err(IdentityError::InvalidRegistry(format!(
+                    "users[{index}].auth_plugin does not match its verifier format"
+                )));
             }
 
             if !valid_database_name(&database) {
@@ -136,8 +168,10 @@ impl MysqlIdentityRegistry {
                 )));
             }
 
-            if !matches!(upstream_options.ip_or_hostname(), "localhost" | "127.0.0.1" | "::1")
-                && upstream_options.ssl_opts().is_none()
+            if !matches!(
+                upstream_options.ip_or_hostname(),
+                "localhost" | "127.0.0.1" | "::1"
+            ) && upstream_options.ssl_opts().is_none()
             {
                 return Err(IdentityError::InvalidRegistry(format!(
                     "users[{index}].upstream_url must require verified TLS for non-loopback upstream hosts (add require_ssl=true)"
@@ -179,20 +213,33 @@ impl MysqlIdentityRegistry {
         salt: &[u8],
         auth_data: &[u8],
     ) -> Option<TenantPrincipal> {
-        if salt.len() != 20 { return None; }
+        if salt.len() != 20 {
+            return None;
+        }
         let username = std::str::from_utf8(username).ok()?;
         let principal = self.principals.get(username)?;
-        if auth_plugin != principal.auth_plugin { return None; }
-        let valid = match (auth_plugin, principal.password_sha1.as_ref(), principal.password_sha256.as_ref()) {
-            ("mysql_native_password", Some(hash), None) => verify_native_password(hash, salt, auth_data),
-            ("caching_sha2_password", None, Some(hash)) => verify_caching_sha2_password(hash, salt, auth_data),
+        if auth_plugin != principal.auth_plugin {
+            return None;
+        }
+        let valid = match (
+            auth_plugin,
+            principal.password_sha1.as_ref(),
+            principal.password_sha256.as_ref(),
+        ) {
+            ("mysql_native_password", Some(hash), None) => {
+                verify_native_password(hash, salt, auth_data)
+            }
+            ("caching_sha2_password", None, Some(hash)) => {
+                verify_caching_sha2_password(hash, salt, auth_data)
+            }
             _ => false,
         };
         valid.then(|| principal.clone())
     }
 
     pub fn auth_plugin_for_username(&self, username: &[u8]) -> &'static str {
-        std::str::from_utf8(username).ok()
+        std::str::from_utf8(username)
+            .ok()
             .and_then(|name| self.principals.get(name))
             .map(|principal| principal.auth_plugin)
             .unwrap_or("caching_sha2_password")
@@ -247,7 +294,9 @@ fn verify_caching_sha2_password(stored_stage2: &[u8; 32], salt: &[u8], auth_data
         let empty_stage2 = Sha256::digest(stage1);
         return constant_time_equal(stored_stage2, &empty_stage2);
     }
-    if auth_data.len() != 32 { return false; }
+    if auth_data.len() != 32 {
+        return false;
+    }
     // MySQL caching_sha2_password fast-auth:
     // stage1 = SHA256(password), stage2 = SHA256(stage1)
     // challenge = SHA256(stage2 || nonce), response = stage1 XOR challenge.
@@ -258,7 +307,9 @@ fn verify_caching_sha2_password(stored_stage2: &[u8; 32], salt: &[u8], auth_data
         Sha256::digest(input)
     };
     let mut recovered_stage1 = [0u8; 32];
-    for index in 0..32 { recovered_stage1[index] = auth_data[index] ^ challenge[index]; }
+    for index in 0..32 {
+        recovered_stage1[index] = auth_data[index] ^ challenge[index];
+    }
     let recovered_stage2 = Sha256::digest(recovered_stage1);
     constant_time_equal(&recovered_stage2, stored_stage2)
 }
@@ -321,7 +372,6 @@ mod tests {
         )
     }
 
-
     fn caching_stage2(password: &str) -> [u8; 32] {
         let stage1 = Sha256::digest(password.as_bytes());
         Sha256::digest(stage1).into()
@@ -334,41 +384,58 @@ mod tests {
         input.extend_from_slice(&stage2);
         input.extend_from_slice(salt);
         let challenge = Sha256::digest(input);
-        stage1.iter().zip(challenge.iter()).map(|(a,b)| a ^ b).collect()
+        stage1
+            .iter()
+            .zip(challenge.iter())
+            .map(|(a, b)| a ^ b)
+            .collect()
     }
 
     fn caching_registry_json() -> String {
         let hash = hex::encode(caching_stage2("correct-password"));
-        format!(r#"{{"users":[{{"username":"tenant_sha2","tenant_id":"tenant-sha2","database":"tenant_sha2_db","upstream_url":"mysql://tenant_sha2:secret@127.0.0.1:3306/tenant_sha2_db","auth_plugin":"caching_sha2_password","password_sha256":"{hash}"}}]}}"#)
+        format!(
+            r#"{{"users":[{{"username":"tenant_sha2","tenant_id":"tenant-sha2","database":"tenant_sha2_db","upstream_url":"mysql://tenant_sha2:secret@127.0.0.1:3306/tenant_sha2_db","auth_plugin":"caching_sha2_password","password_sha256":"{hash}"}}]}}"#
+        )
     }
 
     #[test]
     fn authenticates_caching_sha2_password_with_stage2_verifier() {
         let registry = MysqlIdentityRegistry::from_json(&caching_registry_json()).unwrap();
         let response = caching_response("correct-password", SALT);
-        let principal = registry.authenticate("caching_sha2_password", b"tenant_sha2", SALT, &response).unwrap();
+        let principal = registry
+            .authenticate("caching_sha2_password", b"tenant_sha2", SALT, &response)
+            .unwrap();
         assert_eq!(principal.tenant_id, "tenant-sha2");
-        assert_eq!(registry.auth_plugin_for_username(b"tenant_sha2"), "caching_sha2_password");
+        assert_eq!(
+            registry.auth_plugin_for_username(b"tenant_sha2"),
+            "caching_sha2_password"
+        );
     }
 
     #[test]
     fn rejects_wrong_caching_sha2_password() {
         let registry = MysqlIdentityRegistry::from_json(&caching_registry_json()).unwrap();
         let response = caching_response("wrong-password", SALT);
-        assert!(registry.authenticate("caching_sha2_password", b"tenant_sha2", SALT, &response).is_none());
+        assert!(registry
+            .authenticate("caching_sha2_password", b"tenant_sha2", SALT, &response)
+            .is_none());
     }
 
     #[test]
     fn rejects_malformed_caching_sha2_response() {
         let registry = MysqlIdentityRegistry::from_json(&caching_registry_json()).unwrap();
-        assert!(registry.authenticate("caching_sha2_password", b"tenant_sha2", SALT, b"short").is_none());
+        assert!(registry
+            .authenticate("caching_sha2_password", b"tenant_sha2", SALT, b"short")
+            .is_none());
     }
 
     #[test]
     fn rejects_mismatched_auth_plugin_and_verifier() {
         let registry = MysqlIdentityRegistry::from_json(&caching_registry_json()).unwrap();
         let response = caching_response("correct-password", SALT);
-        assert!(registry.authenticate("mysql_native_password", b"tenant_sha2", SALT, &response).is_none());
+        assert!(registry
+            .authenticate("mysql_native_password", b"tenant_sha2", SALT, &response)
+            .is_none());
     }
 
     #[test]
@@ -479,26 +546,21 @@ mod tests {
     fn accepts_remote_upstream_with_tls() {
         let json = registry_json().replace(
             "127.0.0.1:3306/tenant_a_db",
-            "db.example.com:3306/tenant_a_db?require_ssl=true"
+            "db.example.com:3306/tenant_a_db?require_ssl=true",
         );
         assert!(MysqlIdentityRegistry::from_json(&json).is_ok());
     }
 
     #[test]
     fn rejects_upstream_database_mismatch() {
-        let json = registry_json().replace(
-            "127.0.0.1:3306/tenant_a_db",
-            "127.0.0.1:3306/tenant_b_db"
-        );
+        let json =
+            registry_json().replace("127.0.0.1:3306/tenant_a_db", "127.0.0.1:3306/tenant_b_db");
         assert!(MysqlIdentityRegistry::from_json(&json).is_err());
     }
 
     #[test]
     fn rejects_upstream_url_without_database() {
-        let json = registry_json().replace(
-            "127.0.0.1:3306/tenant_a_db",
-            "127.0.0.1:3306/"
-        );
+        let json = registry_json().replace("127.0.0.1:3306/tenant_a_db", "127.0.0.1:3306/");
         assert!(MysqlIdentityRegistry::from_json(&json).is_err());
     }
 

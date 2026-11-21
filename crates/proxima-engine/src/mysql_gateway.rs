@@ -93,31 +93,61 @@ impl MysqlGatewaySession {
 /// Date/time binary parameter payloads are decoded according to the MySQL
 /// binary protocol and rejected when their lengths or component ranges are invalid.
 fn decode_date_payload(bytes: &[u8]) -> Result<(u16, u8, u8), ()> {
-    if bytes.is_empty() { return Ok((0, 0, 0)); }
-    if bytes.len() != 4 { return Err(()); }
+    if bytes.is_empty() {
+        return Ok((0, 0, 0));
+    }
+    if bytes.len() != 4 {
+        return Err(());
+    }
     let year = u16::from_le_bytes([bytes[0], bytes[1]]);
     let (month, day) = (bytes[2], bytes[3]);
-    if month > 12 || day > 31 { return Err(()); }
+    if month > 12 || day > 31 {
+        return Err(());
+    }
     Ok((year, month, day))
 }
 
 fn decode_datetime_payload(bytes: &[u8]) -> Result<(u16, u8, u8, u8, u8, u8, u32), ()> {
-    if bytes.is_empty() { return Ok((0, 0, 0, 0, 0, 0, 0)); }
-    if !matches!(bytes.len(), 4 | 7 | 11) { return Err(()); }
+    if bytes.is_empty() {
+        return Ok((0, 0, 0, 0, 0, 0, 0));
+    }
+    if !matches!(bytes.len(), 4 | 7 | 11) {
+        return Err(());
+    }
     let (year, month, day) = decode_date_payload(&bytes[..4])?;
-    let (hour, minute, second) = if bytes.len() >= 7 { (bytes[4], bytes[5], bytes[6]) } else { (0, 0, 0) };
-    let micros = if bytes.len() == 11 { u32::from_le_bytes(bytes[7..11].try_into().map_err(|_| ())?) } else { 0 };
-    if hour > 23 || minute > 59 || second > 59 || micros > 999_999 { return Err(()); }
+    let (hour, minute, second) = if bytes.len() >= 7 {
+        (bytes[4], bytes[5], bytes[6])
+    } else {
+        (0, 0, 0)
+    };
+    let micros = if bytes.len() == 11 {
+        u32::from_le_bytes(bytes[7..11].try_into().map_err(|_| ())?)
+    } else {
+        0
+    };
+    if hour > 23 || minute > 59 || second > 59 || micros > 999_999 {
+        return Err(());
+    }
     Ok((year, month, day, hour, minute, second, micros))
 }
 
 fn decode_time_payload(bytes: &[u8]) -> Result<(bool, u32, u8, u8, u8, u32), ()> {
-    if bytes.is_empty() { return Ok((false, 0, 0, 0, 0, 0)); }
-    if !matches!(bytes.len(), 8 | 12) || bytes[0] > 1 { return Err(()); }
+    if bytes.is_empty() {
+        return Ok((false, 0, 0, 0, 0, 0));
+    }
+    if !matches!(bytes.len(), 8 | 12) || bytes[0] > 1 {
+        return Err(());
+    }
     let days = u32::from_le_bytes(bytes[1..5].try_into().map_err(|_| ())?);
     let (hours, minutes, seconds) = (bytes[5], bytes[6], bytes[7]);
-    let micros = if bytes.len() == 12 { u32::from_le_bytes(bytes[8..12].try_into().map_err(|_| ())?) } else { 0 };
-    if hours > 23 || minutes > 59 || seconds > 59 || micros > 999_999 { return Err(()); }
+    let micros = if bytes.len() == 12 {
+        u32::from_le_bytes(bytes[8..12].try_into().map_err(|_| ())?)
+    } else {
+        0
+    };
+    if hours > 23 || minutes > 59 || seconds > 59 || micros > 999_999 {
+        return Err(());
+    }
     Ok((bytes[0] == 1, days, hours, minutes, seconds, micros))
 }
 
@@ -134,11 +164,15 @@ fn convert_parameter(value: ValueInner<'_>) -> Result<UpstreamValue, ()> {
         }
         ValueInner::Datetime(bytes) => {
             let (year, month, day, hour, minute, second, micros) = decode_datetime_payload(bytes)?;
-            Ok(UpstreamValue::Date(year, month, day, hour, minute, second, micros))
+            Ok(UpstreamValue::Date(
+                year, month, day, hour, minute, second, micros,
+            ))
         }
         ValueInner::Time(bytes) => {
             let (negative, days, hours, minutes, seconds, micros) = decode_time_payload(bytes)?;
-            Ok(UpstreamValue::Time(negative, days, hours, minutes, seconds, micros))
+            Ok(UpstreamValue::Time(
+                negative, days, hours, minutes, seconds, micros,
+            ))
         }
     }
 }
@@ -206,39 +240,71 @@ impl ToMysqlValue for MysqlOutputValue {
             Self::UInt(value) => value.to_mysql_bin(writer, column),
             Self::Float(value) => value.to_mysql_bin(writer, column),
             Self::Double(value) => value.to_mysql_bin(writer, column),
-            Self::Date(year, month, day, hour, minute, second, micros) => {
-                match column.coltype {
-                    ColumnType::MYSQL_TYPE_DATE | ColumnType::MYSQL_TYPE_NEWDATE => {
-                        writer.write_all(&[4])?;
-                        writer.write_all(&year.to_le_bytes())?;
-                        writer.write_all(&[*month, *day])
-                    }
-                    ColumnType::MYSQL_TYPE_DATETIME | ColumnType::MYSQL_TYPE_TIMESTAMP
-                    | ColumnType::MYSQL_TYPE_DATETIME2 | ColumnType::MYSQL_TYPE_TIMESTAMP2 => {
-                        let len = if *micros != 0 { 11 } else if *hour != 0 || *minute != 0 || *second != 0 { 7 } else { 4 };
-                        writer.write_all(&[len])?;
-                        writer.write_all(&year.to_le_bytes())?;
-                        writer.write_all(&[*month, *day])?;
-                        if len >= 7 { writer.write_all(&[*hour, *minute, *second])?; }
-                        if len == 11 { writer.write_all(&micros.to_le_bytes())?; }
-                        Ok(())
-                    }
-                    _ => Err(io::Error::new(io::ErrorKind::InvalidInput, "temporal value does not match result column type")),
+            Self::Date(year, month, day, hour, minute, second, micros) => match column.coltype {
+                ColumnType::MYSQL_TYPE_DATE | ColumnType::MYSQL_TYPE_NEWDATE => {
+                    writer.write_all(&[4])?;
+                    writer.write_all(&year.to_le_bytes())?;
+                    writer.write_all(&[*month, *day])
                 }
-            }
+                ColumnType::MYSQL_TYPE_DATETIME
+                | ColumnType::MYSQL_TYPE_TIMESTAMP
+                | ColumnType::MYSQL_TYPE_DATETIME2
+                | ColumnType::MYSQL_TYPE_TIMESTAMP2 => {
+                    let len = if *micros != 0 {
+                        11
+                    } else if *hour != 0 || *minute != 0 || *second != 0 {
+                        7
+                    } else {
+                        4
+                    };
+                    writer.write_all(&[len])?;
+                    writer.write_all(&year.to_le_bytes())?;
+                    writer.write_all(&[*month, *day])?;
+                    if len >= 7 {
+                        writer.write_all(&[*hour, *minute, *second])?;
+                    }
+                    if len == 11 {
+                        writer.write_all(&micros.to_le_bytes())?;
+                    }
+                    Ok(())
+                }
+                _ => Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "temporal value does not match result column type",
+                )),
+            },
             Self::Time(negative, days, hours, minutes, seconds, micros) => {
-                if !matches!(column.coltype, ColumnType::MYSQL_TYPE_TIME | ColumnType::MYSQL_TYPE_TIME2) {
-                    return Err(io::Error::new(io::ErrorKind::InvalidInput, "time value does not match result column type"));
+                if !matches!(
+                    column.coltype,
+                    ColumnType::MYSQL_TYPE_TIME | ColumnType::MYSQL_TYPE_TIME2
+                ) {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "time value does not match result column type",
+                    ));
                 }
-                let len = if *days == 0 && *hours == 0 && *minutes == 0 && *seconds == 0 && *micros == 0 {
+                let len = if *days == 0
+                    && *hours == 0
+                    && *minutes == 0
+                    && *seconds == 0
+                    && *micros == 0
+                {
                     0
-                } else if *micros == 0 { 8 } else { 12 };
+                } else if *micros == 0 {
+                    8
+                } else {
+                    12
+                };
                 writer.write_all(&[len])?;
-                if len == 0 { return Ok(()); }
+                if len == 0 {
+                    return Ok(());
+                }
                 writer.write_all(&[u8::from(*negative)])?;
                 writer.write_all(&days.to_le_bytes())?;
                 writer.write_all(&[*hours, *minutes, *seconds])?;
-                if len == 12 { writer.write_all(&micros.to_le_bytes())?; }
+                if len == 12 {
+                    writer.write_all(&micros.to_le_bytes())?;
+                }
                 Ok(())
             }
         }
@@ -253,10 +319,12 @@ fn upstream_value_to_output(value: UpstreamValue) -> Option<MysqlOutputValue> {
         UpstreamValue::UInt(value) => MysqlOutputValue::UInt(value),
         UpstreamValue::Float(value) => MysqlOutputValue::Float(value),
         UpstreamValue::Double(value) => MysqlOutputValue::Double(value),
-        UpstreamValue::Date(year, month, day, hour, minute, second, micros) =>
-            MysqlOutputValue::Date(year, month, day, hour, minute, second, micros),
-        UpstreamValue::Time(negative, days, hours, minutes, seconds, micros) =>
-            MysqlOutputValue::Time(negative, days, hours, minutes, seconds, micros),
+        UpstreamValue::Date(year, month, day, hour, minute, second, micros) => {
+            MysqlOutputValue::Date(year, month, day, hour, minute, second, micros)
+        }
+        UpstreamValue::Time(negative, days, hours, minutes, seconds, micros) => {
+            MysqlOutputValue::Time(negative, days, hours, minutes, seconds, micros)
+        }
     })
 }
 
@@ -411,7 +479,13 @@ where
                 .await;
         };
 
-        let statement = match tokio::time::timeout(std::time::Duration::from_secs(QUERY_TIMEOUT_SECS), session.connection.prep(query)).await.unwrap_or_else(|_| Err(mysql_async::DriverError::ConnectionClosed.into())) {
+        let statement = match tokio::time::timeout(
+            std::time::Duration::from_secs(QUERY_TIMEOUT_SECS),
+            session.connection.prep(query),
+        )
+        .await
+        .unwrap_or_else(|_| Err(mysql_async::DriverError::ConnectionClosed.into()))
+        {
             Ok(statement) => statement,
             Err(_) => {
                 return info
@@ -515,7 +589,13 @@ where
                 .await;
         }
 
-        let mut upstream_result = match tokio::time::timeout(std::time::Duration::from_secs(QUERY_TIMEOUT_SECS), session.connection.exec_iter(statement, values)).await.unwrap_or_else(|_| Err(mysql_async::DriverError::ConnectionClosed.into())) {
+        let mut upstream_result = match tokio::time::timeout(
+            std::time::Duration::from_secs(QUERY_TIMEOUT_SECS),
+            session.connection.exec_iter(statement, values),
+        )
+        .await
+        .unwrap_or_else(|_| Err(mysql_async::DriverError::ConnectionClosed.into()))
+        {
             Ok(result) => result,
             Err(error) => {
                 tracing::warn!(
@@ -578,7 +658,22 @@ where
             }
         };
 
-        while let Some(row_result) = match tokio::time::timeout(std::time::Duration::from_secs(QUERY_TIMEOUT_SECS), rows.next()).await { Ok(next) => next, Err(_) => return output.finish_error(ErrorKind::ER_UNKNOWN_ERROR, &b"upstream row stream timed out".to_vec()).await } {
+        while let Some(row_result) = match tokio::time::timeout(
+            std::time::Duration::from_secs(QUERY_TIMEOUT_SECS),
+            rows.next(),
+        )
+        .await
+        {
+            Ok(next) => next,
+            Err(_) => {
+                return output
+                    .finish_error(
+                        ErrorKind::ER_UNKNOWN_ERROR,
+                        &b"upstream row stream timed out".to_vec(),
+                    )
+                    .await
+            }
+        } {
             let row = match row_result {
                 Ok(row) => row,
                 Err(_) => {
@@ -667,7 +762,13 @@ where
                 .await;
         };
 
-        let mut upstream_result = match tokio::time::timeout(std::time::Duration::from_secs(QUERY_TIMEOUT_SECS), session.connection.query_iter(query)).await.unwrap_or_else(|_| Err(mysql_async::DriverError::ConnectionClosed.into())) {
+        let mut upstream_result = match tokio::time::timeout(
+            std::time::Duration::from_secs(QUERY_TIMEOUT_SECS),
+            session.connection.query_iter(query),
+        )
+        .await
+        .unwrap_or_else(|_| Err(mysql_async::DriverError::ConnectionClosed.into()))
+        {
             Ok(result) => result,
             Err(_) => {
                 return results
@@ -722,7 +823,22 @@ where
             }
         };
 
-        while let Some(row_result) = match tokio::time::timeout(std::time::Duration::from_secs(QUERY_TIMEOUT_SECS), rows.next()).await { Ok(next) => next, Err(_) => return output.finish_error(ErrorKind::ER_UNKNOWN_ERROR, &b"upstream row stream timed out".to_vec()).await } {
+        while let Some(row_result) = match tokio::time::timeout(
+            std::time::Duration::from_secs(QUERY_TIMEOUT_SECS),
+            rows.next(),
+        )
+        .await
+        {
+            Ok(next) => next,
+            Err(_) => {
+                return output
+                    .finish_error(
+                        ErrorKind::ER_UNKNOWN_ERROR,
+                        &b"upstream row stream timed out".to_vec(),
+                    )
+                    .await
+            }
+        } {
             let row = match row_result {
                 Ok(row) => row,
                 Err(_) => {
@@ -850,18 +966,26 @@ mod tests {
 
     #[test]
     fn preserves_signed_integer_values() {
-        assert!(matches!(upstream_value_to_output(UpstreamValue::Int(-42)), Some(MysqlOutputValue::Int(-42))));
+        assert!(matches!(
+            upstream_value_to_output(UpstreamValue::Int(-42)),
+            Some(MysqlOutputValue::Int(-42))
+        ));
     }
 
     #[test]
     fn preserves_unsigned_integer_values() {
-        assert!(matches!(upstream_value_to_output(UpstreamValue::UInt(42)), Some(MysqlOutputValue::UInt(42))));
+        assert!(matches!(
+            upstream_value_to_output(UpstreamValue::UInt(42)),
+            Some(MysqlOutputValue::UInt(42))
+        ));
     }
 
     #[test]
     fn preserves_binary_payloads_byte_for_byte() {
         let bytes = vec![0xff, 0x00, 0x80, 0x41];
-        assert!(matches!(upstream_value_to_output(UpstreamValue::Bytes(bytes.clone())), Some(MysqlOutputValue::Bytes(value)) if value == bytes));
+        assert!(
+            matches!(upstream_value_to_output(UpstreamValue::Bytes(bytes.clone())), Some(MysqlOutputValue::Bytes(value)) if value == bytes)
+        );
     }
 
     #[test]
@@ -906,13 +1030,19 @@ mod tests {
 
     #[test]
     fn decodes_binary_date_parameter() {
-        assert_eq!(decode_date_payload(&[0xe8, 0x07, 11, 19]), Ok((2024, 11, 19)));
+        assert_eq!(
+            decode_date_payload(&[0xe8, 0x07, 11, 19]),
+            Ok((2024, 11, 19))
+        );
     }
 
     #[test]
     fn decodes_binary_datetime_with_microseconds() {
         let bytes = [0xe8, 0x07, 11, 19, 12, 30, 45, 0x40, 0x0d, 0x03, 0x00];
-        assert_eq!(decode_datetime_payload(&bytes), Ok((2024, 11, 19, 12, 30, 45, 200000)));
+        assert_eq!(
+            decode_datetime_payload(&bytes),
+            Ok((2024, 11, 19, 12, 30, 45, 200000))
+        );
     }
 
     #[test]
@@ -936,4 +1066,3 @@ mod tests {
         );
     }
 }
-

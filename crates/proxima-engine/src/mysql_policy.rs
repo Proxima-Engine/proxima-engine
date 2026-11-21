@@ -57,7 +57,10 @@ impl Visitor for AdmissionVisitor {
             return ControlFlow::Break(());
         }
         let schema = name.trim_matches('`').to_ascii_lowercase();
-        if matches!(schema.as_str(), "mysql" | "information_schema" | "performance_schema" | "sys") {
+        if matches!(
+            schema.as_str(),
+            "mysql" | "information_schema" | "performance_schema" | "sys"
+        ) {
             self.rejected = true;
             return ControlFlow::Break(());
         }
@@ -67,7 +70,11 @@ impl Visitor for AdmissionVisitor {
     fn pre_visit_expr(&mut self, expr: &Expr) -> ControlFlow<Self::Break> {
         if let Expr::Function(function) = expr {
             let full_name = function.name.to_string().to_ascii_lowercase();
-            let name = full_name.rsplit('.').next().unwrap_or(&full_name).trim_matches('`');
+            let name = full_name
+                .rsplit('.')
+                .next()
+                .unwrap_or(&full_name)
+                .trim_matches('`');
             if matches!(
                 name,
                 "load_file"
