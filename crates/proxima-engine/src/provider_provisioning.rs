@@ -561,6 +561,70 @@ pub async fn apply_provisioning_plan(
     Ok(())
 }
 
+/// Disable a previously provisioned tenant identity without deleting its data.
+/// The old credential must fail to authenticate before revocation is accepted.
+pub async fn apply_tenant_revocation(
+    provider: CoreProvider,
+    target: &ProvisioningTarget<'_>,
+    username: &str,
+    namespace: &str,
+    tenant_database: &str,
+    upstream_password: &Secret,
+) -> Result<(), ProvisioningError> {
+    let statements = build_revocation_statements(
+        provider.key(), username, target.database_name, namespace,
+    )?;
+    match provider {
+        CoreProvider::PostgreSql | CoreProvider::CockroachDb => {
+            let tls = postgres_tls_connector(target.tls_ca_file)?;
+            let mut admin = tokio_postgres::Config::new();
+            admin.host(target.host).port(target.port)
+                .user(target.admin_username)
+                .password(target.admin_password.expose()?)
+                .dbname(target.database_name)
+                .ssl_mode(SslMode::VerifyFull);
+            let (client, connection) = admin.connect(tls.clone()).await
+                .map_err(|_| ProvisioningError::ProviderConnectionFailed)?;
+            tokio::spawn(async move { let _ = connection.await; });
+            for statement in &statements {
+                client.batch_execute(statement.sql()?).await
+                    .map_err(|_| ProvisioningError::ProviderStatementFailed)?;
+            }
+            let mut revoked_login = tokio_postgres::Config::new();
+            revoked_login.host(target.host).port(target.port)
+                .user(username).password(upstream_password.expose()?)
+                .dbname(target.database_name).ssl_mode(SslMode::VerifyFull);
+            if let Ok((client, connection)) = revoked_login.connect(tls).await {
+                drop(client);
+                tokio::spawn(async move { let _ = connection.await; });
+                return Err(ProvisioningError::ProviderIsolationFailed);
+            }
+        }
+        CoreProvider::MySql | CoreProvider::MariaDb => {
+            use mysql_async::prelude::Queryable;
+            let opts = mysql_options(
+                target.host,target.port,target.admin_username,
+                target.admin_password.expose()?,target.database_name,
+            );
+            let mut admin = mysql_async::Conn::new(opts).await
+                .map_err(|_| ProvisioningError::ProviderConnectionFailed)?;
+            for statement in &statements {
+                admin.query_drop(statement.sql()).await
+                    .map_err(|_| ProvisioningError::ProviderStatementFailed)?;
+            }
+            let opts = mysql_options(
+                target.host,target.port,username,upstream_password.expose()?,tenant_database,
+            );
+            if let Ok(mut connection) = mysql_async::Conn::new(opts).await {
+                let _ = connection.query_drop("SELECT 1").await;
+                drop(connection);
+                return Err(ProvisioningError::ProviderIsolationFailed);
+            }
+        }
+    }
+    Ok(())
+}
+
 fn postgres_tls_connector(ca_file: &Path) -> Result<MakeRustlsConnect, ProvisioningError> {
     let file = File::open(ca_file).map_err(|_| ProvisioningError::TlsConfigurationFailed)?;
     let mut reader = BufReader::new(file);
