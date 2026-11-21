@@ -32,7 +32,7 @@ docker exec "$container" bash -ec '
     "$config"
   grep -Eq "^authenticator:[[:space:]]*PasswordAuthenticator$" "$config"
   grep -Eq "^authorizer:[[:space:]]*CassandraAuthorizer$" "$config"
-  grep -Eq "^role_manager:[[:space:]]*CassandraRoleManager$" "$config"
+  grep -A2 -E "^role_manager:" "$config" | grep -Eq "class_name:[[:space:]]*CassandraRoleManager"
 '
 docker restart "$container" >/dev/null
 
