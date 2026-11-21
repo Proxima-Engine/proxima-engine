@@ -1,5 +1,7 @@
 # Proxima Engine documentation
 
+- [Cloud-to-Engine runtime reconciliation](CLOUD_ENGINE_RUNTIME_LIFECYCLE.md)
+
 The Proxima Engine documentation covers the Rust data plane, database protocol gateways, tenant identity, security controls, deployment and integration verification.
 
 ## Start here
