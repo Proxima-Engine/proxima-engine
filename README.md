@@ -106,7 +106,7 @@ Each database has its own implementation guide, setup sequence, configuration, c
 | **Oracle Database** | [Tenant isolation](docs/ORACLE_TENANCY.md) | Schema-per-tenant with dedicated Oracle users, bounded quota and least-privilege grants |
 | **DynamoDB** | [Tenant isolation](docs/DYNAMODB_TENANCY.md) | AWS-native IAM policy using exact table ARN and `dynamodb:LeadingKeys`; real AWS IAM acceptance required |
 | **Apache Cassandra 5** | [Tenant isolation](docs/CASSANDRA_TENANCY.md) | Native keyspace-per-tenant authentication and authorization; not a CQL proxy |
-| **Elasticsearch / OpenSearch** | [Tenant isolation](docs/ELASTICSEARCH_TENANCY.md) | Separate native role descriptor helpers; DLS/FLS are distribution/version/license-dependent; not a Proxima wire gateway |
+| **Elasticsearch / OpenSearch** | [Tenant isolation](docs/ELASTICSEARCH_TENANCY.md) | Separate native role descriptor helpers and independent real-cluster acceptance scripts; DLS/FLS are distribution/version/license-dependent; not Proxima wire gateways |
 
 ### What is a database gateway?
 
