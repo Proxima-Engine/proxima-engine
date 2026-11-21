@@ -26,7 +26,7 @@ if [[ "$initial_ready" != 1 ]]; then
   exit 1
 fi
 
-docker exec "$container" bash -ec '
+docker exec -u 0 "$container" bash -ec '
   config=/etc/cassandra/cassandra.yaml
   sed -i -E \
     -e "s/^([[:space:]]*authenticator:).*/\\1 PasswordAuthenticator/" \
