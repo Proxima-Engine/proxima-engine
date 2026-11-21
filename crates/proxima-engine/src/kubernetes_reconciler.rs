@@ -129,18 +129,18 @@ fn resources(assignment: &Value, namespace: &str) -> Result<Option<(Value, Value
     let database = assignment.get("database_name").and_then(Value::as_str).unwrap_or("");
     let secret = secret_name(kind)?;
     let mut envs = vec![
-        json!({"name":"PROXIMA_"+kind.to_ascii_uppercase()+"_LISTEN_ADDR","value":format!("0.0.0.0:{port}")}),
-        json!({"name":"PROXIMA_"+kind.to_ascii_uppercase()+"_UPSTREAM_ADDR","value":format!("{host}:{db_port}")}),
-        json!({"name":"PROXIMA_"+kind.to_ascii_uppercase()+"_IDENTITY_REGISTRY","value":"/var/run/proxima/users.json"}),
+        json!({"name":(format!("PROXIMA_{}_LISTEN_ADDR", kind.to_ascii_uppercase())),"value":format!("0.0.0.0:{port}")}),
+        json!({"name":(format!("PROXIMA_{}_UPSTREAM_ADDR", kind.to_ascii_uppercase())),"value":format!("{host}:{db_port}")}),
+        json!({"name":(format!("PROXIMA_{}_IDENTITY_REGISTRY", kind.to_ascii_uppercase())),"value":"/var/run/proxima/users.json"}),
     ];
     if !database.is_empty() {
         envs.push(json!({"name":"PROXIMA_DATABASE_NAME","value":database}));
     }
     if kind == "mongodb" || kind == "redis" {
         envs.extend([
-            json!({"name":"PROXIMA_"+kind.to_ascii_uppercase()+"_TLS_CERT_FILE","value":"/var/run/proxima/tls.crt"}),
-            json!({"name":"PROXIMA_"+kind.to_ascii_uppercase()+"_TLS_KEY_FILE","value":"/var/run/proxima/tls.key"}),
-            json!({"name":"PROXIMA_"+kind.to_ascii_uppercase()+"_UPSTREAM_TLS_CA_FILE","value":"/var/run/proxima/ca.crt"}),
+            json!({"name":(format!("PROXIMA_{}_TLS_CERT_FILE", kind.to_ascii_uppercase())),"value":"/var/run/proxima/tls.crt"}),
+            json!({"name":(format!("PROXIMA_{}_TLS_KEY_FILE", kind.to_ascii_uppercase())),"value":"/var/run/proxima/tls.key"}),
+            json!({"name":(format!("PROXIMA_{}_UPSTREAM_TLS_CA_FILE", kind.to_ascii_uppercase())),"value":"/var/run/proxima/ca.crt"}),
         ]);
     }
     let common = labels(&name, id);
