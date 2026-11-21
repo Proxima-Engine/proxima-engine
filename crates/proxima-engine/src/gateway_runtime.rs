@@ -54,6 +54,15 @@ pub fn prepare_mysql(
     }
     let runtime = credentials.get("gateway_runtime_config")
         .ok_or_else(|| invalid("encrypted credentials do not include gateway_runtime_config"))?;
+    prepare_mysql_from_registry(assignment, runtime, executable_dir, state_dir)
+}
+
+pub fn prepare_mysql_from_registry(
+    assignment: &Value,
+    runtime: &Value,
+    executable_dir: &Path,
+    state_dir: &Path,
+) -> io::Result<PreparedGateway> {
     if runtime.get("schema_version").and_then(Value::as_u64) != Some(1)
         || required(runtime, "provider_key")? != provider
     {
