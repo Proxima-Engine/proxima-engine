@@ -28,7 +28,7 @@ The Proxima Engine documentation covers the Rust data plane, database protocol g
 - [Local developer mode](LOCAL_DEVELOPMENT.md) — local node identity and signed test tokens.
 - [Engine CLI](CLI.md) — bootstrap, token generation, diagnostics and local status commands.
 
-## Database gateways
+## Database integrations and native security profiles
 
 | Database | Guide | Implementation |
 |---|---|---|
