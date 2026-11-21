@@ -7,11 +7,22 @@ tenant_b_password="$(openssl rand -hex 24)"
 cleanup() { docker rm -f "$container" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 
-docker run -d --name "$container" -p 127.0.0.1:19042:9042 \
-  -e CASSANDRA_AUTHENTICATOR=org.apache.cassandra.auth.PasswordAuthenticator \
-  -e CASSANDRA_AUTHORIZER=org.apache.cassandra.auth.CassandraAuthorizer \
-  -e CASSANDRA_ROLE_MANAGER=org.apache.cassandra.auth.CassandraRoleManager \
-  cassandra:5.0 >/dev/null
+# The official Cassandra image does not consistently apply auth settings from
+# environment variables across major versions. Set the authoritative YAML
+# configuration explicitly before running the acceptance checks.
+docker run -d --name "$container" -p 127.0.0.1:19042:9042 cassandra:5.0 >/dev/null
+docker exec "$container" bash -ec '
+  config=/etc/cassandra/cassandra.yaml
+  sed -i -E \
+    -e "s/^([[:space:]]*authenticator:).*/\\1 PasswordAuthenticator/" \
+    -e "s/^([[:space:]]*authorizer:).*/\\1 CassandraAuthorizer/" \
+    -e "s/^([[:space:]]*role_manager:).*/\\1 CassandraRoleManager/" \
+    "$config"
+  grep -Eq "^authenticator:[[:space:]]*PasswordAuthenticator$" "$config"
+  grep -Eq "^authorizer:[[:space:]]*CassandraAuthorizer$" "$config"
+  grep -Eq "^role_manager:[[:space:]]*CassandraRoleManager$" "$config"
+'
+docker restart "$container" >/dev/null
 
 ready=0
 for _ in $(seq 1 120); do
@@ -23,7 +34,7 @@ for _ in $(seq 1 120); do
 done
 if [[ "$ready" != 1 ]]; then
   docker logs "$container"
-  echo "Cassandra did not become ready with authentication enabled" >&2
+  echo "Cassandra did not become ready with PasswordAuthenticator and CassandraAuthorizer enabled" >&2
   exit 1
 fi
 
