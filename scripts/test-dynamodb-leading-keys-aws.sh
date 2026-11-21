@@ -6,7 +6,7 @@ set -euo pipefail
 : "${AWS_PROFILE_TENANT_B:?Set AWS_PROFILE_TENANT_B to a least-privilege tenant B role}"
 : "${DYNAMODB_TEST_TABLE:?Set DYNAMODB_TEST_TABLE to a disposable test table}"
 : "${DYNAMODB_PARTITION_KEY:=tenant_id}"
-: "${DYNAMODB_SORT_KEY:=}"
+: "${DYNAMODB_SORT_KEY:?Set DYNAMODB_SORT_KEY to the table range-key attribute; a composite key is required for safe canary cleanup}"
 
 command -v aws >/dev/null || { echo "AWS CLI v2 is required" >&2; exit 1; }
 command -v jq >/dev/null || { echo "jq is required" >&2; exit 1; }
@@ -24,15 +24,8 @@ TABLE="$(aws dynamodb describe-table --profile "$AWS_PROFILE_TENANT_A" --table-n
 TABLE_ARN="$(jq -r '.Table.TableArn' <<<"$TABLE")"
 PARTITION_KEY_TYPE="$(jq -r --arg name "$DYNAMODB_PARTITION_KEY" '.Table.KeySchema[] | select(.KeyType=="HASH") | .AttributeName' <<<"$TABLE")"
 [[ "$PARTITION_KEY_TYPE" == "$DYNAMODB_PARTITION_KEY" ]] || { echo "Table partition key must be $DYNAMODB_PARTITION_KEY" >&2; exit 1; }
-if [[ -n "$DYNAMODB_SORT_KEY" ]]; then
-  SORT_KEY_TYPE="$(jq -r --arg name "$DYNAMODB_SORT_KEY" '.Table.KeySchema[] | select(.KeyType=="RANGE") | .AttributeName' <<<"$TABLE")"
-  [[ "$SORT_KEY_TYPE" == "$DYNAMODB_SORT_KEY" ]] || { echo "Configured sort key does not match the table" >&2; exit 1; }
-else
-  if jq -e '.Table.KeySchema[] | select(.KeyType=="RANGE")' <<<"$TABLE" >/dev/null; then
-    echo "Set DYNAMODB_SORT_KEY to the table's range-key attribute" >&2
-    exit 1
-  fi
-fi
+SORT_KEY_TYPE="$(jq -r '.Table.KeySchema[] | select(.KeyType=="RANGE") | .AttributeName' <<<"$TABLE")"
+[[ "$SORT_KEY_TYPE" == "$DYNAMODB_SORT_KEY" ]] || { echo "Configured sort key does not match the table" >&2; exit 1; }
 
 RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$RANDOM"
 TENANT_A="proxima-tenant-a"
