@@ -40,5 +40,3 @@ pub mod runtime_reconciliation;
 pub mod runtime_activation;
 pub mod runtime_coordinator;
 pub mod gateway_runtime;
-pub mod runtime_activation;
-pub mod runtime_coordinator;
