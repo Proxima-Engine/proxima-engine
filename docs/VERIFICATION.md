@@ -215,3 +215,12 @@ Run the real-cluster acceptance script against a disposable HTTPS Elasticsearch 
     bash scripts/test-elasticsearch-tenant-isolation.sh
 
 It creates two tenant API keys with independent index namespaces, then checks tenant-local reads, shared-index DLS filtering, FLS redaction, cross-index denial and cluster-privilege denial. The script invalidates its API keys and removes test indices on exit. It requires curl and jq. OpenSearch is not covered by this script and must be tested independently against its Security plugin.
+
+
+## 13. Verify OpenSearch native Security roles
+
+Run the separate OpenSearch Security-plugin acceptance script against a disposable HTTPS cluster:
+
+    bash scripts/test-opensearch-tenant-isolation.sh
+
+It creates two internal users, backend-role mappings and native Security roles, then verifies tenant-local reads, shared-index DLS filtering, FLS redaction, cross-index denial and cluster-privilege denial. It removes temporary users, mappings, roles and indices on exit. It requires curl, jq and openssl. This is independent from Elasticsearch acceptance.
