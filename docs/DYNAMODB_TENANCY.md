@@ -24,7 +24,7 @@ The table partition key must actually contain the authenticated tenant ID for dy
 
 ## Real AWS IAM acceptance script
 
-Run the real IAM suite in a dedicated disposable AWS account. Configure two separate AWS CLI profiles that assume tenant A and tenant B roles. Each role must have only the generated policy for its own tenant partition key and the exact table ARN. The test table must use `tenant_id` as its partition key; set `DYNAMODB_SORT_KEY` if it also has a sort key.
+Run the real IAM suite in a dedicated disposable AWS account. Configure two separate AWS CLI profiles that assume tenant A and tenant B roles. Each role must have only the generated policy for its own tenant partition key and the exact table ARN. The disposable test table must use `tenant_id` as its partition key and a range key so the script can create uniquely named canary items without overwriting existing tenant data.
 
 ```bash
 export AWS_REGION='us-east-1'
@@ -32,8 +32,7 @@ export AWS_PROFILE_TENANT_A='proxima-tenant-a'
 export AWS_PROFILE_TENANT_B='proxima-tenant-b'
 export DYNAMODB_TEST_TABLE='proxima-tenant-acceptance'
 export DYNAMODB_PARTITION_KEY='tenant_id'
-# Optional for a composite key:
-# export DYNAMODB_SORT_KEY='record_id'
+export DYNAMODB_SORT_KEY='record_id'
 bash scripts/test-dynamodb-leading-keys-aws.sh
 ```
 
