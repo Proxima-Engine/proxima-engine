@@ -17,7 +17,7 @@ impl std::error::Error for CassandraTenantError {}
 pub struct CassandraTenant { tenant_id: String, keyspace: String, role: String, password: String }
 impl CassandraTenant {
     pub fn new(tenant_id: &str, password: &str) -> Result<Self, CassandraTenantError> {
-        if tenant_id.is_empty() || tenant_id.len() > 32 || !tenant_id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') {
+        if tenant_id.is_empty() || tenant_id.len() > 32 || !tenant_id.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_') {
             return Err(CassandraTenantError::InvalidTenantId);
         }
         if password.len() < 24 || !password.bytes().all(|b| (33..=126).contains(&b)) {
@@ -49,7 +49,7 @@ mod tests {
     use super::*;
     #[test]
     fn provisions_separate_keyspace_and_restricted_role() {
-        let t = CassandraTenant::new("Customer_01", "a-long-random-cassandra-secret").unwrap();
+        let t = CassandraTenant::new("customer_01", "a-long-random-cassandra-secret").unwrap();
         assert_eq!(t.keyspace(), "proxima_customer_01");
         assert_eq!(t.role(), "proxima_customer_01_app");
         let cql = t.provisioning_cql("datacenter1", 3).unwrap().join("\n");
@@ -63,7 +63,7 @@ mod tests {
     fn escapes_password_and_rejects_identifier_injection() {
         let t = CassandraTenant::new("tenant_a", "a-long-random-password-with-'quote").unwrap();
         assert!(t.provisioning_cql("dc1", 1).unwrap()[1].contains("''"));
-        assert!(matches!(CassandraTenant::new("a; DROP KEYSPACE x", "a-long-random-cassandra-secret"), Err(CassandraTenantError::InvalidTenantId)));
+        assert!(matches!(CassandraTenant::new("a; DROP KEYSPACE x", "a-long-random-cassandra-secret"), Err(CassandraTenantError::InvalidTenantId)));\n        assert!(matches!(CassandraTenant::new("Customer_01", "a-long-random-cassandra-secret"), Err(CassandraTenantError::InvalidTenantId)));
     }
     #[test]
     fn rejects_weak_secrets_and_invalid_topology() {
