@@ -1,0 +1,6 @@
+apiVersion: v2
+name: proxima-gateways
+description: Isolated Kubernetes workloads for Proxima MySQL, MongoDB and Redis protocol gateways
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
