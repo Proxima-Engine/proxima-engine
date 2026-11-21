@@ -109,6 +109,42 @@ impl RuntimeRecord {
         Ok(())
     }
 
+    /// Reconcile a newer authenticated Cloud desired revision without claiming
+    /// that the runtime is active. Preserve the last applied revision so callers
+    /// can keep the previous runtime as the rollback target until replacement health
+    /// checks pass. Assignment identity and both revision counters are monotonic.
+    pub fn update_desired(
+        &mut self,
+        assignment_id: &str,
+        target_id: &str,
+        provider: &str,
+        revision: u64,
+        credential_revision: u64,
+    ) -> io::Result<()> {
+        if self.phase == RuntimePhase::Revoked {
+            return Err(io::Error::new(io::ErrorKind::PermissionDenied, "revoked assignment cannot be reused"));
+        }
+        if assignment_id != self.assignment_id || target_id != self.target_id || provider != self.provider {
+            return Err(io::Error::new(io::ErrorKind::PermissionDenied, "assignment identity change requires a new runtime record"));
+        }
+        if revision < self.desired_revision || revision == 0 {
+            return Err(io::Error::new(io::ErrorKind::PermissionDenied, "configuration revision rollback rejected"));
+        }
+        if credential_revision < self.credential_revision {
+            return Err(io::Error::new(io::ErrorKind::PermissionDenied, "credential revision rollback rejected"));
+        }
+        if revision == self.desired_revision && credential_revision == self.credential_revision {
+            return Ok(());
+        }
+        self.desired_revision = revision;
+        self.credential_revision = credential_revision;
+        self.phase = RuntimePhase::Staged;
+        self.runtime_health_passed = false;
+        self.last_error_code = None;
+        self.updated_at_unix = now();
+        Ok(())
+    }
+
     /// This is the only transition that records an applied revision. The caller
     /// must supply proof that runtime activation and provider-specific health checks
     /// have already completed successfully.
@@ -261,6 +297,39 @@ mod tests {
         let mut state = RuntimeRecord::staged("a".into(), "t".into(), "mongodb".into(), 9, 4).unwrap();
         assert!(state.begin_apply(8, 4).is_err());
         assert!(state.begin_apply(9, 3).is_err());
+    }
+
+    #[test]
+    fn desired_revision_updates_preserve_last_applied_revision_until_verified() {
+        let mut state = RuntimeRecord::staged("a".into(), "t".into(), "mysql".into(), 4, 2).unwrap();
+        state.begin_apply(4, 2).unwrap();
+        state.mark_applied(4, true).unwrap();
+        state.update_desired("a", "t", "mysql", 5, 3).unwrap();
+        assert_eq!(state.desired_revision, 5);
+        assert_eq!(state.credential_revision, 3);
+        assert_eq!(state.applied_revision, Some(4));
+        assert_eq!(state.phase, RuntimePhase::Staged);
+        assert!(!state.runtime_health_passed);
+        state.begin_apply(5, 3).unwrap();
+        state.mark_applied(5, true).unwrap();
+        assert_eq!(state.applied_revision, Some(5));
+    }
+
+    #[test]
+    fn desired_revision_rejects_identity_and_revision_rollback() {
+        let mut state = RuntimeRecord::staged("a".into(), "t".into(), "mongodb".into(), 7, 4).unwrap();
+        assert!(state.update_desired("other", "t", "mongodb", 8, 4).is_err());
+        assert!(state.update_desired("a", "other", "mongodb", 8, 4).is_err());
+        assert!(state.update_desired("a", "t", "redis", 8, 4).is_err());
+        assert!(state.update_desired("a", "t", "mongodb", 6, 4).is_err());
+        assert!(state.update_desired("a", "t", "mongodb", 8, 3).is_err());
+    }
+
+    #[test]
+    fn revoked_assignment_cannot_be_reused_for_a_new_revision() {
+        let mut state = RuntimeRecord::staged("a".into(), "t".into(), "redis".into(), 3, 1).unwrap();
+        state.begin_revocation();
+        assert!(state.update_desired("a", "t", "redis", 4, 2).is_err());
     }
 
     #[test]
