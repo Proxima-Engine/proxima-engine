@@ -183,6 +183,11 @@ fn desired_assignments(document: &Value) -> Result<&Vec<Value>, Box<dyn std::err
         let id = assignment.get("assignment_id").and_then(Value::as_str)
             .filter(|value| !value.trim().is_empty()).ok_or("desired assignment has no assignment_id")?;
         if !ids.insert(id) { return Err("desired state contains duplicate assignment IDs".into()); }
+        let runtime = assignment.get("gateway_runtime").and_then(Value::as_str)
+            .ok_or("desired assignment has no gateway_runtime")?;
+        if !matches!(runtime, "proxima-engine" | "proxima-mysql-gateway" | "proxima-mongodb-gateway" | "proxima-redis-gateway") {
+            return Err("desired assignment contains an unsupported gateway_runtime".into());
+        }
     }
     Ok(assignments)
 }
