@@ -17,7 +17,7 @@
 
 **Start:** [What is Agata Proxima?](#what-is-agata-proxima) · [Launch evaluation](docs/LAUNCH.md) · [Quickstart](docs/QUICKSTART.md) · [Local developer mode](docs/LOCAL_DEVELOPMENT.md) · [Engine CLI](docs/CLI.md) · [Documentation index](docs/README.md)
 
-**Technical guides:** [Architecture](docs/ARCHITECTURE.md) · [Tenant isolation](docs/TENANT_ISOLATION.md) · [Driver integrations](docs/INTEGRATIONS.md) · [API and metrics](docs/API.md) · [Security](docs/SECURITY.md) · [Deployment](docs/DEPLOYMENT.md) · [Verification](docs/VERIFICATION.md)
+**Technical guides:** [Architecture](docs/ARCHITECTURE.md) · [Phase One Cloud-to-Engine runtime](docs/CLOUD_ENGINE_RUNTIME_LIFECYCLE.md) · [Tenant isolation](docs/TENANT_ISOLATION.md) · [Driver integrations](docs/INTEGRATIONS.md) · [API and metrics](docs/API.md) · [Security](docs/SECURITY.md) · [Deployment](docs/DEPLOYMENT.md) · [Verification](docs/VERIFICATION.md)
 
 
 
@@ -154,11 +154,17 @@ The JavaScript API client is bundled source code, not a published npm package. T
 
 ## Cloud-managed database configuration
 
-Agata Proxima Cloud now has a multi-provider database-target management foundation. It can register organization-scoped targets, protect stored credentials, track node assignments and revisions, and deliver a signed, node-bound encrypted configuration bundle to an enrolled Engine. The Engine-side worker verifies the bundle and stages it locally; its `staged` acknowledgement confirms receipt and persistence only.
+Agata Proxima Cloud manages organization-scoped database targets and assignments for enrolled Proxima Engine nodes. Each assignment binds a database target, provider, endpoint, tenant bindings, configuration revision and credential revision to an authorized node.
 
-**Staged configuration is not a running gateway.** The Engine branch currently does not claim that the staged target has been applied to a live gateway process. Before a Cloud target can be considered ready, the deployment must supervise the correct gateway process, load the intended target and tenant identity configuration, establish and verify the real upstream TLS connection, pass listener and upstream health checks, and send the final signed `applied` acknowledgement. Provider-specific tenant provisioning, least-privilege identities, policy deployment and executed cross-tenant isolation evidence are also required.
+The Engine authenticates configuration pulls with its enrolled node identity. Cloud returns a node- and organization-bound signed configuration bundle with AES-256-GCM credential envelopes. The Engine verifies the bundle and envelope bindings, decrypts provider credentials in memory, validates the assignment and reconciles the desired revision with its local runtime.
 
-The Cloud provider catalog is not a promise of uniform protocol support. PostgreSQL and CockroachDB use the PostgreSQL wire gateway with distinct database-native security profiles; MySQL and MariaDB use the MySQL-compatible gateway; MongoDB uses its restricted OP_MSG gateway; Redis is a restricted RESP2 preview; SQL Server is a native database-per-tenant preview and is not a Proxima TDS proxy. See [Database gateways in Cloud](docs/CLOUD_CONTROL_PLANE.md) and the provider-specific guides above.
+The runtime lifecycle includes durable assignment state, provider-specific configuration preparation, supervised gateway activation where the provider uses a gateway process, listener readiness, authenticated upstream health checks and a signed acknowledgement. Cloud records the applied revision only after the Engine reports the matching assignment and revision with a successful runtime-health result. Failed activation is recorded with a bounded error code; stale or mismatched acknowledgements do not advance the applied revision.
+
+The Engine keeps desired and applied revisions distinct. Assignment identity and revision rollback are validated locally, runtime state is persisted atomically, and revocation stops the assignment-owned process and clears its applied marker. Provider-specific identity and authorization controls remain native to each database.
+
+The 12 integrations use different security and runtime models. PostgreSQL and CockroachDB use the PostgreSQL-wire Engine runtime; MySQL and MariaDB use the MySQL-compatible gateway; MongoDB and Redis use their own protocol gateways; SQL Server, SQLite, Oracle, DynamoDB, Cassandra, Elasticsearch and OpenSearch use their documented native, file or provider-API security boundaries. The lifecycle does not treat these providers as interchangeable protocols.
+
+See the [Cloud-to-Engine runtime lifecycle reference](docs/CLOUD_ENGINE_RUNTIME_LIFECYCLE.md), [provider guides](docs/README.md), and [verification guide](docs/VERIFICATION.md).
 
 ---
 
