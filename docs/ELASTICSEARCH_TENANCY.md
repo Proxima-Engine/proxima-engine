@@ -23,6 +23,19 @@ OpenSearch has a related but non-identical Security plugin API and feature matri
 
 The Engine helper validates tenant identifiers and constructs a narrowly scoped Elasticsearch role descriptor. It is not a cluster client, provisioning executor, API-key issuer, runtime gateway, or OpenSearch adapter. Cloud remains catalog-only until exact distribution/version support, feature entitlements, role provisioning, API-key lifecycle, packaging, and real two-tenant acceptance are complete.
 
+## Real-cluster acceptance script
+
+Run the Elasticsearch-specific suite against a disposable HTTPS cluster with Security enabled and DLS/FLS features available in the deployed license. The script uses an administrator credential only to create temporary indices and two tenant API keys, then verifies index-level denial, shared-index DLS filtering, FLS redaction and denial of cluster privileges. It invalidates the API keys and deletes its test indices on exit.
+
+```bash
+export ELASTICSEARCH_URL='https://127.0.0.1:9200'
+export ELASTICSEARCH_ADMIN_USER='elastic'
+export ELASTICSEARCH_ADMIN_PASSWORD='<disposable-cluster-password>'
+bash scripts/test-elasticsearch-tenant-isolation.sh
+```
+
+The script requires `curl` and `jq`; TLS certificate verification remains enabled. Use a disposable cluster only. It does not verify OpenSearch, which has a separate Security-plugin API and must be accepted independently.
+
 ## Acceptance matrix
 
 For each supported distribution and exact version:
