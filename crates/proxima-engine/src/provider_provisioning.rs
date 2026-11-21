@@ -76,7 +76,6 @@ impl fmt::Display for ProvisioningError {
 }
 impl std::error::Error for ProvisioningError {}
 
-#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TenantBinding {
     pub binding_id: Option<String>,
     pub tenant_id: String,
