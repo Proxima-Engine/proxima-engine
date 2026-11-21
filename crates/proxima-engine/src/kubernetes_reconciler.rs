@@ -33,59 +33,112 @@ impl Kube {
             .unwrap_or_else(|_| "/var/run/secrets/kubernetes.io/serviceaccount/namespace".into());
         let token = fs::read_to_string(token_path)?;
         let ca = reqwest::Certificate::from_pem(&fs::read(ca_path)?)?;
-        let client = Client::builder().add_root_certificate(ca)
-            .timeout(Duration::from_secs(20)).redirect(reqwest::redirect::Policy::none()).build()?;
+        let client = Client::builder()
+            .add_root_certificate(ca)
+            .timeout(Duration::from_secs(20))
+            .redirect(reqwest::redirect::Policy::none())
+            .build()?;
         let namespace = env::var("PROXIMA_KUBERNETES_NAMESPACE")
             .or_else(|_| fs::read_to_string(namespace_path).map(|s| s.trim().to_owned()))?;
         if namespace.is_empty() || namespace.len() > 63 {
             return Err("invalid Kubernetes namespace".into());
         }
-        Ok(Self { client, base: base.trim_end_matches('/').into(), namespace,
-            field_manager: "proxima-engine-runtime".into() })
+        Ok(Self {
+            client,
+            base: base.trim_end_matches('/').into(),
+            namespace,
+            field_manager: "proxima-engine-runtime".into(),
+        })
     }
 
-    async fn request(&self, method: Method, path: &str, body: Option<Value>, apply: bool)
-        -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
-        let mut req = self.client.request(method, format!("{}{}", self.base, path))
-            .bearer_auth(fs::read_to_string(env::var("PROXIMA_KUBERNETES_TOKEN_FILE")
-                .unwrap_or_else(|_| "/var/run/secrets/kubernetes.io/serviceaccount/token".into()))?.trim());
+    async fn request(
+        &self,
+        method: Method,
+        path: &str,
+        body: Option<Value>,
+        apply: bool,
+    ) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
+        let mut req = self
+            .client
+            .request(method, format!("{}{}", self.base, path))
+            .bearer_auth(
+                fs::read_to_string(env::var("PROXIMA_KUBERNETES_TOKEN_FILE").unwrap_or_else(
+                    |_| "/var/run/secrets/kubernetes.io/serviceaccount/token".into(),
+                ))?
+                .trim(),
+            );
         if let Some(body) = body {
             req = if apply {
-                req.header(header::CONTENT_TYPE, "application/apply-patch+yaml").json(&body)
-            } else { req.json(&body) };
+                req.header(header::CONTENT_TYPE, "application/apply-patch+yaml")
+                    .json(&body)
+            } else {
+                req.json(&body)
+            };
         }
         let response = req.send().await?;
         let status = response.status();
         let body = response.text().await?;
-        if status == StatusCode::NOT_FOUND { return Ok(json!({"_not_found":true})); }
-        if !status.is_success() {
-            return Err(format!("Kubernetes API {status}: {}", body.chars().take(1200).collect::<String>()).into());
+        if status == StatusCode::NOT_FOUND {
+            return Ok(json!({"_not_found":true}));
         }
-        if body.trim().is_empty() { return Ok(json!({})); }
+        if !status.is_success() {
+            return Err(format!(
+                "Kubernetes API {status}: {}",
+                body.chars().take(1200).collect::<String>()
+            )
+            .into());
+        }
+        if body.trim().is_empty() {
+            return Ok(json!({}));
+        }
         Ok(serde_json::from_str(&body)?)
     }
 
     fn path(&self, resource: &str, name: Option<&str>) -> String {
-        let api = if resource == "services" { "/api/v1" } else { "/apis/apps/v1" };
+        let api = if resource == "services" {
+            "/api/v1"
+        } else {
+            "/apis/apps/v1"
+        };
         let root = format!("{api}/namespaces/{}/{}", self.namespace, resource);
         match name {
-            Some(name) => format!("{root}/{name}?fieldManager={}&force=true", self.field_manager),
+            Some(name) => format!(
+                "{root}/{name}?fieldManager={}&force=true",
+                self.field_manager
+            ),
             None => root,
         }
     }
 
-    async fn apply(&self, resource: &str, name: &str, value: Value)
-        -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        self.request(Method::PATCH, &self.path(resource, Some(name)), Some(value), true).await?;
+    async fn apply(
+        &self,
+        resource: &str,
+        name: &str,
+        value: Value,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.request(
+            Method::PATCH,
+            &self.path(resource, Some(name)),
+            Some(value),
+            true,
+        )
+        .await?;
         Ok(())
     }
 }
 
 fn dns_name(raw: &str) -> Option<String> {
-    let value: String = raw.to_ascii_lowercase().chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect();
+    let value: String = raw
+        .to_ascii_lowercase()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
     let value = value.trim_matches('-').chars().take(50).collect::<String>();
-    if value.is_empty() { None } else { Some(format!("px-{value}")) }
+    if value.is_empty() {
+        None
+    } else {
+        Some(format!("px-{value}"))
+    }
 }
 
 fn gateway(assignment: &Value) -> Option<(&'static str, &'static str, u16)> {
@@ -104,8 +157,14 @@ fn secret_name(kind: &str) -> Result<String, Box<dyn std::error::Error + Send + 
         "redis" => "PROXIMA_K8S_REDIS_GATEWAY_SECRET",
         _ => return Err("unsupported gateway".into()),
     };
-    let value = env::var(key).map_err(|_| format!("{key} must name a pre-created Kubernetes Secret"))?;
-    if value.is_empty() || value.len() > 253 || !value.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'.') {
+    let value =
+        env::var(key).map_err(|_| format!("{key} must name a pre-created Kubernetes Secret"))?;
+    if value.is_empty()
+        || value.len() > 253
+        || !value
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'.')
+    {
         return Err(format!("{key} is not a valid Secret name").into());
     }
     Ok(value)
@@ -116,29 +175,63 @@ fn labels_for_node(name: &str, assignment: &str, node_id: &str) -> Value {
 }
 
 fn valid_node_label(value: &str) -> bool {
-    !value.is_empty() && value.len() <= 63
-        && value.as_bytes().first().is_some_and(|b| b.is_ascii_alphanumeric())
-        && value.as_bytes().last().is_some_and(|b| b.is_ascii_alphanumeric())
-        && value.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
+    !value.is_empty()
+        && value.len() <= 63
+        && value
+            .as_bytes()
+            .first()
+            .is_some_and(|b| b.is_ascii_alphanumeric())
+        && value
+            .as_bytes()
+            .last()
+            .is_some_and(|b| b.is_ascii_alphanumeric())
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
 }
 
 fn ownership_selector(node_id: &str) -> String {
     format!("{}={},proxima.io/node-id={}", LABEL, MANAGED_BY, node_id)
 }
 
-fn resources(assignment: &Value, namespace: &str, node_id: &str) -> Result<Option<(Value, Value, String)>, Box<dyn std::error::Error + Send + Sync>> {
-    let Some((kind, binary, port)) = gateway(assignment) else { return Ok(None); };
-    let id = assignment.get("assignment_id").and_then(Value::as_str).ok_or("assignment_id missing")?;
+fn resources(
+    assignment: &Value,
+    namespace: &str,
+    node_id: &str,
+) -> Result<Option<(Value, Value, String)>, Box<dyn std::error::Error + Send + Sync>> {
+    let Some((kind, binary, port)) = gateway(assignment) else {
+        return Ok(None);
+    };
+    let id = assignment
+        .get("assignment_id")
+        .and_then(Value::as_str)
+        .ok_or("assignment_id missing")?;
     let name = dns_name(id).ok_or("invalid assignment name")?;
-    let target = assignment.get("database_target_id").and_then(Value::as_str).ok_or("database_target_id missing")?;
-    let revision = assignment.get("config_revision").and_then(Value::as_u64).ok_or("config_revision missing")?;
+    let target = assignment
+        .get("database_target_id")
+        .and_then(Value::as_str)
+        .ok_or("database_target_id missing")?;
+    let revision = assignment
+        .get("config_revision")
+        .and_then(Value::as_u64)
+        .ok_or("config_revision missing")?;
     let endpoint = assignment.get("endpoint").ok_or("endpoint missing")?;
-    let host = endpoint.get("host").and_then(Value::as_str).ok_or("endpoint.host missing")?;
-    let db_port = endpoint.get("port").and_then(Value::as_u64).filter(|p| (1..=65535).contains(p)).ok_or("endpoint.port invalid")?;
+    let host = endpoint
+        .get("host")
+        .and_then(Value::as_str)
+        .ok_or("endpoint.host missing")?;
+    let db_port = endpoint
+        .get("port")
+        .and_then(Value::as_u64)
+        .filter(|p| (1..=65535).contains(p))
+        .ok_or("endpoint.port invalid")?;
     if host.is_empty() || host.len() > 253 || host.contains('/') || host.contains('\n') {
         return Err("endpoint.host invalid".into());
     }
-    let database = assignment.get("database_name").and_then(Value::as_str).unwrap_or("");
+    let database = assignment
+        .get("database_name")
+        .and_then(Value::as_str)
+        .unwrap_or("");
     let secret = secret_name(kind)?;
     let mut envs = vec![
         json!({"name":(format!("PROXIMA_{}_LISTEN_ADDR", kind.to_ascii_uppercase())),"value":format!("0.0.0.0:{port}")}),
@@ -178,45 +271,78 @@ fn resources(assignment: &Value, namespace: &str, node_id: &str) -> Result<Optio
     Ok(Some((deployment, service, name)))
 }
 
-fn desired_assignments(document: &Value) -> Result<&Vec<Value>, Box<dyn std::error::Error + Send + Sync>> {
+fn desired_assignments(
+    document: &Value,
+) -> Result<&Vec<Value>, Box<dyn std::error::Error + Send + Sync>> {
     if document.get("schema_version").and_then(Value::as_u64) != Some(1) {
         return Err("unsupported Engine desired-state schema version".into());
     }
     for field in ["node_id", "organization_id"] {
-        if document.get(field).and_then(Value::as_str).is_none_or(|value| value.trim().is_empty()) {
+        if document
+            .get(field)
+            .and_then(Value::as_str)
+            .is_none_or(|value| value.trim().is_empty())
+        {
             return Err(format!("Engine desired state is missing {field}").into());
         }
     }
-    let node_id = document.get("node_id").and_then(Value::as_str).ok_or("Engine desired state is missing node_id")?;
+    let node_id = document
+        .get("node_id")
+        .and_then(Value::as_str)
+        .ok_or("Engine desired state is missing node_id")?;
     if !valid_node_label(node_id) {
         return Err("Engine desired state node_id is not a valid Kubernetes label value".into());
     }
-    let assignments = document.get("assignments").and_then(Value::as_array)
+    let assignments = document
+        .get("assignments")
+        .and_then(Value::as_array)
         .ok_or("desired state has no assignments array")?;
     let mut ids = HashSet::new();
     for assignment in assignments {
-        let id = assignment.get("assignment_id").and_then(Value::as_str)
-            .filter(|value| !value.trim().is_empty()).ok_or("desired assignment has no assignment_id")?;
-        if !ids.insert(id) { return Err("desired state contains duplicate assignment IDs".into()); }
-        let runtime = assignment.get("gateway_runtime").and_then(Value::as_str)
+        let id = assignment
+            .get("assignment_id")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or("desired assignment has no assignment_id")?;
+        if !ids.insert(id) {
+            return Err("desired state contains duplicate assignment IDs".into());
+        }
+        let runtime = assignment
+            .get("gateway_runtime")
+            .and_then(Value::as_str)
             .ok_or("desired assignment has no gateway_runtime")?;
-        if !matches!(runtime, "proxima-engine" | "proxima-mysql-gateway" | "proxima-mongodb-gateway" | "proxima-redis-gateway") {
+        if !matches!(
+            runtime,
+            "proxima-engine"
+                | "proxima-mysql-gateway"
+                | "proxima-mongodb-gateway"
+                | "proxima-redis-gateway"
+        ) {
             return Err("desired assignment contains an unsupported gateway_runtime".into());
         }
     }
     Ok(assignments)
 }
 
-pub async fn reconcile_once(kube: &Kube, config_path: &PathBuf) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
+pub async fn reconcile_once(
+    kube: &Kube,
+    config_path: &PathBuf,
+) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
     let raw = fs::read(config_path)?;
     let desired: Value = serde_json::from_slice(&raw)?;
     let assignments = desired_assignments(&desired)?;
-    let node_id = desired.get("node_id").and_then(Value::as_str).ok_or("Engine desired state is missing node_id")?;
+    let node_id = desired
+        .get("node_id")
+        .and_then(Value::as_str)
+        .ok_or("Engine desired state is missing node_id")?;
     let mut desired_names = HashSet::new();
     let mut applied = 0usize;
     for assignment in assignments {
-        if let Some((deployment, service, name)) = resources(assignment, &kube.namespace, node_id)? {
-            if !desired_names.insert(name.clone()) { return Err("duplicate gateway assignment resource name".into()); }
+        if let Some((deployment, service, name)) = resources(assignment, &kube.namespace, node_id)?
+        {
+            if !desired_names.insert(name.clone()) {
+                return Err("duplicate gateway assignment resource name".into());
+            }
             kube.apply("deployments", &name, deployment).await?;
             kube.apply("services", &name, service).await?;
             applied += 1;
@@ -225,15 +351,29 @@ pub async fn reconcile_once(kube: &Kube, config_path: &PathBuf) -> Result<usize,
     // Remove only resources carrying our explicit ownership label. Never touch
     // customer-managed workloads or any Secret.
     for resource in ["deployments", "services"] {
-        let path = format!("{}?labelSelector={}", kube.path(resource, None), ownership_selector(node_id));
+        let path = format!(
+            "{}?labelSelector={}",
+            kube.path(resource, None),
+            ownership_selector(node_id)
+        );
         let list = kube.request(Method::GET, &path, None, false).await?;
         if let Some(items) = list.get("items").and_then(Value::as_array) {
             for item in items {
-                let Some(name) = item.pointer("/metadata/name").and_then(Value::as_str) else { continue; };
+                let Some(name) = item.pointer("/metadata/name").and_then(Value::as_str) else {
+                    continue;
+                };
                 if !desired_names.contains(name) {
-                    let delete_path = format!("{}/{}?propagationPolicy=Foreground", kube.path(resource, None), name);
-                    kube.request(Method::DELETE, &delete_path, None, false).await?;
-                    info!(resource, name, "removed stale Engine-managed Kubernetes gateway workload");
+                    let delete_path = format!(
+                        "{}/{}?propagationPolicy=Foreground",
+                        kube.path(resource, None),
+                        name
+                    );
+                    kube.request(Method::DELETE, &delete_path, None, false)
+                        .await?;
+                    info!(
+                        resource,
+                        name, "removed stale Engine-managed Kubernetes gateway workload"
+                    );
                 }
             }
         }
@@ -243,18 +383,28 @@ pub async fn reconcile_once(kube: &Kube, config_path: &PathBuf) -> Result<usize,
 
 pub async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let kube = Kube::from_env()?;
-    let path = PathBuf::from(env::var("PROXIMA_NODE_DATABASE_CONFIG_PATH")
-        .unwrap_or_else(|_| "/var/lib/proxima/database-targets.json".into()));
-    let seconds = env::var("PROXIMA_KUBERNETES_RECONCILE_SECONDS").ok()
-        .and_then(|v| v.parse::<u64>().ok()).filter(|v| (5..=300).contains(v)).unwrap_or(15);
+    let path = PathBuf::from(
+        env::var("PROXIMA_NODE_DATABASE_CONFIG_PATH")
+            .unwrap_or_else(|_| "/var/lib/proxima/database-targets.json".into()),
+    );
+    let seconds = env::var("PROXIMA_KUBERNETES_RECONCILE_SECONDS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .filter(|v| (5..=300).contains(v))
+        .unwrap_or(15);
     info!(namespace=%kube.namespace, path=%path.display(), interval_seconds=seconds,
         "Kubernetes gateway desired-state reconciler started");
     let mut ticker = interval(Duration::from_secs(seconds));
     loop {
         ticker.tick().await;
         match reconcile_once(&kube, &path).await {
-            Ok(count) => info!(managed_gateway_assignments=count, "Kubernetes gateway workloads reconciled"),
-            Err(error) => warn!(%error, "Kubernetes gateway reconciliation failed; last applied workloads are retained"),
+            Ok(count) => info!(
+                managed_gateway_assignments = count,
+                "Kubernetes gateway workloads reconciled"
+            ),
+            Err(error) => {
+                warn!(%error, "Kubernetes gateway reconciliation failed; last applied workloads are retained")
+            }
         }
     }
 }
@@ -301,8 +451,14 @@ mod tests {
     #[test]
     fn gateway_resources_and_cleanup_are_scoped_to_the_owning_node() {
         let labels = labels_for_node("px-assignment", "assignment-id", "node-a");
-        assert_eq!(labels.get("proxima.io/node-id").and_then(Value::as_str), Some("node-a"));
-        assert_eq!(ownership_selector("node-a"), "app.kubernetes.io/managed-by=proxima-engine,proxima.io/node-id=node-a");
+        assert_eq!(
+            labels.get("proxima.io/node-id").and_then(Value::as_str),
+            Some("node-a")
+        );
+        assert_eq!(
+            ownership_selector("node-a"),
+            "app.kubernetes.io/managed-by=proxima-engine,proxima.io/node-id=node-a"
+        );
         assert_ne!(ownership_selector("node-a"), ownership_selector("node-b"));
         assert!(valid_node_label("550e8400-e29b-41d4-a716-446655440000"));
         assert!(!valid_node_label("node/unsafe"));
@@ -310,16 +466,32 @@ mod tests {
 
     #[test]
     fn maps_only_existing_gateway_runtime_binaries() {
-        assert_eq!(gateway(&json!({"gateway_runtime":"proxima-mysql-gateway"})).unwrap().0,"mysql");
-        assert_eq!(gateway(&json!({"gateway_runtime":"proxima-mongodb-gateway"})).unwrap().0,"mongodb");
-        assert_eq!(gateway(&json!({"gateway_runtime":"proxima-redis-gateway"})).unwrap().0,"redis");
+        assert_eq!(
+            gateway(&json!({"gateway_runtime":"proxima-mysql-gateway"}))
+                .unwrap()
+                .0,
+            "mysql"
+        );
+        assert_eq!(
+            gateway(&json!({"gateway_runtime":"proxima-mongodb-gateway"}))
+                .unwrap()
+                .0,
+            "mongodb"
+        );
+        assert_eq!(
+            gateway(&json!({"gateway_runtime":"proxima-redis-gateway"}))
+                .unwrap()
+                .0,
+            "redis"
+        );
         assert!(gateway(&json!({"gateway_runtime":"proxima-engine"})).is_none());
         assert!(gateway(&json!({"gateway_runtime":"dynamodb"})).is_none());
     }
     #[test]
     fn assignment_resource_names_are_dns_safe_and_bounded() {
-        let value=dns_name("Assignment/With Spaces_AND.UPPER");
-        assert!(value.as_ref().is_some_and(|v|v.len()<=53 && v.starts_with("px-")));
+        let value = dns_name("Assignment/With Spaces_AND.UPPER");
+        assert!(value
+            .as_ref()
+            .is_some_and(|v| v.len() <= 53 && v.starts_with("px-")));
     }
 }
-

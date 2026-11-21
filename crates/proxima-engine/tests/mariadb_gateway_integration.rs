@@ -23,8 +23,9 @@ async fn verify_tenant(
     let mut conn = pool.get_conn().await?;
 
     // Own-tenant read.
-    let own: Option<String> =
-        conn.query_first("SELECT value FROM records WHERE id = 1").await?;
+    let own: Option<String> = conn
+        .query_first("SELECT value FROM records WHERE id = 1")
+        .await?;
 
     assert_eq!(own.as_deref(), Some(own_secret));
 
@@ -52,9 +53,7 @@ async fn verify_tenant(
     );
 
     // Database switching must fail.
-    let switch = conn
-        .query_drop(format!("USE {}", other_database))
-        .await;
+    let switch = conn.query_drop(format!("USE {}", other_database)).await;
 
     assert!(
         switch.is_err(),
@@ -62,18 +61,16 @@ async fn verify_tenant(
     );
 
     // Connection must remain bound to its original tenant.
-    let after_denials: Option<String> =
-        conn.query_first("SELECT value FROM records WHERE id = 1").await?;
+    let after_denials: Option<String> = conn
+        .query_first("SELECT value FROM records WHERE id = 1")
+        .await?;
 
     assert_eq!(after_denials.as_deref(), Some(own_secret));
 
     // Prepared SELECT.
-    let select = conn
-        .prep("SELECT value FROM records WHERE id = ?")
-        .await?;
+    let select = conn.prep("SELECT value FROM records WHERE id = ?").await?;
 
-    let prepared_result: Option<String> =
-        conn.exec_first(&select, (1,)).await?;
+    let prepared_result: Option<String> = conn.exec_first(&select, (1,)).await?;
 
     assert_eq!(prepared_result.as_deref(), Some(own_secret));
 
@@ -82,11 +79,8 @@ async fn verify_tenant(
         .prep("INSERT INTO records (id, value) VALUES (?, ?)")
         .await?;
 
-    conn.exec_drop(
-        &insert,
-        (prepared_id, own_prepared_value),
-    )
-    .await?;
+    conn.exec_drop(&insert, (prepared_id, own_prepared_value))
+        .await?;
 
     let inserted: Option<String> = conn
         .query_first(format!(
@@ -104,8 +98,13 @@ async fn verify_tenant(
 }
 
 async fn verify_caching_sha2_rejects_wrong_password() -> Result<(), Box<dyn std::error::Error>> {
-    let pool = Pool::new(Opts::from_url("mysql://client_a:DefinitelyWrongPassword@127.0.0.1:3307/tenant_a")?);
-    assert!(pool.get_conn().await.is_err(), "gateway accepted an invalid caching_sha2_password response");
+    let pool = Pool::new(Opts::from_url(
+        "mysql://client_a:DefinitelyWrongPassword@127.0.0.1:3307/tenant_a",
+    )?);
+    assert!(
+        pool.get_conn().await.is_err(),
+        "gateway accepted an invalid caching_sha2_password response"
+    );
     pool.disconnect().await?;
     Ok(())
 }

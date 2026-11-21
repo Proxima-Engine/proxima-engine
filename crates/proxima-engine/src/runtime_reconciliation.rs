@@ -41,7 +41,10 @@ impl RuntimePhase {
             "applied" => Ok(Self::Applied),
             "failed" => Ok(Self::Failed),
             "revoked" => Ok(Self::Revoked),
-            _ => Err(io::Error::new(io::ErrorKind::InvalidData, "unknown runtime phase")),
+            _ => Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "unknown runtime phase",
+            )),
         }
     }
 }
@@ -73,7 +76,10 @@ impl RuntimeRecord {
             || provider.trim().is_empty()
             || revision == 0
         {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid assignment identity or revision"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "invalid assignment identity or revision",
+            ));
         }
         Ok(Self {
             assignment_id,
@@ -93,13 +99,22 @@ impl RuntimeRecord {
     /// the durable record for an existing assignment.
     pub fn begin_apply(&mut self, revision: u64, credential_revision: u64) -> io::Result<()> {
         if revision != self.desired_revision || revision == 0 {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, "desired revision mismatch"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "desired revision mismatch",
+            ));
         }
         if credential_revision < self.credential_revision {
-            return Err(io::Error::new(io::ErrorKind::PermissionDenied, "credential revision rollback rejected"));
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "credential revision rollback rejected",
+            ));
         }
         if self.phase == RuntimePhase::Revoked {
-            return Err(io::Error::new(io::ErrorKind::PermissionDenied, "revoked assignment cannot be applied"));
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "revoked assignment cannot be applied",
+            ));
         }
         self.credential_revision = credential_revision;
         self.phase = RuntimePhase::Applying;
@@ -122,16 +137,31 @@ impl RuntimeRecord {
         credential_revision: u64,
     ) -> io::Result<()> {
         if self.phase == RuntimePhase::Revoked {
-            return Err(io::Error::new(io::ErrorKind::PermissionDenied, "revoked assignment cannot be reused"));
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "revoked assignment cannot be reused",
+            ));
         }
-        if assignment_id != self.assignment_id || target_id != self.target_id || provider != self.provider {
-            return Err(io::Error::new(io::ErrorKind::PermissionDenied, "assignment identity change requires a new runtime record"));
+        if assignment_id != self.assignment_id
+            || target_id != self.target_id
+            || provider != self.provider
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "assignment identity change requires a new runtime record",
+            ));
         }
         if revision < self.desired_revision || revision == 0 {
-            return Err(io::Error::new(io::ErrorKind::PermissionDenied, "configuration revision rollback rejected"));
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "configuration revision rollback rejected",
+            ));
         }
         if credential_revision < self.credential_revision {
-            return Err(io::Error::new(io::ErrorKind::PermissionDenied, "credential revision rollback rejected"));
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "credential revision rollback rejected",
+            ));
         }
         if revision == self.desired_revision && credential_revision == self.credential_revision {
             return Ok(());
@@ -150,10 +180,16 @@ impl RuntimeRecord {
     /// have already completed successfully.
     pub fn mark_applied(&mut self, revision: u64, provider_health_passed: bool) -> io::Result<()> {
         if self.phase != RuntimePhase::Applying || revision != self.desired_revision {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, "assignment is not applying this revision"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "assignment is not applying this revision",
+            ));
         }
         if !provider_health_passed {
-            return Err(io::Error::new(io::ErrorKind::PermissionDenied, "provider health verification is required"));
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "provider health verification is required",
+            ));
         }
         self.applied_revision = Some(revision);
         self.runtime_health_passed = true;
@@ -165,8 +201,16 @@ impl RuntimeRecord {
 
     pub fn mark_failed(&mut self, error_code: &str) -> io::Result<()> {
         let code = error_code.trim();
-        if code.is_empty() || code.len() > 96 || !code.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-') {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid failure code"));
+        if code.is_empty()
+            || code.len() > 96
+            || !code
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "invalid failure code",
+            ));
         }
         self.phase = RuntimePhase::Failed;
         self.runtime_health_passed = false;
@@ -199,29 +243,57 @@ impl RuntimeRecord {
             "credential_revision": self.credential_revision,
             "last_error_code": self.last_error_code,
             "updated_at_unix": self.updated_at_unix
-        }).to_string()
+        })
+        .to_string()
     }
 
     fn from_json(raw: &str) -> io::Result<Self> {
-        let value: serde_json::Value = serde_json::from_str(raw)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        let value: serde_json::Value =
+            serde_json::from_str(raw).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
         if value.get("schema_version").and_then(|v| v.as_u64()) != Some(1) {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "unsupported runtime state schema"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "unsupported runtime state schema",
+            ));
         }
-        let string = |key: &str| value.get(key).and_then(|v| v.as_str()).map(str::to_owned)
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, format!("missing {key}")));
-        let number = |key: &str| value.get(key).and_then(|v| v.as_u64())
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, format!("missing {key}")));
+        let string = |key: &str| {
+            value
+                .get(key)
+                .and_then(|v| v.as_str())
+                .map(str::to_owned)
+                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, format!("missing {key}")))
+        };
+        let number = |key: &str| {
+            value
+                .get(key)
+                .and_then(|v| v.as_u64())
+                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, format!("missing {key}")))
+        };
         let phase = RuntimePhase::parse(&string("phase")?)?;
         let applied_revision = match value.get("applied_revision") {
             Some(serde_json::Value::Number(n)) => n.as_u64(),
             Some(serde_json::Value::Null) | None => None,
-            _ => return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid applied_revision")),
+            _ => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "invalid applied_revision",
+                ))
+            }
         };
-        let runtime_health_passed = value.get("runtime_health_passed").and_then(|v| v.as_bool())
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing runtime_health_passed"))?;
-        if runtime_health_passed != (phase == RuntimePhase::Applied && applied_revision == Some(number("desired_revision")?)) {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "inconsistent applied health marker"));
+        let runtime_health_passed = value
+            .get("runtime_health_passed")
+            .and_then(|v| v.as_bool())
+            .ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidData, "missing runtime_health_passed")
+            })?;
+        if runtime_health_passed
+            != (phase == RuntimePhase::Applied
+                && applied_revision == Some(number("desired_revision")?))
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "inconsistent applied health marker",
+            ));
         }
         Ok(Self {
             assignment_id: string("assignment_id")?,
@@ -232,7 +304,10 @@ impl RuntimeRecord {
             phase,
             runtime_health_passed,
             credential_revision: number("credential_revision")?,
-            last_error_code: value.get("last_error_code").and_then(|v| v.as_str()).map(str::to_owned),
+            last_error_code: value
+                .get("last_error_code")
+                .and_then(|v| v.as_str())
+                .map(str::to_owned),
             updated_at_unix: number("updated_at_unix")?,
         })
     }
@@ -242,11 +317,16 @@ impl RuntimeRecord {
 /// On Unix, the state file is restricted to its owner (0600).
 pub fn persist(path: impl AsRef<Path>, record: &RuntimeRecord) -> io::Result<()> {
     let path = path.as_ref();
-    let parent = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    let parent = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
     fs::create_dir_all(parent)?;
     let mut temp = PathBuf::from(path);
     let suffix = format!("tmp-{}", std::process::id());
-    let name = path.file_name().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "state path has no filename"))?;
+    let name = path
+        .file_name()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "state path has no filename"))?;
     temp.set_file_name(format!("{}.{}", name.to_string_lossy(), suffix));
     let mut options = OpenOptions::new();
     options.write(true).create(true).truncate(true);
@@ -260,7 +340,8 @@ pub fn persist(path: impl AsRef<Path>, record: &RuntimeRecord) -> io::Result<()>
         file.write_all(record.to_json().as_bytes())?;
         file.sync_all()?;
         fs::rename(&temp, path)?;
-        File::open(parent)?.sync_all()?;
+        #[cfg(unix)]
+        std::fs::File::open(parent)?.sync_all()?;
         Ok(())
     })();
     if result.is_err() {
@@ -275,7 +356,10 @@ pub fn load(path: impl AsRef<Path>) -> io::Result<RuntimeRecord> {
 }
 
 fn now() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs()
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
 }
 
 #[cfg(test)]
@@ -284,7 +368,8 @@ mod tests {
 
     #[test]
     fn applied_requires_health_and_matching_revision() {
-        let mut state = RuntimeRecord::staged("a".into(), "t".into(), "postgresql".into(), 8, 2).unwrap();
+        let mut state =
+            RuntimeRecord::staged("a".into(), "t".into(), "postgresql".into(), 8, 2).unwrap();
         state.begin_apply(8, 2).unwrap();
         assert!(state.mark_applied(8, false).is_err());
         state.mark_applied(8, true).unwrap();
@@ -294,14 +379,16 @@ mod tests {
 
     #[test]
     fn stale_and_credential_rollback_are_rejected() {
-        let mut state = RuntimeRecord::staged("a".into(), "t".into(), "mongodb".into(), 9, 4).unwrap();
+        let mut state =
+            RuntimeRecord::staged("a".into(), "t".into(), "mongodb".into(), 9, 4).unwrap();
         assert!(state.begin_apply(8, 4).is_err());
         assert!(state.begin_apply(9, 3).is_err());
     }
 
     #[test]
     fn desired_revision_updates_preserve_last_applied_revision_until_verified() {
-        let mut state = RuntimeRecord::staged("a".into(), "t".into(), "mysql".into(), 4, 2).unwrap();
+        let mut state =
+            RuntimeRecord::staged("a".into(), "t".into(), "mysql".into(), 4, 2).unwrap();
         state.begin_apply(4, 2).unwrap();
         state.mark_applied(4, true).unwrap();
         state.update_desired("a", "t", "mysql", 5, 3).unwrap();
@@ -317,7 +404,8 @@ mod tests {
 
     #[test]
     fn desired_revision_rejects_identity_and_revision_rollback() {
-        let mut state = RuntimeRecord::staged("a".into(), "t".into(), "mongodb".into(), 7, 4).unwrap();
+        let mut state =
+            RuntimeRecord::staged("a".into(), "t".into(), "mongodb".into(), 7, 4).unwrap();
         assert!(state.update_desired("other", "t", "mongodb", 8, 4).is_err());
         assert!(state.update_desired("a", "other", "mongodb", 8, 4).is_err());
         assert!(state.update_desired("a", "t", "redis", 8, 4).is_err());
@@ -327,14 +415,16 @@ mod tests {
 
     #[test]
     fn revoked_assignment_cannot_be_reused_for_a_new_revision() {
-        let mut state = RuntimeRecord::staged("a".into(), "t".into(), "redis".into(), 3, 1).unwrap();
+        let mut state =
+            RuntimeRecord::staged("a".into(), "t".into(), "redis".into(), 3, 1).unwrap();
         state.begin_revocation();
         assert!(state.update_desired("a", "t", "redis", 4, 2).is_err());
     }
 
     #[test]
     fn revoked_assignment_cannot_be_reapplied() {
-        let mut state = RuntimeRecord::staged("a".into(), "t".into(), "redis".into(), 3, 1).unwrap();
+        let mut state =
+            RuntimeRecord::staged("a".into(), "t".into(), "redis".into(), 3, 1).unwrap();
         state.begin_revocation();
         assert!(state.begin_apply(3, 1).is_err());
         assert_eq!(state.applied_revision, None);
@@ -344,19 +434,25 @@ mod tests {
     fn durable_state_round_trips_and_rejects_corrupt_health_claims() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("runtime-state.json");
-        let mut state = RuntimeRecord::staged("a".into(), "t".into(), "postgresql".into(), 2, 1).unwrap();
+        let mut state =
+            RuntimeRecord::staged("a".into(), "t".into(), "postgresql".into(), 2, 1).unwrap();
         state.begin_apply(2, 1).unwrap();
         state.mark_applied(2, true).unwrap();
         persist(&path, &state).unwrap();
         assert_eq!(load(&path).unwrap(), state);
-        let tampered = state.to_json().replace("\"runtime_health_passed\":true", "\"runtime_health_passed\":false");
-        fs::write(&path, tampered).unwrap();
-        assert!(load(&path).is_err());
+        let tampered = state.to_json().replace(
+            "\"runtime_health_passed\":true",
+            "\"runtime_health_passed\":false",
+        );
+        let tampered_path = dir.path().join("tampered-runtime-state.json");
+        fs::write(&tampered_path, tampered).unwrap();
+        assert!(load(&tampered_path).is_err());
     }
 
     #[test]
     fn failure_never_preserves_healthy_marker() {
-        let mut state = RuntimeRecord::staged("a".into(), "t".into(), "mysql".into(), 1, 1).unwrap();
+        let mut state =
+            RuntimeRecord::staged("a".into(), "t".into(), "mysql".into(), 1, 1).unwrap();
         state.begin_apply(1, 1).unwrap();
         state.mark_failed("UPSTREAM_AUTH_FAILED").unwrap();
         assert_eq!(state.phase, RuntimePhase::Failed);

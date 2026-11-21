@@ -3,8 +3,11 @@
 use serde_json::{json, Value};
 
 pub fn valid_tenant_id(value: &str) -> bool {
-    !value.is_empty() && value.len() <= 48 && value.bytes().all(|b|
-        b.is_ascii_lowercase() || b.is_ascii_digit() || b"_-".contains(&b))
+    !value.is_empty()
+        && value.len() <= 48
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"_-".contains(&b))
 }
 
 pub fn tenant_index_pattern(tenant_id: &str) -> Option<String> {
@@ -37,7 +40,10 @@ mod tests {
 
     #[test]
     fn tenant_namespace_is_exact_and_bounded() {
-        assert_eq!(tenant_index_pattern("tenant_42").as_deref(), Some("tenant-tenant_42-*"));
+        assert_eq!(
+            tenant_index_pattern("tenant_42").as_deref(),
+            Some("tenant-tenant_42-*")
+        );
         assert!(tenant_index_pattern("Tenant_42").is_none());
         assert!(tenant_index_pattern("tenant/42").is_none());
         assert!(tenant_index_pattern("").is_none());

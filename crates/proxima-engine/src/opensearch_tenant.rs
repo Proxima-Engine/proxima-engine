@@ -8,7 +8,9 @@ use serde_json::{json, Value};
 pub fn valid_tenant_id(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 48
-        && value.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"_-".contains(&b))
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"_-".contains(&b))
 }
 
 pub fn tenant_index_pattern(tenant_id: &str) -> Option<String> {
@@ -49,9 +51,16 @@ mod tests {
         let role = opensearch_role_descriptor("org_01").unwrap();
         assert_eq!(role["cluster_permissions"], json!([]));
         assert_eq!(role["tenant_permissions"], json!([]));
-        assert_eq!(role["index_permissions"][0]["index_patterns"][0], "tenant-org_01-*");
-        assert_eq!(role["index_permissions"][0]["fls"], json!(["tenant_id", "id", "created_at", "updated_at", "data"]));
-        let dls: Value = serde_json::from_str(role["index_permissions"][0]["dls"].as_str().unwrap()).unwrap();
+        assert_eq!(
+            role["index_permissions"][0]["index_patterns"][0],
+            "tenant-org_01-*"
+        );
+        assert_eq!(
+            role["index_permissions"][0]["fls"],
+            json!(["tenant_id", "id", "created_at", "updated_at", "data"])
+        );
+        let dls: Value =
+            serde_json::from_str(role["index_permissions"][0]["dls"].as_str().unwrap()).unwrap();
         assert_eq!(dls["term"]["tenant_id"], "org_01");
     }
 

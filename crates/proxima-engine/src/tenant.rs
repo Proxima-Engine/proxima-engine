@@ -84,7 +84,9 @@ impl TenantTokenVerifier {
         previous_secret: Option<&str>,
     ) -> Result<Self, TenantTokenError> {
         let secret = secret.as_ref();
-        if secret.len() < 32 || previous_secret.is_some_and(|previous| previous.as_bytes().len() < 32) {
+        if secret.len() < 32
+            || previous_secret.is_some_and(|previous| previous.as_bytes().len() < 32)
+        {
             return Err(TenantTokenError::InvalidSignature);
         }
         let replay_dir = std::env::var_os("PROXIMA_BREAK_GLASS_REPLAY_DIR")
@@ -147,7 +149,10 @@ impl TenantTokenVerifier {
         let expected = sign_payload(&self.secret, version, tenant_id, expires_at);
         let valid_current = constant_time_hex_eq(&expected, signature);
         let valid_previous = self.previous_secret.as_ref().is_some_and(|secret| {
-            constant_time_hex_eq(&sign_payload(secret, version, tenant_id, expires_at), signature)
+            constant_time_hex_eq(
+                &sign_payload(secret, version, tenant_id, expires_at),
+                signature,
+            )
         });
         if !valid_current && !valid_previous {
             return Err(TenantTokenError::InvalidSignature);
@@ -192,9 +197,10 @@ impl TenantTokenVerifier {
         }
         let payload = format!("bg1.{tenant_id}.{expires_at}.{nonce}");
         let valid_current = constant_time_hex_eq(&sign_message(&self.secret, &payload), parts[4]);
-        let valid_previous = self.previous_secret.as_ref().is_some_and(|secret| {
-            constant_time_hex_eq(&sign_message(secret, &payload), parts[4])
-        });
+        let valid_previous = self
+            .previous_secret
+            .as_ref()
+            .is_some_and(|secret| constant_time_hex_eq(&sign_message(secret, &payload), parts[4]));
         if !valid_current && !valid_previous {
             return Err(TenantTokenError::InvalidSignature);
         }
@@ -410,7 +416,10 @@ mod previous_key_tests {
         let previous = "legacy-global-tenant-signing-key-0001";
         let current = "organization-scoped-tenant-signing-key-01";
         let verifier = TenantTokenVerifier::new_with_previous(current, Some(previous)).unwrap();
-        let token = format!("v1.tenant_a.2000.{}", sign_payload(previous.as_bytes(), "v1", "tenant_a", 2000));
+        let token = format!(
+            "v1.tenant_a.2000.{}",
+            sign_payload(previous.as_bytes(), "v1", "tenant_a", 2000)
+        );
         assert_eq!(verifier.verify(&token, 1000).unwrap().tenant_id, "tenant_a");
     }
 
@@ -419,7 +428,13 @@ mod previous_key_tests {
         let previous = "legacy-global-tenant-signing-key-0001";
         let current = "organization-scoped-tenant-signing-key-01";
         let verifier = TenantTokenVerifier::new(current).unwrap();
-        let token = format!("v1.tenant_a.2000.{}", sign_payload(previous.as_bytes(), "v1", "tenant_a", 2000));
-        assert_eq!(verifier.verify(&token, 1000), Err(TenantTokenError::InvalidSignature));
+        let token = format!(
+            "v1.tenant_a.2000.{}",
+            sign_payload(previous.as_bytes(), "v1", "tenant_a", 2000)
+        );
+        assert_eq!(
+            verifier.verify(&token, 1000),
+            Err(TenantTokenError::InvalidSignature)
+        );
     }
 }

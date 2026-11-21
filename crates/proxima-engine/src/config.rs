@@ -88,19 +88,21 @@ impl Config {
                 Err(_) => None,
             },
         };
-        let tenant_signing_key = match tenant_signing_key_value {
-            Some(value) if value.trim().is_empty() => None,
-            Some(value) if value.len() < 32 => {
-                return Err(io::Error::new(
+        let tenant_signing_key =
+            match tenant_signing_key_value {
+                Some(value) if value.trim().is_empty() => None,
+                Some(value) if value.len() < 32 => return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
                     "PROXIMA_TENANT_SIGNING_KEY or its secret file must contain at least 32 bytes",
-                ))
-            }
-            Some(value) => Some(value),
-            None => None,
-        };
+                )),
+                Some(value) => Some(value),
+                None => None,
+            };
         let tenant_signing_key_previous = non_empty_env("PROXIMA_TENANT_SIGNING_KEY_PREVIOUS");
-        if tenant_signing_key_previous.as_ref().is_some_and(|key| key.len() < 32) {
+        if tenant_signing_key_previous
+            .as_ref()
+            .is_some_and(|key| key.len() < 32)
+        {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "PROXIMA_TENANT_SIGNING_KEY_PREVIOUS must contain at least 32 bytes",
