@@ -76,7 +76,7 @@ impl fmt::Display for ProvisioningError {
 impl std::error::Error for ProvisioningError {}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TenantBinding { pub tenant_id: String, pub namespace: String }
+pub struct TenantBinding { pub binding_id: Option<String>, pub tenant_id: String, pub namespace: String }
 
 pub struct ProvisioningStatement { pub purpose: &'static str, sql: Secret }
 impl ProvisioningStatement {
@@ -90,6 +90,7 @@ impl fmt::Debug for ProvisioningStatement {
 }
 
 pub struct TenantIdentity {
+    pub binding_id: Option<String>,
     pub tenant_id: String,
     pub namespace: String,
     pub username: String,
@@ -205,6 +206,7 @@ pub fn build_provisioning_plan(request: ProvisioningRequest<'_>) -> Result<Provi
         }
 
         identities.push(TenantIdentity {
+            binding_id: binding.binding_id.clone(),
             tenant_id: binding.tenant_id.clone(),
             namespace: binding.namespace.clone(),
             username,
@@ -256,6 +258,31 @@ pub fn mysql_gateway_runtime_config(
         users.push(user);
     }
     Ok(json!({ "schema_version": 1, "provider_key": provider.key(), "users": users }))
+}
+
+/// Serialize only the application-facing identity metadata required by Cloud.
+/// Upstream passwords and SQL statements are deliberately excluded. MySQL/MariaDB
+/// client passwords are returned inside the node-encrypted result envelope.
+pub fn provisioning_result_payload(plan: &ProvisioningPlan) -> Result<Value, ProvisioningError> {
+    let mut bindings = Vec::with_capacity(plan.identities.len());
+    for identity in &plan.identities {
+        let mut item = json!({
+            "binding_id": identity.binding_id,
+            "tenant_id": identity.tenant_id,
+            "username": identity.username,
+            "database": identity.database,
+            "schema": identity.schema
+        });
+        if plan.provider.is_mysql_family() {
+            item["client_password"] = Value::String(identity.client_password.expose()?.to_owned());
+        }
+        bindings.push(item);
+    }
+    Ok(json!({
+        "schema_version": 1,
+        "provider_key": plan.provider.key(),
+        "bindings": bindings
+    }))
 }
 
 pub fn build_rotation_statement(
@@ -480,7 +507,7 @@ fn mysql_options(
 mod tests {
     use super::*;
     fn binding(tenant: &str, namespace: &str) -> TenantBinding {
-        TenantBinding { tenant_id: tenant.into(), namespace: namespace.into() }
+        TenantBinding { binding_id: None, tenant_id: tenant.into(), namespace: namespace.into() }
     }
 
     #[test]
