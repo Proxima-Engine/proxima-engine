@@ -61,6 +61,10 @@ impl RuntimeCoordinator {
         Ok(())
     }
 
+    pub async fn stop_runtime(&self, assignment_id: &str) -> io::Result<()> {
+        self.supervisor.stop(assignment_id).await
+    }
+
     pub async fn revoke(&self, state_path: &Path, state: &mut RuntimeRecord) -> io::Result<()> {
         self.supervisor.stop(&state.assignment_id).await?;
         state.begin_revocation();
