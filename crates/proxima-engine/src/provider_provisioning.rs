@@ -231,17 +231,28 @@ pub fn mysql_gateway_runtime_config(
     for identity in identities {
         let client_password = identity.client_password.expose()?;
         let upstream_password = identity.upstream_password.expose()?;
-        let password_sha1 = hex::encode(Sha1::digest(client_password.as_bytes()));
-        let upstream_url = format!("mysql://{}:{}@{}:{}/{}?require_ssl=true",
+        let upstream_url = format!("mysql://{}:{}@{}:{}/{}?require_ssl=true&verify_ca=true&verify_identity=true",
             identity.username, upstream_password, upstream_host, upstream_port, identity.database);
-        users.push(json!({
+        let mut user = json!({
             "username": identity.username,
             "tenant_id": identity.tenant_id,
             "database": identity.database,
-            "upstream_url": upstream_url,
-            "password_sha1": password_sha1,
-            "auth_plugin": "mysql_native_password"
-        }));
+            "upstream_url": upstream_url
+        });
+        match provider {
+            CoreProvider::MySql => {
+                let stage1 = sha2::Sha256::digest(client_password.as_bytes());
+                let stage2 = sha2::Sha256::digest(stage1);
+                user["password_sha256"] = Value::String(hex::encode(stage2));
+                user["auth_plugin"] = Value::String("caching_sha2_password".into());
+            }
+            CoreProvider::MariaDb => {
+                user["password_sha1"] = Value::String(hex::encode(Sha1::digest(client_password.as_bytes())));
+                user["auth_plugin"] = Value::String("mysql_native_password".into());
+            }
+            _ => return Err(ProvisioningError::UnsupportedProvider),
+        }
+        users.push(user);
     }
     Ok(json!({ "schema_version": 1, "provider_key": provider.key(), "users": users }))
 }
