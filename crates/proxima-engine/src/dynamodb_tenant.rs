@@ -82,7 +82,12 @@ mod tests {
         }
     }
     #[test]
-    fn accepts_regional_aws_partitions() {\n        assert!(DynamoTenant::new("tenant-a", "arn:aws-us-gov:dynamodb:us-gov-west-1:123456789012:table/proxima-records").is_ok());\n        assert!(DynamoTenant::new("tenant-a", "arn:aws-cn:dynamodb:cn-north-1:123456789012:table/proxima-records").is_ok());\n    }\n    #[test]\n    fn validates_partition_keys() {
+    fn accepts_regional_aws_partitions() {
+        assert!(DynamoTenant::new("tenant-a", "arn:aws-us-gov:dynamodb:us-gov-west-1:123456789012:table/proxima-records").is_ok());
+        assert!(DynamoTenant::new("tenant-a", "arn:aws-cn:dynamodb:cn-north-1:123456789012:table/proxima-records").is_ok());
+    }
+    #[test]
+        fn validates_partition_keys() {
         for id in ["", "../tenant", "tenant/a", "tenant a", &"x".repeat(129)] {
             assert!(matches!(validate_tenant_id(id), Err(DynamoTenantError::InvalidTenantId)));
         }
