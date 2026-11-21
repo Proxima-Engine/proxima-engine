@@ -303,7 +303,8 @@ pub fn provisioning_result_payload(plan: &ProvisioningPlan) -> Result<Value, Pro
             "tenant_id": identity.tenant_id,
             "username": identity.username,
             "database": identity.database,
-            "schema": identity.schema
+            "schema": identity.schema,
+            "upstream_password": identity.upstream_password.expose()?
         });
         if plan.provider.is_mysql_family() {
             item["client_password"] = Value::String(identity.client_password.expose()?.to_owned());
