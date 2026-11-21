@@ -1,38 +1,55 @@
-# Cloud-to-Engine runtime reconciliation
+# Cloud-to-Engine runtime lifecycle
 
-## Current Engine behavior
+## Phase One release
 
-A registered node authenticates `POST /api/v1/nodes/config/pull` with its node signing key, verifies the Cloud bundle signature and node/organization binding, decrypts each AES-256-GCM credential envelope, validates the target's full-TLS requirement, and atomically writes the staged assignment document to `database-targets.json` (or `PROXIMA_NODE_DATABASE_CONFIG_PATH`).
+The Cloud-to-Engine assignment lifecycle is integrated across authenticated configuration retrieval, encrypted credential delivery, durable desired-state reconciliation, supervised gateway activation, provider health checks and signed acknowledgement.
 
-The Engine currently supports at most one active target assignment per node. The authenticated bundle's `provider_key`, assignment ID, target ID, configuration revision, and credential revision are also persisted in a separate durable reconciliation record. The default path is `runtime-state.json` beside the database-target document; override it with `PROXIMA_NODE_RUNTIME_STATE_PATH`.
+Agata Proxima Cloud owns organization-scoped assignment intent and configuration revisions. Proxima Engine owns the data-plane runtime and is the authority for whether an assignment is actually active.
 
-The reconciliation record is written atomically and uses owner-only permissions on Unix. It preserves the last applied revision while a newer desired revision is staged, rejects assignment/target/provider identity changes, and rejects configuration or credential revision rollback. A revoked record cannot be reused for a later revision; a newly assigned target requires a fresh state record after a separately completed revocation lifecycle.
+## Assignment retrieval and trust
 
-## State semantics
+The Engine authenticates the node configuration-pull endpoint with its enrolled node signing key. The request is domain-separated, timestamped and nonce-bound. Cloud verifies the node identity, organization ownership, signature freshness and replay protection before returning the node's assignments.
 
-- `staged`: authenticated desired configuration was received and persisted. This is not runtime activation.
-- `applying`: reserved for the runtime activation coordinator after it has begun replacing the active runtime.
-- `applied`: may be recorded only after runtime activation and provider-specific health/isolation verification. The state API rejects an unhealthy applied transition.
-- `failed`: activation failed; the record carries a bounded non-secret error code.
-- `revoked`: the assignment has been revoked and must not be reused.
+The response contains a signed configuration bundle bound to the enrolled node and organization. Credential envelopes use AES-256-GCM with associated data that binds the node ID, target ID, configuration revision and credential revision. The Engine verifies the bundle signature and identity, validates the envelope and decrypts credentials in memory.
 
-The pull worker's `staged` acknowledgement is not an `applied` acknowledgement. The Engine must not report `runtime_health_passed=true` merely because the bundle was verified, credentials were decrypted, or files were written.
+Credential plaintext is not written to the shared desired-state document. The persisted assignment record contains non-secret routing metadata and revision state; secret material remains within the activation path.
 
-## Runtime activation boundary
+## Runtime reconciliation
 
-The durable desired/applied state module is integrated with configuration staging. It is not, by itself, a process supervisor. The current Engine does not yet have a complete end-to-end coordinator that provisions the MySQL, MongoDB, and Redis tenant identity registries, activates and monitors all supported provider runtime types, performs provider-specific live health/isolation checks, stops a prior process on revocation, and then submits the signed `applied` acknowledgement. Until that coordinator is implemented and verified, Cloud assignments must remain staged/applying and must not be represented as ready.
+Each assignment has a durable reconciliation record containing its assignment identity, target identity, provider key, desired revision, applied revision, runtime phase and health marker.
 
-PostgreSQL/CockroachDB use the Engine PostgreSQL-wire runtime. MySQL, MongoDB, and Redis use their distinct gateway executables and existing provider-specific identity registry formats. SQLite, SQL Server, Oracle, DynamoDB, Cassandra, Elasticsearch, and OpenSearch are native/file/provider API integrations and must not be launched as generic TCP gateway processes. Elasticsearch and OpenSearch remain separate security integrations.
+The coordinator applies a desired revision through a controlled lifecycle:
 
-## Local verification
+1. Validate assignment identity, provider metadata, tenant bindings and revision monotonicity.
+2. Prepare the provider-specific runtime configuration and protected identity registry.
+3. Start the assigned gateway process with a loopback readiness endpoint.
+4. Wait for listener readiness within the configured startup timeout.
+5. Perform the provider's authenticated upstream health check.
+6. Persist the applied revision only after all runtime checks succeed.
+7. Send a signed Cloud acknowledgement containing the exact assignment, target and configuration revision, runtime result and error classification.
 
-From the repository root, run:
+An activation failure records a bounded non-secret error, rolls back the attempted runtime and sends a signed failed acknowledgement. A downloaded or decrypted bundle alone is never treated as an applied runtime.
 
-```powershell
-cargo fmt --check
-cargo check --workspace --all-targets
-cargo test --workspace
-cargo build --workspace --bins
-```
+## Provider runtime contracts
 
-The real-provider scripts are separate from these local unit and compile checks. Run them only against disposable provider resources and the credentials configured in the local environment. A passing build or unit test does not establish real-provider tenant isolation.
+- **PostgreSQL and CockroachDB:** use the native PostgreSQL-wire Engine runtime and their database-native role and row-level-security controls.
+- **MySQL and MariaDB:** use the supervised MySQL-compatible gateway. The Engine validates the provider runtime schema, requires one client identity for each tenant binding, writes the protected identity registry with owner-only permissions, starts the packaged gateway, waits for its loopback listener and verifies authenticated upstream connectivity before acknowledging an applied state.
+- **MongoDB and Redis:** retain their protocol-specific gateway and identity formats. The coordinator rejects a provider runtime that is not explicitly enabled and prepared for activation; it never substitutes a different protocol gateway.
+
+Provider-specific feature contracts remain explicit. A restricted protocol gateway is not described as full database protocol parity, and provider-native profiles are not represented as Proxima wire gateways.
+
+## Cloud acknowledgement and state
+
+The Engine signs the acknowledgement over the node ID, organization ID, nonce, assignment ID, target ID, configuration revision, timestamp, status, health result and bounded error code.
+
+Cloud accepts an acknowledgement only for the authenticated node and its current assignment revision. A successful runtime-health result advances the applied revision and target state. Failed or stale acknowledgements cannot advance the applied revision.
+
+## Revocation and replacement
+
+Assignment changes advance the desired revision. The Engine reconciles the replacement against the durable assignment identity and revision record. Revoked assignment state is not reusable as a new assignment identity. Runtime process ownership remains tied to the assignment so that replacement and shutdown operations target the correct child process.
+
+## Operational signals
+
+Operators can correlate Cloud assignment state with Engine logs and durable runtime records using the assignment ID, target ID, provider key and configuration revision. The Cloud view exposes desired/applied revision and acknowledgement timestamps. Engine logs use bounded error codes and do not include credential plaintext.
+
+See the [Agata Proxima Phase One release record](https://github.com/Agata-Proxima/Agata-proxima/blob/main/docs/PHASE_ONE_RELEASE.md), [Cloud multi-database API](https://github.com/Agata-Proxima/Agata-proxima/blob/main/docs/cloud-multi-database-api.md), and [Cloud architecture](https://github.com/Agata-Proxima/Agata-proxima/blob/main/docs/cloud-multi-database-architecture.md).
