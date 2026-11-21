@@ -22,6 +22,23 @@ Example:
 
 The table partition key must actually contain the authenticated tenant ID for dynamodb:LeadingKeys to enforce the intended boundary. Do not attach a second broad role, wildcard table policy, or alternate credentials that bypass this condition. Review role trust, permissions boundaries, resource policies and organization SCPs.
 
+## Real AWS IAM acceptance script
+
+Run the real IAM suite in a dedicated disposable AWS account. Configure two separate AWS CLI profiles that assume tenant A and tenant B roles. Each role must have only the generated policy for its own tenant partition key and the exact table ARN. The test table must use `tenant_id` as its partition key; set `DYNAMODB_SORT_KEY` if it also has a sort key.
+
+```bash
+export AWS_REGION='us-east-1'
+export AWS_PROFILE_TENANT_A='proxima-tenant-a'
+export AWS_PROFILE_TENANT_B='proxima-tenant-b'
+export DYNAMODB_TEST_TABLE='proxima-tenant-acceptance'
+export DYNAMODB_PARTITION_KEY='tenant_id'
+# Optional for a composite key:
+# export DYNAMODB_SORT_KEY='record_id'
+bash scripts/test-dynamodb-leading-keys-aws.sh
+```
+
+The script verifies distinct IAM principals, own-partition writes/reads, cross-tenant GetItem and Query denial, and Scan denial. It cleans up only its uniquely named canary records. Use a disposable table and dedicated test roles; never point it at production data.
+
 ## Verification boundary
 
 Rust tests validate exact resource scoping, tenant-key binding, malformed and wildcard ARN rejection, and omission of broad actions. DynamoDB Local does not enforce AWS IAM identity policies; local CRUD is not proof of tenant isolation. Security acceptance must run in a dedicated AWS test account with two real tenant roles and verify own-partition success plus cross-tenant GetItem, Query, PutItem and Scan denial. CI must not report this AWS authorization test as passed unless it actually ran with isolated AWS credentials.
