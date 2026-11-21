@@ -69,7 +69,10 @@ pub fn prepare_mysql(
         .filter_map(|b| b.get("tenant_id").and_then(Value::as_str)).collect();
     let user_tenants: std::collections::HashSet<&str> = users.iter()
         .filter_map(|u| u.get("tenant_id").and_then(Value::as_str)).collect();
-    if binding_tenants.len() != bindings.len() || user_tenants != binding_tenants {
+    if binding_tenants.len() != bindings.len()
+        || user_tenants.len() != users.len()
+        || user_tenants != binding_tenants
+    {
         return Err(io::Error::new(io::ErrorKind::PermissionDenied,
             "MySQL identity registry must map exactly one upstream identity to every assigned tenant"));
     }
