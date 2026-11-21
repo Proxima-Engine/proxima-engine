@@ -282,6 +282,7 @@ pub fn provisioning_result_payload(plan: &ProvisioningPlan) -> Result<Value, Pro
     Ok(json!({
         "schema_version": 1,
         "provider_key": plan.provider.key(),
+        "isolation_verified": true,
         "bindings": bindings
     }))
 }
