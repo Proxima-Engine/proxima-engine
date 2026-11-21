@@ -126,3 +126,65 @@ impl PreparedGateway {
         Ok(())
     }
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn fixture(temp: &Path) -> (Value, Value, PathBuf) {
+        let executable_dir = temp.join("bin");
+        fs::create_dir_all(&executable_dir).unwrap();
+        fs::write(
+            executable_dir.join(format!("proxima-mysql-gateway{}", std::env::consts::EXE_SUFFIX)),
+            b"test executable placeholder",
+        ).unwrap();
+        let assignment = json!({
+            "assignment_id":"assignment-001",
+            "provider_key":"mysql",
+            "tenant_bindings":[{"tenant_id":"tenant-a"}]
+        });
+        let credentials = json!({
+            "gateway_runtime_config":{
+                "schema_version":1,
+                "provider_key":"mysql",
+                "users":[{
+                    "username":"tenant-a-client",
+                    "tenant_id":"tenant-a",
+                    "database":"tenant_a",
+                    "upstream_url":"mysql://upstream_user:upstream_pass@127.0.0.1:3306/tenant_a",
+                    "password_sha1":"0123456789012345678901234567890123456789",
+                    "auth_plugin":"mysql_native_password"
+                }]
+            }
+        });
+        (assignment, credentials, executable_dir)
+    }
+
+    #[test]
+    fn rejects_registry_that_does_not_cover_every_binding() {
+        let temp = tempfile::tempdir().unwrap();
+        let (mut assignment, credentials, executable_dir) = fixture(temp.path());
+        assignment["tenant_bindings"] = json!([
+            {"tenant_id":"tenant-a"},
+            {"tenant_id":"tenant-b"}
+        ]);
+        let result = prepare_mysql(&assignment, &credentials, &executable_dir, temp.path());
+        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::PermissionDenied);
+    }
+
+    #[test]
+    fn builds_loopback_gateway_spec_and_private_registry() {
+        let temp = tempfile::tempdir().unwrap();
+        let (assignment, credentials, executable_dir) = fixture(temp.path());
+        let prepared = prepare_mysql(&assignment, &credentials, &executable_dir, temp.path()).unwrap();
+        assert_eq!(prepared.spec.readiness_addr, "127.0.0.1:3307".parse().unwrap());
+        assert_eq!(prepared.spec.assignment_id, "assignment-001");
+        let registry = prepared.spec.env.iter()
+            .find(|(key, _)| key == "PROXIMA_MYSQL_IDENTITY_REGISTRY")
+            .map(|(_, value)| value).unwrap();
+        let value: Value = serde_json::from_slice(&fs::read(registry).unwrap()).unwrap();
+        assert_eq!(value["users"][0]["tenant_id"], "tenant-a");
+    }
+}
