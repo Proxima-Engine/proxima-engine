@@ -594,10 +594,13 @@ pub async fn apply_tenant_revocation(
             revoked_login.host(target.host).port(target.port)
                 .user(username).password(upstream_password.expose()?)
                 .dbname(target.database_name).ssl_mode(SslMode::VerifyFull);
-            if let Ok((client, connection)) = revoked_login.connect(tls).await {
-                drop(client);
-                tokio::spawn(async move { let _ = connection.await; });
-                return Err(ProvisioningError::ProviderIsolationFailed);
+            match revoked_login.connect(tls).await {
+                Ok((_client, connection)) => {
+                    drop(connection);
+                    return Err(ProvisioningError::ProviderIsolationFailed);
+                }
+                Err(error) if error.code().is_some() => {}
+                Err(_) => return Err(ProvisioningError::ProviderConnectionFailed),
             }
         }
         CoreProvider::MySql | CoreProvider::MariaDb => {
@@ -609,16 +612,20 @@ pub async fn apply_tenant_revocation(
             let mut admin = mysql_async::Conn::new(opts).await
                 .map_err(|_| ProvisioningError::ProviderConnectionFailed)?;
             for statement in &statements {
-                admin.query_drop(statement.sql()).await
+                admin.query_drop(statement.sql()?).await
                     .map_err(|_| ProvisioningError::ProviderStatementFailed)?;
             }
             let opts = mysql_options(
                 target.host,target.port,username,upstream_password.expose()?,tenant_database,
             );
-            if let Ok(mut connection) = mysql_async::Conn::new(opts).await {
-                let _ = connection.query_drop("SELECT 1").await;
-                drop(connection);
-                return Err(ProvisioningError::ProviderIsolationFailed);
+            match mysql_async::Conn::new(opts).await {
+                Ok(mut connection) => {
+                    let _ = connection.query_drop("SELECT 1").await;
+                    drop(connection);
+                    return Err(ProvisioningError::ProviderIsolationFailed);
+                }
+                Err(mysql_async::Error::Server(_)) => {}
+                Err(_) => return Err(ProvisioningError::ProviderConnectionFailed),
             }
         }
     }
