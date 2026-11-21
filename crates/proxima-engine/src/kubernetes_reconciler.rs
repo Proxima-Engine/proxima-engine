@@ -111,11 +111,22 @@ fn secret_name(kind: &str) -> Result<String, Box<dyn std::error::Error + Send + 
     Ok(value)
 }
 
-fn labels(name: &str, assignment: &str) -> Value {
-    json!({LABEL:MANAGED_BY,"proxima.io/assignment":name,"proxima.io/assignment-id":assignment})
+fn labels_for_node(name: &str, assignment: &str, node_id: &str) -> Value {
+    json!({LABEL:MANAGED_BY,"proxima.io/assignment":name,"proxima.io/assignment-id":assignment,"proxima.io/node-id":node_id})
 }
 
-fn resources(assignment: &Value, namespace: &str) -> Result<Option<(Value, Value, String)>, Box<dyn std::error::Error + Send + Sync>> {
+fn valid_node_label(value: &str) -> bool {
+    !value.is_empty() && value.len() <= 63
+        && value.as_bytes().first().is_some_and(|b| b.is_ascii_alphanumeric())
+        && value.as_bytes().last().is_some_and(|b| b.is_ascii_alphanumeric())
+        && value.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
+}
+
+fn ownership_selector(node_id: &str) -> String {
+    format!("{}={},proxima.io/node-id={}", LABEL, MANAGED_BY, node_id)
+}
+
+fn resources(assignment: &Value, namespace: &str, node_id: &str) -> Result<Option<(Value, Value, String)>, Box<dyn std::error::Error + Send + Sync>> {
     let Some((kind, binary, port)) = gateway(assignment) else { return Ok(None); };
     let id = assignment.get("assignment_id").and_then(Value::as_str).ok_or("assignment_id missing")?;
     let name = dns_name(id).ok_or("invalid assignment name")?;
@@ -144,7 +155,7 @@ fn resources(assignment: &Value, namespace: &str) -> Result<Option<(Value, Value
             json!({"name":(format!("PROXIMA_{}_UPSTREAM_TLS_CA_FILE", kind.to_ascii_uppercase())),"value":"/var/run/proxima/ca.crt"}),
         ]);
     }
-    let common = labels(&name, id);
+    let common = labels_for_node(&name, id, node_id);
     let deployment = json!({
         "apiVersion":"apps/v1","kind":"Deployment",
         "metadata":{"name":name,"namespace":namespace,"labels":common.clone()},
@@ -176,6 +187,10 @@ fn desired_assignments(document: &Value) -> Result<&Vec<Value>, Box<dyn std::err
             return Err(format!("Engine desired state is missing {field}").into());
         }
     }
+    let node_id = document.get("node_id").and_then(Value::as_str).ok_or("Engine desired state is missing node_id")?;
+    if !valid_node_label(node_id) {
+        return Err("Engine desired state node_id is not a valid Kubernetes label value".into());
+    }
     let assignments = document.get("assignments").and_then(Value::as_array)
         .ok_or("desired state has no assignments array")?;
     let mut ids = HashSet::new();
@@ -196,10 +211,11 @@ pub async fn reconcile_once(kube: &Kube, config_path: &PathBuf) -> Result<usize,
     let raw = fs::read(config_path)?;
     let desired: Value = serde_json::from_slice(&raw)?;
     let assignments = desired_assignments(&desired)?;
+    let node_id = desired.get("node_id").and_then(Value::as_str).ok_or("Engine desired state is missing node_id")?;
     let mut desired_names = HashSet::new();
     let mut applied = 0usize;
     for assignment in assignments {
-        if let Some((deployment, service, name)) = resources(assignment, &kube.namespace)? {
+        if let Some((deployment, service, name)) = resources(assignment, &kube.namespace, node_id)? {
             if !desired_names.insert(name.clone()) { return Err("duplicate gateway assignment resource name".into()); }
             kube.apply("deployments", &name, deployment).await?;
             kube.apply("services", &name, service).await?;
@@ -209,7 +225,7 @@ pub async fn reconcile_once(kube: &Kube, config_path: &PathBuf) -> Result<usize,
     // Remove only resources carrying our explicit ownership label. Never touch
     // customer-managed workloads or any Secret.
     for resource in ["deployments", "services"] {
-        let path = format!("{}?labelSelector={}={}", kube.path(resource, None), LABEL, MANAGED_BY);
+        let path = format!("{}?labelSelector={}", kube.path(resource, None), ownership_selector(node_id));
         let list = kube.request(Method::GET, &path, None, false).await?;
         if let Some(items) = list.get("items").and_then(Value::as_array) {
             for item in items {
@@ -275,9 +291,21 @@ mod tests {
         let unsupported = json!({"schema_version":1,"node_id":"node-a","organization_id":"org-a","assignments":[
             {"assignment_id":"bad","gateway_runtime":"unknown-gateway"}
         ]});
+        let invalid_node_id = json!({"schema_version":1,"node_id":"node/unsafe","organization_id":"org-a","assignments":[]});
         assert!(desired_assignments(&wrong_schema).is_err());
         assert!(desired_assignments(&duplicate).is_err());
         assert!(desired_assignments(&unsupported).is_err());
+        assert!(desired_assignments(&invalid_node_id).is_err());
+    }
+
+    #[test]
+    fn gateway_resources_and_cleanup_are_scoped_to_the_owning_node() {
+        let labels = labels_for_node("px-assignment", "assignment-id", "node-a");
+        assert_eq!(labels.get("proxima.io/node-id").and_then(Value::as_str), Some("node-a"));
+        assert_eq!(ownership_selector("node-a"), "app.kubernetes.io/managed-by=proxima-engine,proxima.io/node-id=node-a");
+        assert_ne!(ownership_selector("node-a"), ownership_selector("node-b"));
+        assert!(valid_node_label("550e8400-e29b-41d4-a716-446655440000"));
+        assert!(!valid_node_label("node/unsafe"));
     }
 
     #[test]
@@ -294,3 +322,4 @@ mod tests {
         assert!(value.as_ref().is_some_and(|v|v.len()<=53 && v.starts_with("px-")));
     }
 }
+
