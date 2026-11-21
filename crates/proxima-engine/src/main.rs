@@ -622,6 +622,40 @@ fn validate_assignment_runtime_cardinality(records: &[serde_json::Value]) -> Res
     Ok(())
 }
 
+fn encrypt_provisioning_result_envelope(
+    envelope_key: &[u8],
+    node_id: &str,
+    assignment_id: &str,
+    target_id: &str,
+    config_revision: i64,
+    credential_revision: i64,
+    result: &serde_json::Value,
+) -> io::Result<serde_json::Value> {
+    use ring::rand::SecureRandom;
+    let key = ring::aead::LessSafeKey::new(
+        ring::aead::UnboundKey::new(&ring::aead::AES_256_GCM, envelope_key)
+            .map_err(|_| io::Error::other("invalid provisioning result encryption key"))?
+    );
+    let mut nonce = [0u8; 12];
+    ring::rand::SystemRandom::new().fill(&mut nonce)
+        .map_err(|_| io::Error::other("provisioning result nonce generation failed"))?;
+    let aad = format!(
+        "proxima-node-provisioning-result-v1\n{node_id}\n{assignment_id}\n{target_id}\n{config_revision}\n{credential_revision}"
+    );
+    let mut ciphertext = serde_json::to_vec(result)?;
+    key.seal_in_place_append_tag(
+        ring::aead::Nonce::assume_unique_for_key(nonce),
+        ring::aead::Aad::from(aad.as_bytes()),
+        &mut ciphertext,
+    ).map_err(|_| io::Error::other("provisioning result encryption failed"))?;
+    Ok(serde_json::json!({
+        "algorithm": "AES-256-GCM",
+        "ciphertext": hex::encode(ciphertext),
+        "nonce": hex::encode(nonce),
+        "aad": aad
+    }))
+}
+
 async fn pull_and_stage_database_config_once(coordinator: &RuntimeCoordinator) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     use std::{env, fs, io::Write, path::PathBuf, time::{SystemTime, UNIX_EPOCH}};
     let node_id = env::var("PROXIMA_NODE_ID")?;
@@ -827,25 +861,71 @@ async fn pull_and_stage_database_config_once(coordinator: &RuntimeCoordinator) -
         );
     }
 
-    for record in records {
-        let assignment_id=record.get("assignment_id").and_then(serde_json::Value::as_str).ok_or("assignment ID missing")?;
-        let target_id=record.get("database_target_id").and_then(serde_json::Value::as_str).ok_or("target ID missing")?;
-        let revision=record.get("config_revision").and_then(serde_json::Value::as_i64).ok_or("config revision missing")?;
-        let ack_timestamp=SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
-        let ack_nonce=uuid::Uuid::new_v4().to_string();
-        let ack_canonical=format!(
-            "proxima-node-config-ack-v1\n{}\n{}\n{}\n{}\n{}\n{}\n{}\nstaged\nunhealthy\n",
-            node_id,organization_id,ack_nonce,assignment_id,target_id,revision,ack_timestamp
+    for (record, credentials) in &decrypted_assignments {
+        let assignment_id = record.get("assignment_id").and_then(serde_json::Value::as_str)
+            .ok_or("assignment ID missing")?;
+        let target_id = record.get("database_target_id").and_then(serde_json::Value::as_str)
+            .ok_or("target ID missing")?;
+        let revision = record.get("config_revision").and_then(serde_json::Value::as_i64)
+            .ok_or("config revision missing")?;
+        let credential_revision = record.get("credential_revision").and_then(serde_json::Value::as_i64)
+            .ok_or("credential revision missing")?;
+        let state_path = state_dir.join(format!("{assignment_id}.json"));
+        let mut state = runtime_reconciliation::load(&state_path)?;
+        let outcome = cloud_provisioning::reconcile_core_assignment(
+            record, credentials, &state_path, &mut state, coordinator,
+        ).await;
+
+        let mut status = outcome.status;
+        let mut runtime_health_passed = outcome.runtime_health_passed;
+        let mut error_code = outcome.error_code;
+        let provisioning_result_envelope = if let Some(result) = outcome.provisioning_result.as_ref() {
+            match encrypt_provisioning_result_envelope(
+                envelope_key.as_ref(), &node_id, assignment_id, target_id,
+                revision, credential_revision, result,
+            ) {
+                Ok(value) => Some(value),
+                Err(_) => {
+                    status = "failed";
+                    runtime_health_passed = false;
+                    error_code = Some("PROVISIONING_RESULT_ENCRYPTION_FAILED");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        let ack_timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
+        let ack_nonce = uuid::Uuid::new_v4().to_string();
+        let envelope_bytes = provisioning_result_envelope.as_ref()
+            .map(serde_json::Value::to_string).unwrap_or_default();
+        let provisioning_result_hash = hex::encode(Sha256::digest(envelope_bytes.as_bytes()));
+        let ack_canonical = format!(
+            "proxima-node-config-ack-v2\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
+            node_id, organization_id, ack_nonce, assignment_id, target_id,
+            revision, credential_revision, ack_timestamp, status,
+            if runtime_health_passed { "healthy" } else { "unhealthy" },
+            error_code.unwrap_or(""), provisioning_result_hash
         );
-        let mut ack_mac=hmac::Hmac::<Sha256>::new_from_slice(&signing_key)?;
+        let mut ack_mac = hmac::Hmac::<Sha256>::new_from_slice(&signing_key)?;
         ack_mac.update(ack_canonical.as_bytes());
-        let ack_signature=hex::encode(ack_mac.finalize().into_bytes());
+        let ack_signature = hex::encode(ack_mac.finalize().into_bytes());
         client.post(&ack_url).json(&serde_json::json!({
-            "node_id":node_id,"nonce":ack_nonce,"assignment_id":assignment_id,
-            "database_target_id":target_id,"config_revision":revision,
-            "timestamp":ack_timestamp,"status":"staged","runtime_health_passed":false,
-            "error_code":null,"signature":ack_signature
+            "node_id": node_id,
+            "nonce": ack_nonce,
+            "assignment_id": assignment_id,
+            "database_target_id": target_id,
+            "config_revision": revision,
+            "credential_revision": credential_revision,
+            "timestamp": ack_timestamp,
+            "status": status,
+            "runtime_health_passed": runtime_health_passed,
+            "error_code": error_code,
+            "provisioning_result_envelope": provisioning_result_envelope,
+            "signature": ack_signature
         })).send().await?.error_for_status()?;
+        info!(assignment_id, target_id, revision, status, "database assignment reconciliation completed");
     }
     info!(assignments=records.len(),path=%output_path.display(),"authenticated database configuration staged on node");
     Ok(())
