@@ -29,6 +29,11 @@ impl RuntimeCoordinator {
         }
         let revision = state.desired_revision;
         let credential_revision = state.credential_revision;
+
+        // Reconciliation is idempotent across lost acknowledgements and worker
+        // retries: replace any prior child for this assignment before applying
+        // the current desired revision.
+        self.supervisor.stop(&state.assignment_id).await?;
         state.begin_apply(revision, credential_revision)?;
         runtime_reconciliation::persist(state_path, state)?;
 
