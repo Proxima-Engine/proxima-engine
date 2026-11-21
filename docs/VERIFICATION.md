@@ -1,6 +1,6 @@
 # Verification and test guide
 
-Use this guide to run the Engine test suite, exercise tenant isolation across PostgreSQL, MySQL, MariaDB, CockroachDB, MongoDB, Redis, SQLite, Oracle and SQL Server's native database-per-tenant profile, verify the Docker image build and PgBouncer transaction-pool separation, inspect runtime endpoints, and validate signed local evidence. Record the exact source commit and toolchain with each result.
+Use this guide to run the Engine test suite, exercise tenant isolation across PostgreSQL, MySQL, MariaDB, CockroachDB, MongoDB, Redis, SQLite, Oracle, SQL Server's native database-per-tenant profile, Cassandra's keyspace-per-tenant profile, DynamoDB IAM policy helpers and Elasticsearch/OpenSearch native-role policy helpers, verify the Docker image build and PgBouncer transaction-pool separation, inspect runtime endpoints, and validate signed local evidence. Record the exact source commit and toolchain with each result.
 
 ## Verification workflow
 
@@ -146,9 +146,13 @@ The maximum lifetime is 900 seconds (15 minutes). The Engine records used nonces
 
 ## 8. CI workflow
 
-The [Rust CI workflow](https://github.com/Proxima-Engine/proxima-engine/actions/workflows/ci.yml) runs on pushes to `main` and pull requests targeting `main`. It provisions PostgreSQL 17, MySQL 8.0, MariaDB 11.4 and MongoDB 8; runs the Rust and CLI test suites; builds the release engine, MySQL gateway and MongoDB gateway; and executes real two-tenant acceptance tests for MySQL, MariaDB, PostgreSQL, CockroachDB 25.2 and MongoDB 8. It then builds the runtime Docker image and verifies PgBouncer tenant-pool isolation. SQLite is tested as an embedded file-per-tenant store; Oracle is tested as a schema-per-tenant profile against Oracle Free 23. The MongoDB and Redis protocol handlers remain restricted profiles, and CockroachDB uses its own native RLS compatibility profile.
+The [Rust CI workflow](https://github.com/Proxima-Engine/proxima-engine/actions/workflows/ci.yml) runs on pushes to `main` and pull requests targeting `main`. It provisions PostgreSQL 17, MySQL 8.0, MariaDB 11.4 and MongoDB 8; runs Rust and CLI suites; builds the release engine and released gateway binaries; and executes real two-tenant acceptance for MySQL, MariaDB, PostgreSQL, CockroachDB 25.2, MongoDB 8, and the Cassandra keyspace/role profile when its service job is enabled. It also exercises SQLite's embedded file boundary and Oracle's schema-per-tenant profile, plus the restricted Redis gateway and SQL Server native profile in their dedicated CI jobs. DynamoDB's IAM `LeadingKeys` condition requires a real AWS-account test; DynamoDB Local is insufficient. Elasticsearch and OpenSearch require independent real-cluster acceptance for their respective security APIs and are not certified by helper unit tests. CI build/test success is not equivalent to all-twelve-provider production acceptance.
 
 A green workflow run is direct evidence that those configured checks passed for its commit. For deployment acceptance, also verify the target environment's TLS, database roles/RLS, network policy, persistence, and recovery procedures.
+
+## Native provider helper boundaries
+
+DynamoDB, Cassandra, Elasticsearch and OpenSearch helper modules do not by themselves provide a Cloud provisioning service or a universal wire gateway. DynamoDB policy output must be applied by a trusted AWS IAM provisioning identity and tested against real IAM. Cassandra CQL must be executed through a separate administrative session with per-tenant credentials stored and rotated securely. Elasticsearch and OpenSearch role descriptors must be applied through their distinct native security APIs, then bound to tenant-specific API keys/backend roles. These helpers are not a substitute for those lifecycle executors.
 
 ## Evidence record
 
@@ -202,3 +206,30 @@ Run the real Oracle Free 23 acceptance fixture with Docker available:
     ORACLE_PASSWORD='a-long-random-local-test-password' bash scripts/test-oracle-tenant-isolation-ci.sh
 
 The test creates two schema owners with separate credentials and bounded tablespace quotas, verifies each tenant's local CRUD, and confirms that cross-schema reads and DBA role activation are denied. It destroys the disposable Oracle container on exit. See [Oracle tenant isolation](ORACLE_TENANCY.md).
+
+
+## 12. Verify Elasticsearch native tenant roles
+
+Run the real-cluster acceptance script against a disposable HTTPS Elasticsearch cluster with the required DLS/FLS feature entitlement:
+
+    bash scripts/test-elasticsearch-tenant-isolation.sh
+
+It creates two tenant API keys with independent index namespaces, then checks tenant-local reads, shared-index DLS filtering, FLS redaction, cross-index denial and cluster-privilege denial. The script invalidates its API keys and removes test indices on exit. It requires curl and jq. OpenSearch is not covered by this script and must be tested independently against its Security plugin.
+
+
+## 13. Verify OpenSearch native Security roles
+
+Run the separate OpenSearch Security-plugin acceptance script against a disposable HTTPS cluster:
+
+    bash scripts/test-opensearch-tenant-isolation.sh
+
+It creates two internal users, backend-role mappings and native Security roles, then verifies tenant-local reads, shared-index DLS filtering, FLS redaction, cross-index denial and cluster-privilege denial. It removes temporary users, mappings, roles and indices on exit. It requires curl, jq and openssl. This is independent from Elasticsearch acceptance.
+
+
+## 14. Verify DynamoDB IAM LeadingKeys in AWS
+
+The AWS acceptance script requires two distinct least-privilege AWS CLI profiles, a dedicated test table with tenant partition key, and AWS CLI v2:
+
+    bash scripts/test-dynamodb-leading-keys-aws.sh
+
+It verifies own-partition reads/writes, cross-tenant GetItem and Query denial, and Scan denial against real AWS IAM. DynamoDB Local is not an acceptable substitute. Use a disposable AWS account/table and never run the script against production data.

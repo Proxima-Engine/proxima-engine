@@ -4,7 +4,7 @@
 
 <h1 align="center">Agata Proxima · Proxima Engine</h1>
 <p align="center"><strong>Multi-database tenant isolation, enforced at the database connection boundary.</strong></p>
-<p align="center">Proxima Engine is the open-source Rust data plane for multi-database tenant security. It supports PostgreSQL, CockroachDB 25.2+, MySQL, MariaDB, MongoDB 8, Redis RESP2, SQLite tenant-file isolation, Oracle schema-per-tenant isolation, and SQL Server's native database-per-tenant profile. Each database uses an isolation model appropriate to its architecture; these integrations are not presented as one interchangeable database protocol.</p>
+<p align="center">Proxima Engine is the open-source Rust data plane for multi-database tenant security. It supports PostgreSQL, CockroachDB 25.2+, MySQL, MariaDB, MongoDB 8, Redis RESP2, SQLite tenant-file isolation, Oracle schema-per-tenant isolation, SQL Server's native database-per-tenant profile, DynamoDB IAM `LeadingKeys` policies, Cassandra keyspace-per-tenant roles, and separate Elasticsearch/OpenSearch native-role policy helpers. Each database uses an isolation model appropriate to its architecture; these integrations are not presented as one interchangeable database protocol.</p>
 
 <p align="center">
   <a href="https://github.com/Proxima-Engine/proxima-engine/actions/workflows/ci.yml">Continuous integration</a> ·
@@ -57,10 +57,14 @@ The Engine provides:
 - **SQL Server native tenant profile (preview).** Uses a dedicated SQL Server database and least-privilege login per tenant so applications do not include tenant IDs in SQL. It is not a Proxima TDS listener or shared-database RLS implementation.
 - **SQLite tenant storage.** Uses a separate embedded SQLite database file per tenant, validated tenant identifiers, canonicalized storage paths, symlink rejection, owner-only Unix permissions, SQLite NOFOLLOW, WAL mode, and hardened connection pragmas. SQLite has no server-side roles; the trusted application process owns tenant-to-file resolution.
 - **Oracle schema tenancy.** Uses a dedicated Oracle schema owner per tenant, a bounded tablespace quota, narrowly scoped object-creation privileges, and no DBA or cross-schema ANY grants. Applications connect with the tenant-specific Oracle identity.
+- **DynamoDB tenant authorization.** Generates tenant-specific AWS IAM identity policies scoped to an exact table ARN and authenticated tenant partition key through `dynamodb:LeadingKeys`. Scan, PartiQL, transactions and table administration are not granted. AWS IAM enforcement requires a real AWS-account acceptance test; DynamoDB Local cannot prove IAM isolation.
+- **Cassandra tenant isolation.** Provides a keyspace-per-tenant provisioning profile with a dedicated login role and SELECT/MODIFY-only grants. It relies on Cassandra-native authentication and authorization; it is not a CQL wire-protocol proxy.
+- **Elasticsearch tenant policy helper (early profile).** Builds a tenant-scoped Elasticsearch role descriptor with an index namespace, DLS query and FLS allowlist. It does not provision clusters or API keys; OpenSearch requires a separate adapter and acceptance suite.
+- **Elasticsearch tenant policy helper (early profile).** Builds a tenant-scoped Elasticsearch role descriptor with index namespace, DLS query and FLS allowlist. It does not provision clusters or API keys; OpenSearch requires a separate adapter and acceptance suite.
 - **Protocol and connection controls.** Applies protocol-specific startup handling, connection limits, upstream timeouts and configured TLS requirements.
 - **PostgreSQL security operations.** Includes the peer-scoped violation breaker, short-lived break-glass tokens with replay protection and the local signed attestation ledger.
 - **PostgreSQL operational visibility.** Exposes the Engine's local health/status routes and Prometheus metrics.
-- **Developer tooling.** Includes a Python local-development CLI, local identity bootstrap, signed PostgreSQL tenant-token generation, PostgreSQL driver examples, separate PostgreSQL, MySQL, MariaDB, CockroachDB, MongoDB, SQLite and Oracle guides, customer installers and database-specific integration tests.
+- **Developer tooling.** Includes a Python local-development CLI, local identity bootstrap, signed PostgreSQL tenant-token generation, PostgreSQL driver examples, separate PostgreSQL, MySQL, MariaDB, CockroachDB, MongoDB, Redis, SQL Server, SQLite, Oracle, DynamoDB, Cassandra, and Elasticsearch/OpenSearch guides, customer installers and database-specific integration tests.
 
 ### Agata Proxima Cloud — hosted management product
 
@@ -87,7 +91,7 @@ Proxima Engine works alongside existing database deployments and drivers. Postgr
 
 ## Database guides — separate setup for each engine
 
-Each database has its own implementation guide, setup sequence, configuration, compatibility notes and verification instructions. PostgreSQL is the reference integration; CockroachDB reuses its PostgreSQL wire protocol with a distinct native RLS profile. MySQL and MariaDB have separate guides and acceptance suites. MongoDB has a restricted gateway profile with explicitly documented feature limits.
+Each database has its own implementation guide, setup sequence, configuration, compatibility notes and verification instructions. PostgreSQL is the reference integration; CockroachDB reuses its PostgreSQL wire protocol with a distinct native RLS profile. MySQL and MariaDB have separate guides and acceptance suites. MongoDB has a restricted gateway profile with explicitly documented feature limits. Redis, SQL Server, SQLite, Oracle, DynamoDB, Cassandra and Elasticsearch/OpenSearch use provider-native security boundaries where appropriate; catalog and helper code do not imply that all are released gateways or fully provisioned Cloud integrations.
 
 | Database | Start here | Deep-dive documentation |
 |---|---|---|
@@ -100,6 +104,9 @@ Each database has its own implementation guide, setup sequence, configuration, c
 | **SQL Server 2022 (native profile preview)** | [Native tenant isolation](docs/SQLSERVER_NATIVE_TENANCY.md) | [Two-tenant provisioning fixture](scripts/sqlserver-provision-two-tenants.sql) · [Real SQL Server acceptance script](scripts/test-sqlserver-tenant-isolation-ci.sh) · No Proxima TDS proxy |
 | **SQLite** | [Tenant isolation](docs/SQLITE_TENANCY.md) | Embedded database-file-per-tenant storage with path validation and owner-only permissions |
 | **Oracle Database** | [Tenant isolation](docs/ORACLE_TENANCY.md) | Schema-per-tenant with dedicated Oracle users, bounded quota and least-privilege grants |
+| **DynamoDB** | [Tenant isolation](docs/DYNAMODB_TENANCY.md) | AWS-native IAM policy using exact table ARN and `dynamodb:LeadingKeys`; real AWS IAM acceptance required |
+| **Apache Cassandra 5** | [Tenant isolation](docs/CASSANDRA_TENANCY.md) | Native keyspace-per-tenant authentication and authorization; not a CQL proxy |
+| **Elasticsearch / OpenSearch** | [Tenant isolation](docs/ELASTICSEARCH_TENANCY.md) | Separate native role descriptor helpers and independent real-cluster acceptance scripts; DLS/FLS are distribution/version/license-dependent; not Proxima wire gateways |
 
 ### What is a database gateway?
 

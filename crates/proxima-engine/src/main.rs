@@ -16,6 +16,7 @@ use proxima_engine::{
     session::{establish, BoxedPgStream},
     tenant::TenantTokenVerifier,
     tls::{accept_client_tls, client_acceptor, connect_upstream_tls, upstream_connector},
+    runtime_reconciliation::{self, RuntimeRecord},
 };
 use sha2::{Digest, Sha256};
 use std::time::Instant;
@@ -560,6 +561,65 @@ async fn bootstrap_node_identity() -> Result<(), Box<dyn std::error::Error + Sen
     Ok(())
 }
 
+fn validate_tenant_bindings(record: &serde_json::Value) -> Result<(), &'static str> {
+    let bindings = record.get("tenant_bindings")
+        .and_then(serde_json::Value::as_array)
+        .ok_or("tenant database bindings are missing or invalid")?;
+    if bindings.len() > 10_000 {
+        return Err("tenant database binding count exceeds the supported limit");
+    }
+    let mut tenant_ids = std::collections::HashSet::new();
+    let mut namespaces = std::collections::HashSet::new();
+    for binding in bindings {
+        let tenant_id = binding.get("tenant_id").and_then(serde_json::Value::as_str)
+            .filter(|value| !value.is_empty()).ok_or("tenant binding has no tenant ID")?;
+        let namespace = binding.get("namespace").and_then(serde_json::Value::as_str)
+            .filter(|value| !value.is_empty()).ok_or("tenant binding has no namespace")?;
+        let status = binding.get("status").and_then(serde_json::Value::as_str)
+            .ok_or("tenant binding has no lifecycle status")?;
+        if !matches!(status, "pending" | "provisioning" | "active") {
+            return Err("tenant binding lifecycle status is not deployable");
+        }
+        if tenant_id.len() > 128 || namespace.len() > 255
+            || !tenant_id.bytes().all(|byte| byte.is_ascii_graphic())
+            || !namespace.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'))
+            || namespace.contains("..")
+        {
+            return Err("tenant binding contains an invalid tenant ID or namespace");
+        }
+        if !tenant_ids.insert(tenant_id) || !namespaces.insert(namespace) {
+            return Err("tenant bindings contain duplicate tenant IDs or namespaces");
+        }
+    }
+    Ok(())
+}
+
+/// The Engine's native PostgreSQL listener has one upstream, but gateway
+/// assignments are independent Kubernetes workloads and therefore each gets
+/// its own process. Do not impose the native listener's cardinality on gateways.
+fn validate_assignment_runtime_cardinality(records: &[serde_json::Value]) -> Result<(), &'static str> {
+    let mut native_engine_assignments = 0usize;
+    let mut assignment_ids = std::collections::HashSet::new();
+    for record in records {
+        let id = record.get("assignment_id").and_then(serde_json::Value::as_str)
+            .filter(|value| !value.trim().is_empty()).ok_or("assignment ID missing")?;
+        if !assignment_ids.insert(id) {
+            return Err("configuration bundle contains duplicate assignment IDs");
+        }
+        let runtime = record.get("gateway_runtime").and_then(serde_json::Value::as_str)
+            .ok_or("gateway runtime is missing")?;
+        if runtime == "proxima-engine" {
+            native_engine_assignments += 1;
+        } else if !matches!(runtime, "proxima-mysql-gateway" | "proxima-mongodb-gateway" | "proxima-redis-gateway") {
+            return Err("assigned gateway runtime is not supported");
+        }
+    }
+    if native_engine_assignments > 1 {
+        return Err("this Engine node supports one native proxima-engine upstream assignment");
+    }
+    Ok(())
+}
+
 async fn pull_and_stage_database_config_once() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     use std::{env, fs, io::Write, path::PathBuf, time::{SystemTime, UNIX_EPOCH}};
     let node_id = env::var("PROXIMA_NODE_ID")?;
@@ -617,12 +677,12 @@ async fn pull_and_stage_database_config_once() -> Result<(), Box<dyn std::error:
     let mut staged = Vec::new();
     let records = bundle.get("assignments").and_then(serde_json::Value::as_array)
         .ok_or("configuration bundle assignments must be an array")?;
-    if records.len() > 1 {
-        return Err("this Engine node supports one active upstream target per gateway process".into());
-    }
+    validate_assignment_runtime_cardinality(records)?;
     let executable = env::current_exe()?;
     let executable_dir = executable.parent().ok_or("Engine executable directory is unavailable")?;
     for record in records {
+        validate_tenant_bindings(record)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
         if record.get("tls_mode").and_then(serde_json::Value::as_str) != Some("verify-full") {
             return Err("assigned database target does not require full upstream TLS verification".into());
         }
@@ -682,8 +742,12 @@ async fn pull_and_stage_database_config_once() -> Result<(), Box<dyn std::error:
             return Err("database target endpoint exceeds supported limits".into());
         }
         let mut item = record.clone();
+        // The shared desired-state file is consumed by the Kubernetes
+        // controller, so persist routing metadata only. Never place decrypted
+        // database usernames/passwords on the controller-readable PVC; the
+        // authenticated credential envelope is validated above and then dropped.
         item.as_object_mut().ok_or("assignment entry must be an object")?.remove("credential_envelope");
-        item.as_object_mut().unwrap().insert("credentials".into(), credentials);
+        item.as_object_mut().unwrap().remove("credentials");
         staged.push(item);
     }
 
@@ -725,6 +789,40 @@ async fn pull_and_stage_database_config_once() -> Result<(), Box<dyn std::error:
         fs::set_permissions(&output_path,fs::Permissions::from_mode(0o600))?;
     }
 
+    // Persist each assignment independently. A node may receive multiple
+    // target assignments; one shared state file must never silently track only
+    // the first assignment in the bundle.
+    let state_dir = env::var_os("PROXIMA_NODE_RUNTIME_STATE_DIR")
+        .map(PathBuf::from)
+        .or_else(|| output_path.parent().map(|parent| parent.join("runtime-state")))
+        .unwrap_or_else(|| PathBuf::from("data/runtime-state"));
+    fs::create_dir_all(&state_dir)?;
+    for record in &staged {
+        let assignment_id = record.get("assignment_id").and_then(serde_json::Value::as_str)
+            .ok_or("assignment ID missing")?;
+        let target_id = record.get("database_target_id").and_then(serde_json::Value::as_str)
+            .ok_or("target ID missing")?;
+        let provider = record.get("provider_key").and_then(serde_json::Value::as_str)
+            .ok_or("provider key missing")?;
+        let revision = record.get("config_revision").and_then(serde_json::Value::as_u64)
+            .ok_or("configuration revision missing")?;
+        let credential_revision = record.get("credential_revision").and_then(serde_json::Value::as_u64)
+            .ok_or("credential revision missing")?;
+        let state_path = state_dir.join(format!("{assignment_id}.json"));
+        let state = if state_path.exists() {
+            let mut current = runtime_reconciliation::load(&state_path)?;
+            current.update_desired(assignment_id, target_id, provider, revision, credential_revision)?;
+            current
+        } else {
+            RuntimeRecord::staged(assignment_id.to_owned(), target_id.to_owned(), provider.to_owned(), revision, credential_revision)?
+        };
+        runtime_reconciliation::persist(&state_path, &state)?;
+        info!(
+            assignment_id, target_id, desired_revision = revision, phase = "staged",
+            "authenticated database desired state persisted; runtime activation remains separate"
+        );
+    }
+
     for record in records {
         let assignment_id=record.get("assignment_id").and_then(serde_json::Value::as_str).ok_or("assignment ID missing")?;
         let target_id=record.get("database_target_id").and_then(serde_json::Value::as_str).ok_or("target ID missing")?;
@@ -760,6 +858,43 @@ fn spawn_node_database_config_worker() {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod assignment_runtime_cardinality_tests {
+    use super::validate_assignment_runtime_cardinality;
+    use serde_json::json;
+
+    #[test]
+    fn accepts_multiple_independent_gateway_assignments() {
+        let records = vec![
+            json!({"assignment_id":"mysql-a","gateway_runtime":"proxima-mysql-gateway"}),
+            json!({"assignment_id":"mysql-b","gateway_runtime":"proxima-mysql-gateway"}),
+            json!({"assignment_id":"mongo-a","gateway_runtime":"proxima-mongodb-gateway"}),
+            json!({"assignment_id":"redis-a","gateway_runtime":"proxima-redis-gateway"}),
+        ];
+        assert!(validate_assignment_runtime_cardinality(&records).is_ok());
+    }
+
+    #[test]
+    fn keeps_native_engine_listener_single_upstream() {
+        let records = vec![
+            json!({"assignment_id":"pg-a","gateway_runtime":"proxima-engine"}),
+            json!({"assignment_id":"pg-b","gateway_runtime":"proxima-engine"}),
+        ];
+        assert!(validate_assignment_runtime_cardinality(&records).is_err());
+    }
+
+    #[test]
+    fn rejects_duplicate_assignment_ids_and_unknown_runtimes() {
+        let duplicate = vec![
+            json!({"assignment_id":"same","gateway_runtime":"proxima-mysql-gateway"}),
+            json!({"assignment_id":"same","gateway_runtime":"proxima-redis-gateway"}),
+        ];
+        let unknown = vec![json!({"assignment_id":"x","gateway_runtime":"made-up"})];
+        assert!(validate_assignment_runtime_cardinality(&duplicate).is_err());
+        assert!(validate_assignment_runtime_cardinality(&unknown).is_err());
+    }
 }
 
 #[tokio::main]
@@ -1592,6 +1727,46 @@ fn breaker_config_enabled() -> bool {
         mode.trim().to_ascii_lowercase().as_str(),
         "off" | "disabled" | "false" | "0"
     )
+}
+
+#[cfg(test)]
+mod tenant_database_binding_validation_tests {
+    use super::validate_tenant_bindings;
+
+    #[test]
+    fn accepts_distinct_tenant_namespaces() {
+        let record = serde_json::json!({"tenant_bindings":[
+            {"tenant_id":"tenant-a","namespace":"tenant_a","status":"active"},
+            {"tenant_id":"tenant-b","namespace":"tenant_b","status":"pending"}
+        ]});
+        assert!(validate_tenant_bindings(&record).is_ok());
+    }
+
+    #[test]
+    fn rejects_duplicate_tenant_ids_and_namespaces() {
+        let duplicate_tenant = serde_json::json!({"tenant_bindings":[
+            {"tenant_id":"tenant-a","namespace":"one","status":"active"},
+            {"tenant_id":"tenant-a","namespace":"two","status":"active"}
+        ]});
+        let duplicate_namespace = serde_json::json!({"tenant_bindings":[
+            {"tenant_id":"tenant-a","namespace":"shared","status":"active"},
+            {"tenant_id":"tenant-b","namespace":"shared","status":"active"}
+        ]});
+        assert!(validate_tenant_bindings(&duplicate_tenant).is_err());
+        assert!(validate_tenant_bindings(&duplicate_namespace).is_err());
+    }
+
+    #[test]
+    fn rejects_revoked_or_malformed_bindings() {
+        let revoked = serde_json::json!({"tenant_bindings":[
+            {"tenant_id":"tenant-a","namespace":"one","status":"revoked"}
+        ]});
+        let malformed = serde_json::json!({"tenant_bindings":[
+            {"tenant_id":"tenant-a","namespace":"../escape","status":"active"}
+        ]});
+        assert!(validate_tenant_bindings(&revoked).is_err());
+        assert!(validate_tenant_bindings(&malformed).is_err());
+    }
 }
 
 #[cfg(test)]

@@ -1,0 +1,73 @@
+{{- if .Values.controller.enabled }}
+{{- if or .Values.gateways.mysql.enabled .Values.gateways.mongodb.enabled .Values.gateways.redis.enabled }}{{- fail "disable static gateways.*.enabled workloads when the assignment controller is enabled" }}{{- end }}
+{{- if not .Values.controller.configVolume.existingClaim }}
+{{- fail "controller.enabled requires controller.configVolume.existingClaim shared with the Engine node" }}
+{{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "proxima-gateways.fullname" . }}-controller
+  labels:
+    {{- include "proxima-gateways.labels" . | nindent 4 }}
+    app.kubernetes.io/component: gateway-controller
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: gateway-controller
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: gateway-controller
+    spec:
+      serviceAccountName: {{ include "proxima-gateways.fullname" . }}-controller
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: reconciler
+          image: "{{ .Values.controller.gatewayImage.repository }}:{{ .Values.controller.gatewayImage.tag }}"
+          imagePullPolicy: IfNotPresent
+          command: ["/usr/local/bin/proxima-kubernetes-controller"]
+          env:
+            - name: PROXIMA_NODE_DATABASE_CONFIG_PATH
+              value: "{{ .Values.controller.configVolume.mountPath }}/database-targets.json"
+            - name: PROXIMA_KUBERNETES_RECONCILE_SECONDS
+              value: {{ .Values.controller.reconcileSeconds | quote }}
+            - name: PROXIMA_KUBERNETES_GATEWAY_IMAGE
+              value: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+            - name: PROXIMA_K8S_MYSQL_GATEWAY_SECRET
+              value: {{ .Values.controller.secrets.mysql | quote }}
+            - name: PROXIMA_K8S_MONGODB_GATEWAY_SECRET
+              value: {{ .Values.controller.secrets.mongodb | quote }}
+            - name: PROXIMA_K8S_REDIS_GATEWAY_SECRET
+              value: {{ .Values.controller.secrets.redis | quote }}
+          volumeMounts:
+            - name: engine-desired-state
+              mountPath: {{ .Values.controller.configVolume.mountPath }}
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+      volumes:
+        - name: engine-desired-state
+          persistentVolumeClaim:
+            claimName: {{ .Values.controller.configVolume.existingClaim | quote }}
+{{- end }}

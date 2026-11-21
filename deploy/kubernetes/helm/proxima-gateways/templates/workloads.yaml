@@ -1,0 +1,91 @@
+{{- $root := . -}}
+{{- range $name, $cfg := .Values.gateways }}
+{{- if $cfg.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "proxima-gateways.fullname" $root }}-{{ $name }}
+  labels:
+    {{- include "proxima-gateways.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: {{ $name }}-gateway
+spec:
+  replicas: {{ $cfg.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ $root.Release.Name }}
+      app.kubernetes.io/component: {{ $name }}-gateway
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/instance: {{ $root.Release.Name }}
+        app.kubernetes.io/component: {{ $name }}-gateway
+        app.kubernetes.io/name: {{ include "proxima-gateways.name" $root }}
+      annotations:
+        {{- toYaml $root.Values.podAnnotations | nindent 8 }}
+    spec:
+      serviceAccountName: {{ default (include "proxima-gateways.fullname" $root) $root.Values.serviceAccount.name }}
+      automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml $root.Values.securityContext | nindent 8 }}
+      {{- with $root.Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ $name }}-gateway
+          image: "{{ $root.Values.image.repository }}:{{ $root.Values.image.tag }}"
+          imagePullPolicy: {{ $root.Values.image.pullPolicy }}
+          command: ["/usr/local/bin/proxima-{{ $name }}-gateway"]
+          ports:
+            - name: client
+              containerPort: {{ $cfg.port }}
+              protocol: TCP
+          env:
+            {{- range $key, $value := $cfg.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+          volumeMounts:
+            - name: gateway-secrets
+              mountPath: /var/run/proxima
+              readOnly: true
+          startupProbe:
+            tcpSocket:
+              port: client
+            periodSeconds: 5
+            failureThreshold: 24
+          readinessProbe:
+            tcpSocket:
+              port: client
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            tcpSocket:
+              port: client
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            {{- toYaml $root.Values.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml $root.Values.containerSecurityContext | nindent 12 }}
+      volumes:
+        - name: gateway-secrets
+          secret:
+            secretName: {{ $cfg.secretName }}
+            defaultMode: 0440
+            optional: false
+      {{- with $root.Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $root.Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $root.Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}
+{{- end }}

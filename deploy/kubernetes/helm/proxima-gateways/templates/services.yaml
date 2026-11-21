@@ -1,0 +1,22 @@
+{{- range $name, $cfg := .Values.gateways }}
+{{- if $cfg.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "proxima-gateways.fullname" $ }}-{{ $name }}
+  labels:
+    {{- include "proxima-gateways.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $name }}-gateway
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/instance: {{ $.Release.Name }}
+    app.kubernetes.io/component: {{ $name }}-gateway
+  ports:
+    - name: client
+      port: {{ $cfg.port }}
+      targetPort: client
+      protocol: TCP
+{{- end }}
+{{- end }}

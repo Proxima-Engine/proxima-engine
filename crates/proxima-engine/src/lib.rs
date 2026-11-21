@@ -29,3 +29,13 @@ pub mod redis_gateway;
 
 pub mod sqlite_tenant;
 pub mod oracle_tenant;
+
+pub mod dynamodb_tenant;
+pub mod cassandra_tenant;
+
+pub mod elasticsearch_tenant;
+pub mod opensearch_tenant;
+
+pub mod runtime_reconciliation;
+
+pub mod kubernetes_reconciler;
