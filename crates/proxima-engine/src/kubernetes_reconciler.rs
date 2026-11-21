@@ -146,7 +146,7 @@ fn resources(assignment: &Value, namespace: &str) -> Result<Option<(Value, Value
     let common = labels(&name, id);
     let deployment = json!({
         "apiVersion":"apps/v1","kind":"Deployment",
-        "metadata":{"name":name,"namespace":namespace,"labels":common},
+        "metadata":{"name":name,"namespace":namespace,"labels":common.clone()},
         "spec":{"replicas":1,"selector":{"matchLabels":{"proxima.io/assignment":name}},
           "template":{"metadata":{"labels":common,"annotations":{"proxima.io/config-revision":revision.to_string(),"proxima.io/target-id":target}},
             "spec":{"automountServiceAccountToken":false,
