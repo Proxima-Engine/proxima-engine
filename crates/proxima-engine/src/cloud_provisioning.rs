@@ -7,7 +7,8 @@ use serde_json::{json, Value};
 use crate::{
     gateway_runtime,
     provider_provisioning::{
-        self, CoreProvider, ProvisioningRequest, ProvisioningTarget, Secret, TenantBinding,
+        self, CoreProvider, ProvisioningPlan, ProvisioningRequest, ProvisioningTarget, Secret,
+        TenantBinding,
     },
     runtime_coordinator::RuntimeCoordinator,
     runtime_reconciliation::{self, RuntimeRecord},
@@ -38,9 +39,6 @@ fn fail_state(path: &Path, state: &mut RuntimeRecord, code: &'static str) -> Ass
     AssignmentOutcome::failed(code)
 }
 
-/// Provision tenant identities on the customer database, verify every generated
-/// login, then activate the provider runtime. Credentials are returned only as a
-/// structured result for the caller to encrypt into the signed Cloud acknowledgement.
 pub async fn reconcile_core_assignment(
     record: &Value,
     credentials: &Value,
@@ -68,36 +66,7 @@ pub async fn reconcile_core_assignment(
         Some(value) => value,
         None => return fail_state(state_path, state, "TENANT_BINDINGS_INVALID"),
     };
-    if bindings_json.is_empty() {
-        return AssignmentOutcome::staged();
-    }
-    let existing_identities = credentials.get("tenant_identities").and_then(Value::as_array);
-    let mut bindings = Vec::with_capacity(bindings_json.len());
-    for binding in bindings_json {
-        let tenant_id = match binding.get("tenant_id").and_then(Value::as_str) {
-            Some(value) => value.to_owned(),
-            None => return fail_state(state_path, state, "TENANT_ID_MISSING"),
-        };
-        let namespace = match binding.get("namespace").and_then(Value::as_str) {
-            Some(value) => value.to_owned(),
-            None => return fail_state(state_path, state, "TENANT_NAMESPACE_MISSING"),
-        };
-        let binding_id = binding.get("binding_id").and_then(Value::as_str).map(str::to_owned);
-        let existing = existing_identities.and_then(|items| items.iter().find(|item| {
-            item.get("tenant_id").and_then(Value::as_str) == Some(tenant_id.as_str())
-                && item.get("binding_id").and_then(Value::as_str) == binding_id.as_deref()
-        }));
-        let existing_username = existing.and_then(|item| item.get("username").and_then(Value::as_str)).map(str::to_owned);
-        let existing_client_password = existing.and_then(|item| item.get("client_password").and_then(Value::as_str))
-            .map(Secret::new);
-        let existing_upstream_password = existing.and_then(|item| item.get("upstream_password").and_then(Value::as_str))
-            .map(Secret::new);
-        let rotate_credentials = binding.get("credential_rotation_requested").and_then(Value::as_bool).unwrap_or(false);
-        bindings.push(TenantBinding {
-            binding_id, tenant_id, namespace, existing_username,
-            existing_client_password, existing_upstream_password, rotate_credentials,
-        });
-    }
+    if bindings_json.is_empty() { return AssignmentOutcome::staged(); }
 
     let database_name = match record.get("database_name").and_then(Value::as_str) {
         Some(value) => value,
@@ -123,30 +92,100 @@ pub async fn reconcile_core_assignment(
         Some(value) => Secret::new(value),
         None => return fail_state(state_path, state, "PROVISIONING_PASSWORD_MISSING"),
     };
-
-    let plan = match provider_provisioning::build_provisioning_plan(ProvisioningRequest {
-        provider_key,
-        database_name,
-        bindings: &bindings,
-    }) {
-        Ok(value) => value,
-        Err(_) => return fail_state(state_path, state, "PROVIDER_PROVISIONING_PLAN_INVALID"),
-    };
-
     let ca_path = env::var_os("PROXIMA_DATABASE_TLS_CA_FILE")
         .or_else(|| env::var_os("PROXIMA_UPSTREAM_TLS_CA_FILE"))
         .map(PathBuf::from)
         .unwrap_or_default();
     let target = ProvisioningTarget {
-        host,
-        port,
-        database_name,
-        admin_username,
-        admin_password: &admin_password,
-        tls_ca_file: &ca_path,
+        host, port, database_name, admin_username,
+        admin_password: &admin_password, tls_ca_file: &ca_path,
     };
+
+    let existing_identities = credentials.get("tenant_identities").and_then(Value::as_array);
+    let mut active_bindings = Vec::new();
+    let mut revoked_bindings = Vec::new();
+    let mut revoked_binding_ids = Vec::new();
+
+    for binding in bindings_json {
+        let status = match binding.get("status").and_then(Value::as_str) {
+            Some(value) => value,
+            None => return fail_state(state_path, state, "TENANT_BINDING_STATUS_MISSING"),
+        };
+        let tenant_id = match binding.get("tenant_id").and_then(Value::as_str) {
+            Some(value) => value.to_owned(),
+            None => return fail_state(state_path, state, "TENANT_ID_MISSING"),
+        };
+        let namespace = match binding.get("namespace").and_then(Value::as_str) {
+            Some(value) => value.to_owned(),
+            None => return fail_state(state_path, state, "TENANT_NAMESPACE_MISSING"),
+        };
+        let binding_id = match binding.get("binding_id").and_then(Value::as_str) {
+            Some(value) => value.to_owned(),
+            None => return fail_state(state_path, state, "TENANT_BINDING_ID_MISSING"),
+        };
+        let existing = existing_identities.and_then(|items| items.iter().find(|item| {
+            item.get("tenant_id").and_then(Value::as_str) == Some(tenant_id.as_str())
+                && item.get("binding_id").and_then(Value::as_str) == Some(binding_id.as_str())
+        }));
+        if status == "revoked" {
+            revoked_binding_ids.push(binding_id.clone());
+            revoked_bindings.push((binding_id, tenant_id, namespace, existing));
+            continue;
+        }
+        if !matches!(status, "pending" | "provisioning" | "active") {
+            return fail_state(state_path, state, "TENANT_BINDING_STATUS_UNSUPPORTED");
+        }
+        let existing_username = existing.and_then(|item| item.get("username").and_then(Value::as_str)).map(str::to_owned);
+        let existing_client_password = existing.and_then(|item| item.get("client_password").and_then(Value::as_str)).map(Secret::new);
+        let existing_upstream_password = existing.and_then(|item| item.get("upstream_password").and_then(Value::as_str)).map(Secret::new);
+        let rotate_credentials = binding.get("credential_rotation_requested").and_then(Value::as_bool).unwrap_or(false);
+        active_bindings.push(TenantBinding {
+            binding_id: Some(binding_id),
+            tenant_id,
+            namespace,
+            existing_username,
+            existing_client_password,
+            existing_upstream_password,
+            rotate_credentials,
+        });
+    }
+
+    if active_bindings.is_empty() && revoked_bindings.is_empty() {
+        return AssignmentOutcome::staged();
+    }
+    let plan = if active_bindings.is_empty() {
+        ProvisioningPlan { provider, identities: Vec::new(), statements: Vec::new() }
+    } else {
+        match provider_provisioning::build_provisioning_plan(ProvisioningRequest {
+            provider_key, database_name, bindings: &active_bindings,
+        }) {
+            Ok(value) => value,
+            Err(_) => return fail_state(state_path, state, "PROVIDER_PROVISIONING_PLAN_INVALID"),
+        }
+    };
+
     if provider_provisioning::apply_provisioning_plan(&plan, &target).await.is_err() {
         return fail_state(state_path, state, "PROVIDER_PROVISIONING_OR_HEALTH_FAILED");
+    }
+
+    for (binding_id, _tenant_id, namespace, existing) in revoked_bindings {
+        if let Some(identity) = existing {
+            let username = match identity.get("username").and_then(Value::as_str) {
+                Some(value) => value,
+                None => return fail_state(state_path, state, "REVOKED_IDENTITY_INVALID"),
+            };
+            let tenant_database = identity.get("database").and_then(Value::as_str).unwrap_or(database_name);
+            let upstream_password = match identity.get("upstream_password").and_then(Value::as_str) {
+                Some(value) => Secret::new(value),
+                None => return fail_state(state_path, state, "REVOKED_IDENTITY_SECRET_MISSING"),
+            };
+            if provider_provisioning::apply_tenant_revocation(
+                provider, &target, username, &namespace, tenant_database, &upstream_password,
+            ).await.is_err() {
+                return fail_state(state_path, state, "TENANT_REVOCATION_FAILED");
+            }
+        }
+        let _ = binding_id;
     }
 
     match provider {
@@ -157,7 +196,7 @@ pub async fn reconcile_core_assignment(
                 format!("{host}:{port}")
             };
             let configured_upstream = env::var("PROXIMA_UPSTREAM_ADDR").unwrap_or_default();
-            let tls_mode = env::var("PROXIMA_UPSTREAM_TLS_MODE").unwrap_or_default();
+            let tls_mode = env::var("PROXIMA_UPSTREAM_TLS_MODE").unwrap_or_default().to_ascii_lowercase();
             let ca_configured = env::var_os("PROXIMA_UPSTREAM_TLS_CA_FILE").is_some();
             if configured_upstream != expected_upstream || tls_mode != "verify-full" || !ca_configured {
                 return fail_state(state_path, state, "ENGINE_UPSTREAM_TARGET_MISMATCH");
@@ -173,41 +212,56 @@ pub async fn reconcile_core_assignment(
             }
         }
         CoreProvider::MySql | CoreProvider::MariaDb => {
-            let executable = match env::current_exe() {
-                Ok(value) => value,
-                Err(_) => return fail_state(state_path, state, "ENGINE_EXECUTABLE_UNAVAILABLE"),
-            };
-            let executable_dir = match executable.parent() {
-                Some(value) => value,
-                None => return fail_state(state_path, state, "ENGINE_EXECUTABLE_UNAVAILABLE"),
-            };
-            let runtime_dir = env::var_os("PROXIMA_NODE_RUNTIME_STATE_DIR")
-                .map(PathBuf::from)
-                .or_else(|| state_path.parent().map(Path::to_path_buf))
-                .unwrap_or_else(|| PathBuf::from("data/runtime-state"));
-            let mut runtime = match provider_provisioning::mysql_gateway_runtime_config(
-                provider, &plan.identities, host, port,
-            ) {
-                Ok(value) => value,
-                Err(_) => return fail_state(state_path, state, "MYSQL_GATEWAY_REGISTRY_INVALID"),
-            };
-            let listen_addr = env::var("PROXIMA_MYSQL_LISTEN_ADDR")
-                .unwrap_or_else(|_| "127.0.0.1:3307".to_owned());
-            runtime["listen_addr"] = json!(listen_addr);
-            let prepared = match gateway_runtime::prepare_mysql_from_registry(
-                record, &runtime, executable_dir, &runtime_dir,
-            ) {
-                Ok(value) => value,
-                Err(_) => return fail_state(state_path, state, "MYSQL_GATEWAY_PREPARATION_FAILED"),
-            };
-            let health = || async move { prepared.verify_upstream().await };
-            if coordinator.activate(state_path, state, prepared.spec.clone(), health).await.is_err() {
-                return fail_state(state_path, state, "MYSQL_GATEWAY_ACTIVATION_FAILED");
+            if plan.identities.is_empty() {
+                if coordinator.stop_runtime(&state.assignment_id).await.is_err() {
+                    return fail_state(state_path, state, "MYSQL_GATEWAY_STOP_FAILED");
+                }
+                let revision = state.desired_revision;
+                let credential_revision = state.credential_revision;
+                if state.begin_apply(revision, credential_revision).is_err()
+                    || runtime_reconciliation::persist(state_path, state).is_err()
+                    || state.mark_applied(revision, true).is_err()
+                    || runtime_reconciliation::persist(state_path, state).is_err()
+                {
+                    return fail_state(state_path, state, "RUNTIME_STATE_TRANSITION_FAILED");
+                }
+            } else {
+                let executable = match env::current_exe() {
+                    Ok(value) => value,
+                    Err(_) => return fail_state(state_path, state, "ENGINE_EXECUTABLE_UNAVAILABLE"),
+                };
+                let executable_dir = match executable.parent() {
+                    Some(value) => value,
+                    None => return fail_state(state_path, state, "ENGINE_EXECUTABLE_UNAVAILABLE"),
+                };
+                let runtime_dir = env::var_os("PROXIMA_NODE_RUNTIME_STATE_DIR")
+                    .map(PathBuf::from)
+                    .or_else(|| state_path.parent().map(Path::to_path_buf))
+                    .unwrap_or_else(|| PathBuf::from("data/runtime-state"));
+                let mut runtime = match provider_provisioning::mysql_gateway_runtime_config(
+                    provider, &plan.identities, host, port,
+                ) {
+                    Ok(value) => value,
+                    Err(_) => return fail_state(state_path, state, "MYSQL_GATEWAY_REGISTRY_INVALID"),
+                };
+                let listen_addr = env::var("PROXIMA_MYSQL_LISTEN_ADDR")
+                    .unwrap_or_else(|_| "127.0.0.1:3307".to_owned());
+                runtime["listen_addr"] = json!(listen_addr);
+                let prepared = match gateway_runtime::prepare_mysql_from_registry(
+                    record, &runtime, executable_dir, &runtime_dir,
+                ) {
+                    Ok(value) => value,
+                    Err(_) => return fail_state(state_path, state, "MYSQL_GATEWAY_PREPARATION_FAILED"),
+                };
+                let health = || async move { prepared.verify_upstream().await };
+                if coordinator.activate(state_path, state, prepared.spec.clone(), health).await.is_err() {
+                    return fail_state(state_path, state, "MYSQL_GATEWAY_ACTIVATION_FAILED");
+                }
             }
         }
     }
 
-    match provider_provisioning::provisioning_result_payload(&plan) {
+    match provider_provisioning::provisioning_result_payload(&plan, &revoked_binding_ids) {
         Ok(result) => AssignmentOutcome::applied(result),
         Err(_) => fail_state(state_path, state, "PROVISIONING_RESULT_SERIALIZATION_FAILED"),
     }
