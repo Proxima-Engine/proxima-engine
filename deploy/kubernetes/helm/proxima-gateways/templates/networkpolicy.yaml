@@ -1,0 +1,49 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- range $name, $cfg := .Values.gateways }}
+{{- if $cfg.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "proxima-gateways.fullname" $ }}-{{ $name }}
+  labels:
+    {{- include "proxima-gateways.labels" $ | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ $.Release.Name }}
+      app.kubernetes.io/component: {{ $name }}-gateway
+  policyTypes: ["Ingress", "Egress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- toYaml $.Values.networkPolicy.clientPodSelector | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ $cfg.port }}
+  egress:
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    {{- if $.Values.networkPolicy.egressCIDRs }}
+    {{- range $.Values.networkPolicy.egressCIDRs }}
+    - to:
+        - ipBlock:
+            cidr: {{ . | quote }}
+      {{- if $.Values.networkPolicy.egressPorts }}
+      ports:
+        {{- range $.Values.networkPolicy.egressPorts }}
+        - protocol: TCP
+          port: {{ . }}
+        {{- end }}
+      {{- end }}
+    {{- end }}
+    {{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
