@@ -118,6 +118,9 @@ jobs:
         run: cargo build -p proxima-engine --release
       - name: Build MySQL protocol gateway
         run: cargo build -p proxima-engine --bin proxima-mysql-gateway
+      - name: Elasticsearch acceptance script syntax
+        run: bash -n scripts/test-elasticsearch-tenant-isolation.sh
+
       - name: Build MongoDB wire gateway
         run: cargo build -p proxima-engine --bin proxima-mongodb-gateway
       - name: Build Redis RESP2 gateway
