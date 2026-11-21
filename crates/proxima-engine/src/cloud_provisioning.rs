@@ -141,9 +141,11 @@ pub async fn reconcile_core_assignment(
             if configured_upstream != expected_upstream || tls_mode != "verify-full" || !ca_configured {
                 return fail_state(state_path, state, "ENGINE_UPSTREAM_TARGET_MISMATCH");
             }
-            if state.begin_apply(state.desired_revision, state.credential_revision).is_err()
+            let revision = state.desired_revision;
+            let credential_revision = state.credential_revision;
+            if state.begin_apply(revision, credential_revision).is_err()
                 || runtime_reconciliation::persist(state_path, state).is_err()
-                || state.mark_applied(state.desired_revision, true).is_err()
+                || state.mark_applied(revision, true).is_err()
                 || runtime_reconciliation::persist(state_path, state).is_err()
             {
                 return fail_state(state_path, state, "RUNTIME_STATE_TRANSITION_FAILED");
@@ -178,7 +180,7 @@ pub async fn reconcile_core_assignment(
                 Err(_) => return fail_state(state_path, state, "MYSQL_GATEWAY_PREPARATION_FAILED"),
             };
             let health = || async move { prepared.verify_upstream().await };
-            if coordinator.activate(state_path, state, prepared.spec, health).await.is_err() {
+            if coordinator.activate(state_path, state, prepared.spec.clone(), health).await.is_err() {
                 return fail_state(state_path, state, "MYSQL_GATEWAY_ACTIVATION_FAILED");
             }
         }
