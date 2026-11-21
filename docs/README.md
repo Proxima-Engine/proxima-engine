@@ -14,7 +14,9 @@ The Proxima Engine documentation covers the Rust data plane, database protocol g
 - [SQL Server native tenant isolation](SQLSERVER_NATIVE_TENANCY.md) — dedicated database and least-privilege login per tenant; explicitly not a TDS proxy.
 - [Redis tenant gateway](REDIS_TENANT_GATEWAY.md) — restricted RESP2 TLS gateway, client identity binding, key namespace enforcement and Redis ACL configuration.
 - [SQLite tenant isolation](SQLITE_TENANCY.md) — embedded database-file-per-tenant storage, path safety and operating-system permissions.
-- [Oracle tenant isolation](ORACLE_TENANCY.md) — dedicated schema owners, bounded quota and least-privilege provisioning.\n- [DynamoDB tenant isolation](DYNAMODB_TENANCY.md) — AWS IAM LeadingKeys enforcement for tenant-scoped partition keys; real AWS authorization testing is required.\n- [Cassandra tenant isolation](CASSANDRA_TENANCY.md) — dedicated keyspace and login role per tenant with restricted native grants.
+- [Oracle tenant isolation](ORACLE_TENANCY.md) — dedicated schema owners, bounded quota and least-privilege provisioning.
+- [DynamoDB tenant isolation](DYNAMODB_TENANCY.md) — AWS IAM LeadingKeys enforcement for tenant-scoped partition keys; real AWS authorization testing is required.
+- [Cassandra tenant isolation](CASSANDRA_TENANCY.md) — dedicated keyspace and login role per tenant with restricted native grants.
 - [SQL Server and Redis implementation plan](SQLSERVER_REDIS_IMPLEMENTATION_PLAN.md) — protocol feasibility decisions, security boundaries and acceptance criteria.
 - [Database production verification system](DATABASE_PRODUCTION_VERIFICATION.md) — target one-command real-database test runner, per-database acceptance suites, evidence reporting and production-confidence levels.
 - [Shared MySQL protocol authentication](MYSQL_GATEWAY_AUTH.md) — verifier formats and authentication behavior.
@@ -37,7 +39,9 @@ The Proxima Engine documentation covers the Rust data plane, database protocol g
 | SQL Server | [Native tenant isolation](SQLSERVER_NATIVE_TENANCY.md) | Native database-per-tenant profile with dedicated SQL login; no Proxima TDS proxy or shared-database RLS gateway |
 | Redis | [Tenant gateway](REDIS_TENANT_GATEWAY.md) | Restricted RESP2 TLS gateway with immutable tenant sessions, namespace rewriting and upstream Redis ACL users; limited command compatibility |
 | SQLite | [Tenant isolation](SQLITE_TENANCY.md) | Native embedded storage; separate SQLite file per tenant with path and filesystem protections |
-| Oracle Database | [Tenant isolation](ORACLE_TENANCY.md) | Native schema-per-tenant profile with dedicated users and least-privilege grants |\n| Amazon DynamoDB | [Tenant isolation](DYNAMODB_TENANCY.md) | Native AWS IAM policy using exact table ARN and dynamodb:LeadingKeys; AWS-account acceptance required for IAM proof |\n| Apache Cassandra | [Tenant isolation](CASSANDRA_TENANCY.md) | Keyspace-per-tenant with dedicated login roles and SELECT/MODIFY-only grants |
+| Oracle Database | [Tenant isolation](ORACLE_TENANCY.md) | Native schema-per-tenant profile with dedicated users and least-privilege grants |
+| Amazon DynamoDB | [Tenant isolation](DYNAMODB_TENANCY.md) | Native AWS IAM policy using exact table ARN and dynamodb:LeadingKeys; AWS-account acceptance required for IAM proof |
+| Apache Cassandra | [Tenant isolation](CASSANDRA_TENANCY.md) | Keyspace-per-tenant with dedicated login roles and SELECT/MODIFY-only grants |
 
 ## Developer tools
 
