@@ -379,15 +379,15 @@ fn provider_username(provider: CoreProvider, tenant_id: Uuid) -> String {
     }
 }
 fn validate_namespace(value: &str) -> Result<(), ProvisioningError> {
-    if value.is_empty() || value.len() > 63 || !value.as_bytes()[0].is_ascii_alphabetic()
-        || !value.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') {
+    if value.is_empty() || value.len() > 63 || !value.as_bytes()[0].is_ascii_alphanumeric()
+        || !value.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b'-')) {
         return Err(ProvisioningError::InvalidNamespace);
     }
     Ok(())
 }
 fn validate_database_name(value: &str) -> Result<(), ProvisioningError> {
-    if value.is_empty() || value.len() > 63 || !value.as_bytes()[0].is_ascii_alphabetic()
-        || !value.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') {
+    if value.is_empty() || value.len() > 63 || !value.as_bytes()[0].is_ascii_alphanumeric()
+        || !value.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b'-')) {
         return Err(ProvisioningError::InvalidDatabaseName);
     }
     Ok(())
