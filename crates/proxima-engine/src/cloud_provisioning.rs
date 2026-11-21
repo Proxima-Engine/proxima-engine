@@ -56,6 +56,13 @@ pub async fn reconcile_core_assignment(
         Ok(value) => value,
         Err(_) => return AssignmentOutcome::staged(),
     };
+    if record.get("cloud_integration_state").and_then(Value::as_str) != Some("enabled") {
+        return AssignmentOutcome::staged();
+    }
+    let expected_runtime = if provider.is_mysql_family() { "proxima-mysql-gateway" } else { "proxima-engine" };
+    if record.get("gateway_runtime").and_then(Value::as_str) != Some(expected_runtime) {
+        return fail_state(state_path, state, "PROVIDER_RUNTIME_MISMATCH");
+    }
 
     let bindings_json = match record.get("tenant_bindings").and_then(Value::as_array) {
         Some(value) => value,
