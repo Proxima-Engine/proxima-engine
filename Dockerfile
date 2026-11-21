@@ -9,7 +9,7 @@ COPY vendor ./vendor
 COPY dashboard ./dashboard
 COPY frontend/src/assets/agata-proxima-orbit.svg ./frontend/src/assets/agata-proxima-orbit.svg
 
-RUN cargo build --release -p proxima-engine --bin proxima-engine --bin proxima-mysql-gateway --bin proxima-mongodb-gateway --bin proxima-redis-gateway
+RUN cargo build --release -p proxima-engine --bin proxima-engine --bin proxima-mysql-gateway --bin proxima-mongodb-gateway --bin proxima-redis-gateway --bin proxima-kubernetes-controller
 
 FROM debian:bookworm-slim AS runtime
 RUN apt-get update \
@@ -24,6 +24,7 @@ COPY --from=builder /src/target/release/proxima-engine /usr/local/bin/proxima-en
 COPY --from=builder /src/target/release/proxima-mysql-gateway /usr/local/bin/proxima-mysql-gateway
 COPY --from=builder /src/target/release/proxima-mongodb-gateway /usr/local/bin/proxima-mongodb-gateway
 COPY --from=builder /src/target/release/proxima-redis-gateway /usr/local/bin/proxima-redis-gateway
+COPY --from=builder /src/target/release/proxima-kubernetes-controller /usr/local/bin/proxima-kubernetes-controller
 
 ENV PROXIMA_LISTEN_ADDR=0.0.0.0:6432 \
     PROXIMA_UPSTREAM_ADDR=127.0.0.1:5432 \
