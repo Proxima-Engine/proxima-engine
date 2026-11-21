@@ -227,7 +227,7 @@ pub fn mysql_gateway_runtime_config(
     upstream_port: u16,
 ) -> Result<Value, ProvisioningError> {
     if !provider.is_mysql_family() || upstream_host.trim().is_empty()
-        || upstream_host.chars().any(|c| matches!(c, '/' | '@' | ':' | '?' | '#'))
+        || upstream_host.chars().any(|c| matches!(c, '/' | '@' | '?' | '#'))
         || upstream_port == 0 {
         return Err(ProvisioningError::UnsupportedProvider);
     }
@@ -235,8 +235,12 @@ pub fn mysql_gateway_runtime_config(
     for identity in identities {
         let client_password = identity.client_password.expose()?;
         let upstream_password = identity.upstream_password.expose()?;
-        let upstream_url = format!("mysql://{}:{}@{}:{}/{}?require_ssl=true&verify_ca=true&verify_identity=true",
-            identity.username, upstream_password, upstream_host, upstream_port, identity.database);
+        let formatted_host = match upstream_host.parse::<std::net::IpAddr>() {
+            Ok(std::net::IpAddr::V6(_)) => format!("[{upstream_host}]"),
+            _ => upstream_host.to_owned(),
+        };
+        let upstream_url = format!("mysql://{}:{}@{}:{}/{}?require_ssl=true",
+            identity.username, upstream_password, formatted_host, upstream_port, identity.database);
         let mut user = json!({
             "username": identity.username,
             "tenant_id": identity.tenant_id,
