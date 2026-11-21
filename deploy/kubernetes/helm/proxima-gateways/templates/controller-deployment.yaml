@@ -1,4 +1,5 @@
 {{- if .Values.controller.enabled }}
+{{- if or .Values.gateways.mysql.enabled .Values.gateways.mongodb.enabled .Values.gateways.redis.enabled }}{{- fail "disable static gateways.*.enabled workloads when the assignment controller is enabled" }}{{- end }}
 {{- if not .Values.controller.configVolume.existingClaim }}
 {{- fail "controller.enabled requires controller.configVolume.existingClaim shared with the Engine node" }}
 {{- end }}
