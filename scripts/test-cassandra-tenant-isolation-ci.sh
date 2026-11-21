@@ -45,9 +45,10 @@ docker exec -u 0 "$container" bash -ec 'set -eux
   " "$config" > "$temporary_config"
   cat "$temporary_config" > "$config"
   rm -f "$temporary_config"
-  awk "/^authenticator:/ { section=1; next } /^[^[:space:]]/ { section=0 } section && /class_name:/ { print; exit }" "$config" | grep -Eq "class_name:[[:space:]]*PasswordAuthenticator"
-  awk "/^authorizer:/ { section=1; next } /^[^[:space:]]/ { section=0 } section && /class_name:/ { print; exit }" "$config" | grep -Eq "class_name:[[:space:]]*CassandraAuthorizer"
-  awk "/^role_manager:/ { section=1; next } /^[^[:space:]]/ { section=0 } section && /class_name:/ { print; exit }" "$config" | grep -Eq "class_name:[[:space:]]*CassandraRoleManager"
+  grep -A4 -E "^authenticator:" "$config" | grep -q "PasswordAuthenticator"
+  grep -A4 -E "^authorizer:" "$config" | grep -q "CassandraAuthorizer"
+  grep -A4 -E "^role_manager:" "$config" | grep -q "CassandraRoleManager"
+  grep -n -A4 -E "^(authenticator|authorizer|role_manager):" "$config"
 '
 echo "Cassandra authentication configuration updated"
 docker restart "$container" >/dev/null
