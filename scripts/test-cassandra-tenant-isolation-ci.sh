@@ -29,15 +29,25 @@ fi
 echo "Cassandra initial startup is ready"
 
 docker exec -u 0 "$container" bash -ec 'set -eux
-
   config=/etc/cassandra/cassandra.yaml
-  sed -i -E \
-    -e "s/^([[:space:]]*authenticator:).*/\\1 PasswordAuthenticator/" \
-    -e "s/^([[:space:]]*authorizer:).*/\\1 CassandraAuthorizer/" \
-    "$config"
-  grep -Eq "^authenticator:[[:space:]]*PasswordAuthenticator$" "$config"
-  grep -Eq "^authorizer:[[:space:]]*CassandraAuthorizer$" "$config"
-  grep -A4 -E "^role_manager:" "$config" | grep -Eq "class_name:[[:space:]]*CassandraRoleManager"
+  temporary_config="$(mktemp)"
+  awk "
+    /^authenticator:[[:space:]]*$/ { section=\"authenticator\"; print; next }
+    /^authorizer:[[:space:]]*$/ { section=\"authorizer\"; print; next }
+    /^[^[:space:]]/ { section=\"\" }
+    section == \"authenticator\" && /^[[:space:]]*class_name:/ {
+      sub(/class_name:.*/, \"class_name: PasswordAuthenticator\")
+    }
+    section == \"authorizer\" && /^[[:space:]]*class_name:/ {
+      sub(/class_name:.*/, \"class_name: CassandraAuthorizer\")
+    }
+    { print }
+  " "$config" > "$temporary_config"
+  cat "$temporary_config" > "$config"
+  rm -f "$temporary_config"
+  awk "/^authenticator:/ { section=1; next } /^[^[:space:]]/ { section=0 } section && /class_name:/ { print; exit }" "$config" | grep -Eq "class_name:[[:space:]]*PasswordAuthenticator"
+  awk "/^authorizer:/ { section=1; next } /^[^[:space:]]/ { section=0 } section && /class_name:/ { print; exit }" "$config" | grep -Eq "class_name:[[:space:]]*CassandraAuthorizer"
+  awk "/^role_manager:/ { section=1; next } /^[^[:space:]]/ { section=0 } section && /class_name:/ { print; exit }" "$config" | grep -Eq "class_name:[[:space:]]*CassandraRoleManager"
 '
 echo "Cassandra authentication configuration updated"
 docker restart "$container" >/dev/null
