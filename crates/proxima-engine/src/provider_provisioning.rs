@@ -478,21 +478,51 @@ pub async fn apply_provisioning_plan(
                 admin.query_drop(statement.sql()?).await
                     .map_err(|_| ProvisioningError::ProviderStatementFailed)?;
             }
-            drop(admin);
+            for identity in &plan.identities {
+                let database = mysql_identifier(&identity.database);
+                admin.query_drop(format!(
+                    "CREATE TABLE IF NOT EXISTS {database}.__proxima_isolation_probe (id integer PRIMARY KEY)"
+                )).await.map_err(|_| ProvisioningError::ProviderStatementFailed)?;
+                admin.query_drop(format!(
+                    "INSERT IGNORE INTO {database}.__proxima_isolation_probe(id) VALUES (1)"
+                )).await.map_err(|_| ProvisioningError::ProviderStatementFailed)?;
+            }
+
+            let isolation_checks = async {
+                for identity in &plan.identities {
+                    let opts = mysql_options(
+                        target.host, target.port, &identity.username,
+                        identity.upstream_password.expose()?, &identity.database,
+                    );
+                    let mut tenant = mysql_async::Conn::new(opts).await
+                        .map_err(|_| ProvisioningError::ProviderHealthCheckFailed)?;
+                    let selected: Option<String> = tenant.query_first("SELECT DATABASE()").await
+                        .map_err(|_| ProvisioningError::ProviderHealthCheckFailed)?;
+                    if selected.as_deref() != Some(identity.database.as_str()) {
+                        return Err(ProvisioningError::ProviderHealthCheckFailed);
+                    }
+                    let own_database = mysql_identifier(&identity.database);
+                    let own_probe = format!("SELECT id FROM {own_database}.__proxima_isolation_probe LIMIT 1");
+                    let own_row: Option<i32> = tenant.query_first(own_probe).await
+                        .map_err(|_| ProvisioningError::ProviderHealthCheckFailed)?;
+                    if own_row != Some(1) { return Err(ProvisioningError::ProviderHealthCheckFailed); }
+                    for other in plan.identities.iter().filter(|other| other.tenant_id != identity.tenant_id) {
+                        let other_database = mysql_identifier(&other.database);
+                        let cross_query = format!("SELECT id FROM {other_database}.__proxima_isolation_probe LIMIT 1");
+                        if tenant.query_first::<i32, _>(cross_query).await.is_ok() {
+                            return Err(ProvisioningError::ProviderIsolationFailed);
+                        }
+                    }
+                }
+                Ok::<(), ProvisioningError>(())
+            }.await;
 
             for identity in &plan.identities {
-                let opts = mysql_options(
-                    target.host, target.port, &identity.username,
-                    identity.upstream_password.expose()?, &identity.database,
-                );
-                let mut tenant = mysql_async::Conn::new(opts).await
-                    .map_err(|_| ProvisioningError::ProviderHealthCheckFailed)?;
-                let selected: Option<String> = tenant.query_first("SELECT DATABASE()").await
-                    .map_err(|_| ProvisioningError::ProviderHealthCheckFailed)?;
-                if selected.as_deref() != Some(identity.database.as_str()) {
-                    return Err(ProvisioningError::ProviderHealthCheckFailed);
-                }
+                let database = mysql_identifier(&identity.database);
+                admin.query_drop(format!("DROP TABLE IF EXISTS {database}.__proxima_isolation_probe"))
+                    .await.map_err(|_| ProvisioningError::ProviderStatementFailed)?;
             }
+            isolation_checks?;
         }
     }
     Ok(())
