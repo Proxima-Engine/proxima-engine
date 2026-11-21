@@ -224,3 +224,12 @@ Run the separate OpenSearch Security-plugin acceptance script against a disposab
     bash scripts/test-opensearch-tenant-isolation.sh
 
 It creates two internal users, backend-role mappings and native Security roles, then verifies tenant-local reads, shared-index DLS filtering, FLS redaction, cross-index denial and cluster-privilege denial. It removes temporary users, mappings, roles and indices on exit. It requires curl, jq and openssl. This is independent from Elasticsearch acceptance.
+
+
+## 14. Verify DynamoDB IAM LeadingKeys in AWS
+
+The AWS acceptance script requires two distinct least-privilege AWS CLI profiles, a dedicated test table with tenant partition key, and AWS CLI v2:
+
+    bash scripts/test-dynamodb-leading-keys-aws.sh
+
+It verifies own-partition reads/writes, cross-tenant GetItem and Query denial, and Scan denial against real AWS IAM. DynamoDB Local is not an acceptable substitute. Use a disposable AWS account/table and never run the script against production data.
