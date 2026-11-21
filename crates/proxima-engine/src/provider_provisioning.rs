@@ -295,7 +295,7 @@ pub fn mysql_gateway_runtime_config(
 /// Serialize only the application-facing identity metadata required by Cloud.
 /// Upstream passwords and SQL statements are deliberately excluded. MySQL/MariaDB
 /// client passwords are returned inside the node-encrypted result envelope.
-pub fn provisioning_result_payload(plan: &ProvisioningPlan) -> Result<Value, ProvisioningError> {
+pub fn provisioning_result_payload(plan: &ProvisioningPlan, revoked_binding_ids: &[String]) -> Result<Value, ProvisioningError> {
     let mut bindings = Vec::with_capacity(plan.identities.len());
     for identity in &plan.identities {
         let mut item = json!({
@@ -315,7 +315,8 @@ pub fn provisioning_result_payload(plan: &ProvisioningPlan) -> Result<Value, Pro
         "schema_version": 1,
         "provider_key": plan.provider.key(),
         "isolation_verified": true,
-        "bindings": bindings
+        "bindings": bindings,
+        "revoked_binding_ids": revoked_binding_ids
     }))
 }
 
