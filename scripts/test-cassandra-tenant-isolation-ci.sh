@@ -28,7 +28,6 @@ docker exec "$container" bash -ec '
   sed -i -E \
     -e "s/^([[:space:]]*authenticator:).*/\\1 PasswordAuthenticator/" \
     -e "s/^([[:space:]]*authorizer:).*/\\1 CassandraAuthorizer/" \
-    -e "s/^([[:space:]]*role_manager:).*/\\1 CassandraRoleManager/" \
     "$config"
   grep -Eq "^authenticator:[[:space:]]*PasswordAuthenticator$" "$config"
   grep -Eq "^authorizer:[[:space:]]*CassandraAuthorizer$" "$config"
