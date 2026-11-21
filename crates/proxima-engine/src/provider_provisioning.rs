@@ -7,8 +7,10 @@
 use ring::rand::{SecureRandom, SystemRandom};
 use serde_json::{json, Value};
 use sha1::{Digest, Sha1};
-use std::fmt;
+use std::{fmt, fs::File, io::BufReader, path::Path};
 use uuid::Uuid;
+use tokio_postgres::config::SslMode;
+use tokio_postgres_rustls::MakeRustlsConnect;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CoreProvider { PostgreSql, CockroachDb, MySql, MariaDb }
@@ -63,6 +65,10 @@ impl fmt::Display for ProvisioningError {
             Self::DuplicateNamespace => "tenant bindings contain duplicate namespaces",
             Self::RandomGenerationFailed => "cryptographic secret generation failed",
             Self::InvalidSecret => "generated secret is not valid UTF-8",
+            Self::ProviderConnectionFailed => "provider connection failed",
+            Self::ProviderStatementFailed => "provider provisioning statement failed",
+            Self::ProviderHealthCheckFailed => "provisioned tenant identity health check failed",
+            Self::TlsConfigurationFailed => "provider TLS trust configuration failed",
         })
     }
 }
@@ -325,6 +331,137 @@ fn mysql_identifier(value: &str) -> String {
     format!("{}{}{}", char::from(96), value.replace(char::from(96), &doubled), char::from(96))
 }
 fn sql_literal(value: &str) -> String { format!("'{}'", value.replace('\'', "''")) }
+
+
+pub struct ProvisioningTarget<'a> {
+    pub host: &'a str,
+    pub port: u16,
+    pub database_name: &'a str,
+    pub admin_username: &'a str,
+    pub admin_password: &'a Secret,
+    /// PEM bundle containing the provider's trusted root CA. Required for the
+    /// PostgreSQL-wire providers; MySQL-family connections use verified system roots.
+    pub tls_ca_file: &'a Path,
+}
+
+/// Execute a prepared plan against the assigned database. Provisioning is
+/// idempotent; every generated tenant identity is then tested with a real login
+/// and a database/schema identity check before the caller can acknowledge success.
+pub async fn apply_provisioning_plan(
+    plan: &ProvisioningPlan,
+    target: &ProvisioningTarget<'_>,
+) -> Result<(), ProvisioningError> {
+    if target.port == 0 || target.host.trim().is_empty()
+        || validate_database_name(target.database_name).is_err()
+        || target.admin_username.trim().is_empty()
+        || target.admin_password.expose().is_err()
+    {
+        return Err(ProvisioningError::ProviderConnectionFailed);
+    }
+
+    match plan.provider {
+        CoreProvider::PostgreSql | CoreProvider::CockroachDb => {
+            let tls = postgres_tls_connector(target.tls_ca_file)?;
+            let mut admin = tokio_postgres::Config::new();
+            admin.host(target.host)
+                .port(target.port)
+                .user(target.admin_username)
+                .password(target.admin_password.expose()?)
+                .dbname(target.database_name)
+                .ssl_mode(SslMode::VerifyFull);
+            let (client, connection) = admin.connect(tls.clone()).await
+                .map_err(|_| ProvisioningError::ProviderConnectionFailed)?;
+            tokio::spawn(async move { let _ = connection.await; });
+
+            for statement in &plan.statements {
+                client.batch_execute(statement.sql()?).await
+                    .map_err(|_| ProvisioningError::ProviderStatementFailed)?;
+            }
+
+            for identity in &plan.identities {
+                let mut tenant = tokio_postgres::Config::new();
+                tenant.host(target.host)
+                    .port(target.port)
+                    .user(&identity.username)
+                    .password(identity.upstream_password.expose()?)
+                    .dbname(target.database_name)
+                    .ssl_mode(SslMode::VerifyFull);
+                let (tenant_client, tenant_connection) = tenant.connect(tls.clone()).await
+                    .map_err(|_| ProvisioningError::ProviderHealthCheckFailed)?;
+                tokio::spawn(async move { let _ = tenant_connection.await; });
+                let row = tenant_client.query_one("SELECT current_user, current_schema()", &[]).await
+                    .map_err(|_| ProvisioningError::ProviderHealthCheckFailed)?;
+                let actual_user: String = row.get(0);
+                let actual_schema: Option<String> = row.get(1);
+                if actual_user != identity.username || actual_schema.as_deref() != identity.schema.as_deref() {
+                    return Err(ProvisioningError::ProviderHealthCheckFailed);
+                }
+            }
+        }
+        CoreProvider::MySql | CoreProvider::MariaDb => {
+            use mysql_async::prelude::Queryable;
+            let admin_opts = mysql_options(
+                target.host, target.port, target.admin_username,
+                target.admin_password.expose()?, target.database_name,
+            );
+            let mut admin = mysql_async::Conn::new(admin_opts).await
+                .map_err(|_| ProvisioningError::ProviderConnectionFailed)?;
+            for statement in &plan.statements {
+                admin.query_drop(statement.sql()?).await
+                    .map_err(|_| ProvisioningError::ProviderStatementFailed)?;
+            }
+            drop(admin);
+
+            for identity in &plan.identities {
+                let opts = mysql_options(
+                    target.host, target.port, &identity.username,
+                    identity.upstream_password.expose()?, &identity.database,
+                );
+                let mut tenant = mysql_async::Conn::new(opts).await
+                    .map_err(|_| ProvisioningError::ProviderHealthCheckFailed)?;
+                let selected: Option<String> = tenant.query_first("SELECT DATABASE()").await
+                    .map_err(|_| ProvisioningError::ProviderHealthCheckFailed)?;
+                if selected.as_deref() != Some(identity.database.as_str()) {
+                    return Err(ProvisioningError::ProviderHealthCheckFailed);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn postgres_tls_connector(ca_file: &Path) -> Result<MakeRustlsConnect, ProvisioningError> {
+    let file = File::open(ca_file).map_err(|_| ProvisioningError::TlsConfigurationFailed)?;
+    let mut reader = BufReader::new(file);
+    let certificates = rustls_pemfile::certs(&mut reader)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| ProvisioningError::TlsConfigurationFailed)?;
+    if certificates.is_empty() {
+        return Err(ProvisioningError::TlsConfigurationFailed);
+    }
+    let mut roots = rustls::RootCertStore::empty();
+    for certificate in certificates {
+        roots.add(certificate).map_err(|_| ProvisioningError::TlsConfigurationFailed)?;
+    }
+    let config = rustls::ClientConfig::builder()
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+    Ok(MakeRustlsConnect::new(config))
+}
+
+fn mysql_options(
+    host: &str, port: u16, username: &str, password: &str, database: &str,
+) -> mysql_async::OptsBuilder {
+    mysql_async::OptsBuilder::default()
+        .ip_or_hostname(host.to_owned())
+        .tcp_port(port)
+        .user(Some(username.to_owned()))
+        .pass(Some(password.to_owned()))
+        .db_name(Some(database.to_owned()))
+        // SslOpts defaults to certificate and hostname verification. No insecure
+        // skip-validation option is enabled for customer database connections.
+        .ssl_opts(mysql_async::SslOpts::default())
+}
 
 #[cfg(test)]
 mod tests {
