@@ -91,7 +91,7 @@ Proxima Engine works alongside existing database deployments and drivers. Postgr
 
 ## Database guides — separate setup for each engine
 
-Each database has its own implementation guide, setup sequence, configuration, compatibility notes and verification instructions. PostgreSQL is the reference integration; CockroachDB reuses its PostgreSQL wire protocol with a distinct native RLS profile. MySQL and MariaDB have separate guides and acceptance suites. MongoDB has a restricted gateway profile with explicitly documented feature limits. Redis, SQL Server, SQLite, Oracle, DynamoDB, Cassandra and Elasticsearch/OpenSearch use provider-native security boundaries where appropriate; catalog and helper code do not imply that all are released gateways or fully provisioned Cloud integrations.
+Each database has its own implementation guide, setup sequence, configuration, compatibility notes and verification instructions. PostgreSQL and CockroachDB share a wire-protocol family while retaining their respective database-native security profiles. MySQL and MariaDB have separate guides and acceptance suites. MongoDB has a restricted gateway profile with explicitly documented feature limits. Redis, SQL Server, SQLite, Oracle, DynamoDB, Cassandra and Elasticsearch/OpenSearch use provider-native security boundaries where appropriate; catalog and helper code do not imply that all are released gateways or fully provisioned Cloud integrations.
 
 | Database | Start here | Deep-dive documentation |
 |---|---|---|
@@ -116,7 +116,7 @@ The gateway does not replace PostgreSQL, CockroachDB, MySQL, MariaDB or MongoDB.
 
 ### PostgreSQL
 
-PostgreSQL is the reference integration and retains its complete walkthrough, including the local Compose stack, PgBouncer transaction pooling, signed tenant context, tenant-role provisioning, Row-Level Security, driver examples, deployment, verification and the original engineering demonstration.
+PostgreSQL is a first-class database integration with its own walkthrough, local Compose stack, PgBouncer transaction pooling, signed tenant context, tenant-role provisioning, Row-Level Security, driver examples, deployment, verification and engineering demonstration.
 
 Start with [the PostgreSQL quickstart](docs/QUICKSTART.md), then complete [tenant isolation](docs/TENANT_ISOLATION.md) and [verification](docs/VERIFICATION.md).
 
