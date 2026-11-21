@@ -52,7 +52,7 @@ impl fmt::Debug for Secret {
 pub enum ProvisioningError {
     UnsupportedProvider, InvalidTenantId, InvalidNamespace, InvalidDatabaseName,
     EmptyBindings, DuplicateTenant, DuplicateNamespace, RandomGenerationFailed, InvalidSecret,
-    ProviderConnectionFailed, ProviderStatementFailed, ProviderHealthCheckFailed, TlsConfigurationFailed,
+    ProviderConnectionFailed, ProviderStatementFailed, ProviderHealthCheckFailed, ProviderIsolationFailed, TlsConfigurationFailed,
 }
 impl fmt::Display for ProvisioningError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -69,6 +69,7 @@ impl fmt::Display for ProvisioningError {
             Self::ProviderConnectionFailed => "provider connection failed",
             Self::ProviderStatementFailed => "provider provisioning statement failed",
             Self::ProviderHealthCheckFailed => "provisioned tenant identity health check failed",
+            Self::ProviderIsolationFailed => "provider tenant isolation verification failed",
             Self::TlsConfigurationFailed => "provider TLS trust configuration failed",
         })
     }
@@ -417,26 +418,53 @@ pub async fn apply_provisioning_plan(
                 client.batch_execute(statement.sql()?).await
                     .map_err(|_| ProvisioningError::ProviderStatementFailed)?;
             }
-
             for identity in &plan.identities {
-                let mut tenant = tokio_postgres::Config::new();
-                tenant.host(target.host)
-                    .port(target.port)
-                    .user(&identity.username)
-                    .password(identity.upstream_password.expose()?)
-                    .dbname(target.database_name)
-                    .ssl_mode(SslMode::VerifyFull);
-                let (tenant_client, tenant_connection) = tenant.connect(tls.clone()).await
-                    .map_err(|_| ProvisioningError::ProviderHealthCheckFailed)?;
-                tokio::spawn(async move { let _ = tenant_connection.await; });
-                let row = tenant_client.query_one("SELECT current_user, current_schema()", &[]).await
-                    .map_err(|_| ProvisioningError::ProviderHealthCheckFailed)?;
-                let actual_user: String = row.get(0);
-                let actual_schema: Option<String> = row.get(1);
-                if actual_user != identity.username || actual_schema.as_deref() != identity.schema.as_deref() {
-                    return Err(ProvisioningError::ProviderHealthCheckFailed);
+                let schema = pg_identifier(identity.schema.as_deref().ok_or(ProvisioningError::ProviderStatementFailed)?);
+                let role = pg_identifier(&identity.username);
+                client.batch_execute(&format!(
+                    "CREATE TABLE IF NOT EXISTS {schema}.__proxima_isolation_probe (id integer PRIMARY KEY); INSERT INTO {schema}.__proxima_isolation_probe(id) VALUES (1) ON CONFLICT DO NOTHING; GRANT SELECT ON TABLE {schema}.__proxima_isolation_probe TO {role}"
+                )).await.map_err(|_| ProvisioningError::ProviderStatementFailed)?;
+            }
+
+            let isolation_checks = async {
+                for identity in &plan.identities {
+                    let mut tenant = tokio_postgres::Config::new();
+                    tenant.host(target.host)
+                        .port(target.port)
+                        .user(&identity.username)
+                        .password(identity.upstream_password.expose()?)
+                        .dbname(target.database_name)
+                        .ssl_mode(SslMode::VerifyFull);
+                    let (tenant_client, tenant_connection) = tenant.connect(tls.clone()).await
+                        .map_err(|_| ProvisioningError::ProviderHealthCheckFailed)?;
+                    tokio::spawn(async move { let _ = tenant_connection.await; });
+                    let row = tenant_client.query_one("SELECT current_user, current_schema()", &[]).await
+                        .map_err(|_| ProvisioningError::ProviderHealthCheckFailed)?;
+                    let actual_user: String = row.get(0);
+                    let actual_schema: Option<String> = row.get(1);
+                    if actual_user != identity.username || actual_schema.as_deref() != identity.schema.as_deref() {
+                        return Err(ProvisioningError::ProviderHealthCheckFailed);
+                    }
+                    let own_schema = pg_identifier(identity.schema.as_deref().ok_or(ProvisioningError::ProviderHealthCheckFailed)?);
+                    tenant_client.query_one(&format!("SELECT id FROM {own_schema}.__proxima_isolation_probe LIMIT 1"), &[]).await
+                        .map_err(|_| ProvisioningError::ProviderHealthCheckFailed)?;
+                    for other in plan.identities.iter().filter(|other| other.tenant_id != identity.tenant_id) {
+                        let other_schema = pg_identifier(other.schema.as_deref().ok_or(ProvisioningError::ProviderIsolationFailed)?);
+                        if tenant_client.query_opt(&format!("SELECT id FROM {other_schema}.__proxima_isolation_probe LIMIT 1"), &[]).await.is_ok() {
+                            return Err(ProvisioningError::ProviderIsolationFailed);
+                        }
+                    }
+                }
+                Ok::<(), ProvisioningError>(())
+            }.await;
+            for identity in &plan.identities {
+                if let Some(schema) = identity.schema.as_deref() {
+                    let schema = pg_identifier(schema);
+                    client.batch_execute(&format!("DROP TABLE IF EXISTS {schema}.__proxima_isolation_probe"))
+                        .await.map_err(|_| ProvisioningError::ProviderStatementFailed)?;
                 }
             }
+            isolation_checks?;
         }
         CoreProvider::MySql | CoreProvider::MariaDb => {
             use mysql_async::prelude::Queryable;
