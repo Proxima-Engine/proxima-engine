@@ -71,6 +71,7 @@ pub async fn reconcile_core_assignment(
     if bindings_json.is_empty() {
         return AssignmentOutcome::staged();
     }
+    let existing_identities = credentials.get("tenant_identities").and_then(Value::as_array);
     let mut bindings = Vec::with_capacity(bindings_json.len());
     for binding in bindings_json {
         let tenant_id = match binding.get("tenant_id").and_then(Value::as_str) {
@@ -82,7 +83,20 @@ pub async fn reconcile_core_assignment(
             None => return fail_state(state_path, state, "TENANT_NAMESPACE_MISSING"),
         };
         let binding_id = binding.get("binding_id").and_then(Value::as_str).map(str::to_owned);
-        bindings.push(TenantBinding { binding_id, tenant_id, namespace });
+        let existing = existing_identities.and_then(|items| items.iter().find(|item| {
+            item.get("tenant_id").and_then(Value::as_str) == Some(tenant_id.as_str())
+                && item.get("binding_id").and_then(Value::as_str) == binding_id.as_deref()
+        }));
+        let existing_username = existing.and_then(|item| item.get("username").and_then(Value::as_str)).map(str::to_owned);
+        let existing_client_password = existing.and_then(|item| item.get("client_password").and_then(Value::as_str))
+            .map(Secret::new);
+        let existing_upstream_password = existing.and_then(|item| item.get("upstream_password").and_then(Value::as_str))
+            .map(Secret::new);
+        let rotate_credentials = binding.get("credential_rotation_requested").and_then(Value::as_bool).unwrap_or(false);
+        bindings.push(TenantBinding {
+            binding_id, tenant_id, namespace, existing_username,
+            existing_client_password, existing_upstream_password, rotate_credentials,
+        });
     }
 
     let database_name = match record.get("database_name").and_then(Value::as_str) {
