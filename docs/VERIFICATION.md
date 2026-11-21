@@ -150,7 +150,11 @@ The [Rust CI workflow](https://github.com/Proxima-Engine/proxima-engine/actions/
 
 A green workflow run is direct evidence that those configured checks passed for its commit. For deployment acceptance, also verify the target environment's TLS, database roles/RLS, network policy, persistence, and recovery procedures.
 
-## Native provider helper boundaries\n\nDynamoDB, Cassandra, Elasticsearch and OpenSearch helper modules do not by themselves provide a Cloud provisioning service or a universal wire gateway. DynamoDB policy output must be applied by a trusted AWS IAM provisioning identity and tested against real IAM. Cassandra CQL must be executed through a separate administrative session with per-tenant credentials stored and rotated securely. Elasticsearch and OpenSearch role descriptors must be applied through their distinct native security APIs, then bound to tenant-specific API keys/backend roles. These helpers are not a substitute for those lifecycle executors.\n\n## Evidence record
+## Native provider helper boundaries
+
+DynamoDB, Cassandra, Elasticsearch and OpenSearch helper modules do not by themselves provide a Cloud provisioning service or a universal wire gateway. DynamoDB policy output must be applied by a trusted AWS IAM provisioning identity and tested against real IAM. Cassandra CQL must be executed through a separate administrative session with per-tenant credentials stored and rotated securely. Elasticsearch and OpenSearch role descriptors must be applied through their distinct native security APIs, then bound to tenant-specific API keys/backend roles. These helpers are not a substitute for those lifecycle executors.
+
+## Evidence record
 
 For each verification run, record:
 
