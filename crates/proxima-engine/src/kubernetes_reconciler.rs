@@ -148,7 +148,7 @@ fn resources(assignment: &Value, namespace: &str) -> Result<Option<(Value, Value
         "apiVersion":"apps/v1","kind":"Deployment",
         "metadata":{"name":name,"namespace":namespace,"labels":common.clone()},
         "spec":{"replicas":1,"selector":{"matchLabels":{"proxima.io/assignment":name}},
-          "template":{"metadata":{"labels":common,"annotations":{"proxima.io/config-revision":revision.to_string(),"proxima.io/target-id":target}},
+          "template":{"metadata":{"labels":common.clone(),"annotations":{"proxima.io/config-revision":revision.to_string(),"proxima.io/target-id":target}},
             "spec":{"automountServiceAccountToken":false,
               "securityContext":{"runAsNonRoot":true,"runAsUser":10001,"runAsGroup":10001,"seccompProfile":{"type":"RuntimeDefault"}},
               "containers":[{"name":"gateway","image":env::var("PROXIMA_KUBERNETES_GATEWAY_IMAGE").unwrap_or_else(|_|"ghcr.io/proxima-engine/proxima-engine:latest".into()),
