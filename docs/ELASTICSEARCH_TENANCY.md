@@ -6,7 +6,7 @@ Elasticsearch and OpenSearch do not provide SQL row-level security. Tenant isola
 
 The first implementation target is Elasticsearch native roles: each tenant receives a dedicated role and API key restricted to a tenant-specific index namespace. Where the exact distribution, version, and license support document-level security (DLS) and field-level security (FLS), apply a tenant filter and explicit field allowlist. DLS is defense in depth and does not replace index-level separation.
 
-OpenSearch has a related but non-identical Security plugin API and feature matrix. It requires a separately reviewed role-mapping/backend-role adapter. Never send Elasticsearch role descriptors to OpenSearch or assume feature/license parity. The Cloud catalog groups the family for discovery only; it does not mean both distributions are released.
+OpenSearch has a related but non-identical Security plugin API and feature matrix. The Engine now has a separate OpenSearch role-descriptor helper using `index_permissions`, explicit action names, DLS and FLS. It is not an API client or provisioning executor: a trusted control-plane integration must create the role and bind it to a tenant-specific backend role or API key. Never send Elasticsearch role descriptors to OpenSearch or assume feature/license parity. The Cloud catalog groups the family for discovery only; it does not mean both distributions are released.
 
 ## Required controls
 
