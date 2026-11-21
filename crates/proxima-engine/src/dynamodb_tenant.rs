@@ -47,9 +47,15 @@ pub fn validate_tenant_id(id: &str) -> Result<(), DynamoTenantError> {
 }
 fn validate_table_arn(arn: &str) -> Result<(), DynamoTenantError> {
     let p: Vec<&str> = arn.split(':').collect();
-    if p.len() != 6 || p[0] != "arn" || p[1] != "aws" || p[2] != "dynamodb" || p[3].is_empty()
-        || p[4].len() != 12 || !p[4].bytes().all(|b| b.is_ascii_digit())
-        || !p[5].starts_with("table/") || p[5].len() <= 6 || p[5].contains('*') || p[5].contains('?') {
+    let allowed_partition = matches!(p.get(1).copied(), Some("aws" | "aws-cn" | "aws-us-gov" | "aws-iso" | "aws-iso-b"));
+    let region_valid = !p.get(3).unwrap_or(&"").is_empty()
+        && p[3].bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
+    let table_name = p.get(5).and_then(|resource| resource.strip_prefix("table/")).unwrap_or("");
+    let table_name_valid = (3..=255).contains(&table_name.len())
+        && table_name.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.'));
+    if p.len() != 6 || p[0] != "arn" || !allowed_partition || p[2] != "dynamodb"
+        || !region_valid || p[4].len() != 12 || !p[4].bytes().all(|b| b.is_ascii_digit())
+        || !table_name_valid {
         return Err(DynamoTenantError::InvalidTableArn);
     }
     Ok(())
@@ -71,12 +77,12 @@ mod tests {
     }
     #[test]
     fn rejects_wildcard_or_malformed_table_arns() {
-        for arn in ["*", "arn:aws:dynamodb:us-east-1:123456789012:table/*", "arn:aws:s3:::bucket", "arn:aws:dynamodb:us-east-1:abc:table/x"] {
+        for arn in ["*", "arn:aws:dynamodb:us-east-1:123456789012:table/*", "arn:aws:s3:::bucket", "arn:aws:dynamodb:us-east-1:abc:table/records", "arn:aws:dynamodb:us-east-1:123456789012:table/ab", "arn:aws:dynamodb:us-east-1:123456789012:table/a/b"] {
             assert!(matches!(DynamoTenant::new("tenant-a", arn), Err(DynamoTenantError::InvalidTableArn)));
         }
     }
     #[test]
-    fn validates_partition_keys() {
+    fn accepts_regional_aws_partitions() {\n        assert!(DynamoTenant::new("tenant-a", "arn:aws-us-gov:dynamodb:us-gov-west-1:123456789012:table/proxima-records").is_ok());\n        assert!(DynamoTenant::new("tenant-a", "arn:aws-cn:dynamodb:cn-north-1:123456789012:table/proxima-records").is_ok());\n    }\n    #[test]\n    fn validates_partition_keys() {
         for id in ["", "../tenant", "tenant/a", "tenant a", &"x".repeat(129)] {
             assert!(matches!(validate_tenant_id(id), Err(DynamoTenantError::InvalidTenantId)));
         }
