@@ -29,6 +29,20 @@ resources:
 nodeSelector: {}
 tolerations: []
 affinity: {}
+controller:
+  enabled: false
+  # Existing PVC shared read-only with the Engine node's database-targets.json writer.
+  configVolume:
+    existingClaim: ""
+    mountPath: /var/lib/proxima
+  reconcileSeconds: 15
+  gatewayImage:
+    repository: ghcr.io/proxima-engine/proxima-engine
+    tag: latest
+  secrets:
+    mysql: proxima-mysql-gateway
+    mongodb: proxima-mongodb-gateway
+    redis: proxima-redis-gateway
 networkPolicy:
   enabled: true
   clientPodSelector:
