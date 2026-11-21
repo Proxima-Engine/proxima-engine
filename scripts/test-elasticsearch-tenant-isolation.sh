@@ -67,6 +67,9 @@ request -fsS -X PUT "$BASE/$INDEX_A/_doc/a1?refresh=true" -H 'content-type: appl
   -d '{"tenant_id":"tenant-a","public_field":"alpha","secret_field":"must-not-leak"}' >/dev/null
 request -fsS -X PUT "$BASE/$INDEX_B/_doc/b1?refresh=true" -H 'content-type: application/json' \
   -d '{"tenant_id":"tenant-b","public_field":"bravo","secret_field":"must-not-leak"}' >/dev/null
+# A shared index can contain multiple tenants; DLS must filter the other tenant's row.
+request -fsS -X PUT "$BASE/$INDEX_A/_doc/a2?refresh=true" -H 'content-type: application/json' \
+  -d '{"tenant_id":"tenant-b","public_field":"cross-tenant-canary","secret_field":"must-not-leak"}' >/dev/null
 
 create_key() {
   local tenant="$1" pattern="$2" out="$3"
