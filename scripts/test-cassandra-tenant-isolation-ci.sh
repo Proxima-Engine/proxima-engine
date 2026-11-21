@@ -32,14 +32,36 @@ docker exec -u 0 "$container" bash -ec 'set -eux
   config=/etc/cassandra/cassandra.yaml
   temporary_config="$(mktemp)"
   awk "
+    /^authenticator:[[:space:]]*[^[:space:]]/ {
+      sub(/:.*/, \": PasswordAuthenticator\")
+      section=\"\"
+      print
+      next
+    }
+    /^authorizer:[[:space:]]*[^[:space:]]/ {
+      sub(/:.*/, \": CassandraAuthorizer\")
+      section=\"\"
+      print
+      next
+    }
+    /^role_manager:[[:space:]]*[^[:space:]]/ {
+      sub(/:.*/, \": CassandraRoleManager\")
+      section=\"\"
+      print
+      next
+    }
     /^authenticator:[[:space:]]*$/ { section=\"authenticator\"; print; next }
     /^authorizer:[[:space:]]*$/ { section=\"authorizer\"; print; next }
+    /^role_manager:[[:space:]]*$/ { section=\"role_manager\"; print; next }
     /^[^[:space:]]/ { section=\"\" }
     section == \"authenticator\" && /^[[:space:]]*class_name:/ {
       sub(/class_name:.*/, \"class_name: PasswordAuthenticator\")
     }
     section == \"authorizer\" && /^[[:space:]]*class_name:/ {
       sub(/class_name:.*/, \"class_name: CassandraAuthorizer\")
+    }
+    section == \"role_manager\" && /^[[:space:]]*class_name:/ {
+      sub(/class_name:.*/, \"class_name: CassandraRoleManager\")
     }
     { print }
   " "$config" > "$temporary_config"
