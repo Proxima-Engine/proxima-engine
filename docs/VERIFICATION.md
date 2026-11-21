@@ -1,6 +1,6 @@
 # Verification and test guide
 
-Use this guide to run the Engine test suite, exercise tenant isolation across PostgreSQL, MySQL, MariaDB, CockroachDB, MongoDB, Redis, SQLite, Oracle and SQL Server's native database-per-tenant profile, verify the Docker image build and PgBouncer transaction-pool separation, inspect runtime endpoints, and validate signed local evidence. Record the exact source commit and toolchain with each result.
+Use this guide to run the Engine test suite, exercise tenant isolation across PostgreSQL, MySQL, MariaDB, CockroachDB, MongoDB, Redis, SQLite, Oracle, SQL Server's native database-per-tenant profile, Cassandra's keyspace-per-tenant profile, DynamoDB IAM policy helpers and Elasticsearch/OpenSearch native-role policy helpers, verify the Docker image build and PgBouncer transaction-pool separation, inspect runtime endpoints, and validate signed local evidence. Record the exact source commit and toolchain with each result.
 
 ## Verification workflow
 
@@ -146,11 +146,11 @@ The maximum lifetime is 900 seconds (15 minutes). The Engine records used nonces
 
 ## 8. CI workflow
 
-The [Rust CI workflow](https://github.com/Proxima-Engine/proxima-engine/actions/workflows/ci.yml) runs on pushes to `main` and pull requests targeting `main`. It provisions PostgreSQL 17, MySQL 8.0, MariaDB 11.4 and MongoDB 8; runs the Rust and CLI test suites; builds the release engine, MySQL gateway and MongoDB gateway; and executes real two-tenant acceptance tests for MySQL, MariaDB, PostgreSQL, CockroachDB 25.2 and MongoDB 8. It then builds the runtime Docker image and verifies PgBouncer tenant-pool isolation. SQLite is tested as an embedded file-per-tenant store; Oracle is tested as a schema-per-tenant profile against Oracle Free 23. The MongoDB and Redis protocol handlers remain restricted profiles, and CockroachDB uses its own native RLS compatibility profile.
+The [Rust CI workflow](https://github.com/Proxima-Engine/proxima-engine/actions/workflows/ci.yml) runs on pushes to `main` and pull requests targeting `main`. It provisions PostgreSQL 17, MySQL 8.0, MariaDB 11.4 and MongoDB 8; runs Rust and CLI suites; builds the release engine and released gateway binaries; and executes real two-tenant acceptance for MySQL, MariaDB, PostgreSQL, CockroachDB 25.2, MongoDB 8, and the Cassandra keyspace/role profile when its service job is enabled. It also exercises SQLite's embedded file boundary and Oracle's schema-per-tenant profile, plus the restricted Redis gateway and SQL Server native profile in their dedicated CI jobs. DynamoDB's IAM `LeadingKeys` condition requires a real AWS-account test; DynamoDB Local is insufficient. Elasticsearch and OpenSearch require independent real-cluster acceptance for their respective security APIs and are not certified by helper unit tests. CI build/test success is not equivalent to all-twelve-provider production acceptance.
 
 A green workflow run is direct evidence that those configured checks passed for its commit. For deployment acceptance, also verify the target environment's TLS, database roles/RLS, network policy, persistence, and recovery procedures.
 
-## Evidence record
+## Native provider helper boundaries\n\nDynamoDB, Cassandra, Elasticsearch and OpenSearch helper modules do not by themselves provide a Cloud provisioning service or a universal wire gateway. DynamoDB policy output must be applied by a trusted AWS IAM provisioning identity and tested against real IAM. Cassandra CQL must be executed through a separate administrative session with per-tenant credentials stored and rotated securely. Elasticsearch and OpenSearch role descriptors must be applied through their distinct native security APIs, then bound to tenant-specific API keys/backend roles. These helpers are not a substitute for those lifecycle executors.\n\n## Evidence record
 
 For each verification run, record:
 
