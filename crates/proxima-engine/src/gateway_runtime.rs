@@ -63,6 +63,10 @@ pub fn prepare_mysql_from_registry(
     executable_dir: &Path,
     state_dir: &Path,
 ) -> io::Result<PreparedGateway> {
+    let provider = required(assignment, "provider_key")?;
+    if provider != "mysql" && provider != "mariadb" {
+        return Err(invalid("this activation path currently supports only MySQL/MariaDB"));
+    }
     if runtime.get("schema_version").and_then(Value::as_u64) != Some(1)
         || required(runtime, "provider_key")? != provider
     {
