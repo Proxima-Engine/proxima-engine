@@ -7,10 +7,22 @@ tenant_b_password="$(openssl rand -hex 24)"
 cleanup() { docker rm -f "$container" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 
-# The official Cassandra image does not consistently apply auth settings from
-# environment variables across major versions. Set the authoritative YAML
-# configuration explicitly before running the acceptance checks.
-docker run -d --name "$container" -p 127.0.0.1:19042:9042 cassandra:5.0 >/dev/null
+# Let the image finish its first boot before editing its effective config.
+# Otherwise the entrypoint can race this change and start with AllowAll auth.
+initial_ready=0
+for _ in $(seq 1 120); do
+  if docker exec "$container" cqlsh -e "SELECT release_version FROM system.local" >/dev/null 2>&1; then
+    initial_ready=1
+    break
+  fi
+  sleep 5
+done
+if [[ "$initial_ready" != 1 ]]; then
+  docker logs "$container"
+  echo "Cassandra did not complete its initial startup" >&2
+  exit 1
+fi
+
 docker exec "$container" bash -ec '
   config=/etc/cassandra/cassandra.yaml
   sed -i -E \
