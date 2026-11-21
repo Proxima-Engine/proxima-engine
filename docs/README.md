@@ -15,6 +15,7 @@ The Proxima Engine documentation covers the Rust data plane, database protocol g
 - [Redis tenant gateway](REDIS_TENANT_GATEWAY.md) — restricted RESP2 TLS gateway, client identity binding, key namespace enforcement and Redis ACL configuration.
 - [SQLite tenant isolation](SQLITE_TENANCY.md) — embedded database-file-per-tenant storage, path safety and operating-system permissions.
 - [Oracle tenant isolation](ORACLE_TENANCY.md) — dedicated schema owners, bounded quota and least-privilege provisioning.
+- [Elasticsearch and OpenSearch tenant isolation](ELASTICSEARCH_TENANCY.md) — native roles, index namespaces, DLS/FLS constraints and separate distribution acceptance.
 - [SQL Server and Redis implementation plan](SQLSERVER_REDIS_IMPLEMENTATION_PLAN.md) — protocol feasibility decisions, security boundaries and acceptance criteria.
 - [Database production verification system](DATABASE_PRODUCTION_VERIFICATION.md) — target one-command real-database test runner, per-database acceptance suites, evidence reporting and production-confidence levels.
 - [Shared MySQL protocol authentication](MYSQL_GATEWAY_AUTH.md) — verifier formats and authentication behavior.
@@ -38,6 +39,7 @@ The Proxima Engine documentation covers the Rust data plane, database protocol g
 | Redis | [Tenant gateway](REDIS_TENANT_GATEWAY.md) | Restricted RESP2 TLS gateway with immutable tenant sessions, namespace rewriting and upstream Redis ACL users; limited command compatibility |
 | SQLite | [Tenant isolation](SQLITE_TENANCY.md) | Native embedded storage; separate SQLite file per tenant with path and filesystem protections |
 | Oracle Database | [Tenant isolation](ORACLE_TENANCY.md) | Native schema-per-tenant profile with dedicated users and least-privilege grants |
+| Elasticsearch / OpenSearch | [Tenant isolation](ELASTICSEARCH_TENANCY.md) | Native role/index authorization; DLS/FLS only where distribution/version/license supports it; separate adapters and acceptance required |
 
 ## Developer tools
 
