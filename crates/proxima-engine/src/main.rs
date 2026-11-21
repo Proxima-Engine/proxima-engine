@@ -618,6 +618,9 @@ async fn pull_and_stage_database_config_once(coordinator: &RuntimeCoordinator) -
             .map_err(|_| io::Error::other("invalid database configuration envelope key"))?
     );
     let mut staged = Vec::new();
+    // Keep decrypted credentials only in memory for the activation attempt.
+    // They must never be copied into the persisted desired-state document.
+    let mut activation_credentials: Option<serde_json::Value> = None;
     let records = bundle.get("assignments").and_then(serde_json::Value::as_array)
         .ok_or("configuration bundle assignments must be an array")?;
     if records.len() > 1 {
@@ -684,9 +687,10 @@ async fn pull_and_stage_database_config_once(coordinator: &RuntimeCoordinator) -
         if host.len() > 255 || database_name.len() > 255 || port == 0 {
             return Err("database target endpoint exceeds supported limits".into());
         }
+        activation_credentials = Some(credentials);
         let mut item = record.clone();
         item.as_object_mut().ok_or("assignment entry must be an object")?.remove("credential_envelope");
-        item.as_object_mut().unwrap().insert("credentials".into(), credentials);
+        item.as_object_mut().unwrap().remove("credentials");
         staged.push(item);
     }
 
@@ -729,13 +733,13 @@ async fn pull_and_stage_database_config_once(coordinator: &RuntimeCoordinator) -
     }
 
     // The signed Cloud acknowledgement is derived from the actual runtime result.
-    // Preview providers remain staged; enabled MySQL/MariaDB assignments may activate.
+    // Only an enabled provider with a healthy supervised runtime can be applied.
     let mut ack_status = "staged";
     let mut ack_healthy = false;
     let mut ack_error_code: Option<String> = None;
 
-    // Persist the authenticated desired revision separately from the staged
-    // credential document. A downloaded bundle is not an applied runtime.
+    // Persist non-secret desired state separately from the in-memory
+    // credentials used by the provider activation path.
     if let Some(record) = records.first() {
         let assignment_id = record.get("assignment_id").and_then(serde_json::Value::as_str)
             .ok_or("assignment ID missing")?;
@@ -764,15 +768,16 @@ async fn pull_and_stage_database_config_once(coordinator: &RuntimeCoordinator) -
         runtime_reconciliation::persist(&state_path, &state)?;
 
         let cloud_state = record.get("cloud_integration_state")
-            .and_then(serde_json::Value::as_str).unwrap_or("preview");
+            .and_then(serde_json::Value::as_str).unwrap_or("disabled");
         let gateway_runtime_name = record.get("gateway_runtime")
             .and_then(serde_json::Value::as_str).unwrap_or_default();
 
         if cloud_state == "enabled" && matches!(gateway_runtime_name, "proxima-mysql-gateway") {
-            let staged_record = staged.first().ok_or("decrypted assignment was not staged")?;
+            let credentials = activation_credentials.as_ref()
+                .ok_or("decrypted provider credentials are unavailable in memory")?;
             match gateway_runtime::prepare_mysql(
                 record,
-                &staged_record["credentials"],
+                credentials,
                 executable_dir,
                 parent,
             ) {
