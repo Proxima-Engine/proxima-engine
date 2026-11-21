@@ -36,6 +36,19 @@ bash scripts/test-elasticsearch-tenant-isolation.sh
 
 The script requires `curl` and `jq`; TLS certificate verification remains enabled. Use a disposable cluster only. It does not verify OpenSearch, which has a separate Security-plugin API and must be accepted independently.
 
+## OpenSearch real-cluster acceptance script
+
+Run the separate OpenSearch Security-plugin suite against a disposable HTTPS cluster with the Security plugin enabled. The script creates two temporary native roles, internal users and backend-role mappings, then checks tenant-local reads, shared-index DLS filtering, FLS redaction, cross-index denial and cluster-privilege denial. It removes its test users, mappings, roles and indices on exit.
+
+```bash
+export OPENSEARCH_URL='https://127.0.0.1:9200'
+export OPENSEARCH_ADMIN_USER='admin'
+export OPENSEARCH_ADMIN_PASSWORD='<disposable-cluster-password>'
+bash scripts/test-opensearch-tenant-isolation.sh
+```
+
+The script requires `curl`, `jq` and `openssl`; TLS certificate verification remains enabled. Use a disposable cluster only.
+
 ## Acceptance matrix
 
 For each supported distribution and exact version:
