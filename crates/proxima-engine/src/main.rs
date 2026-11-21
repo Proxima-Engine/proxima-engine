@@ -933,12 +933,13 @@ async fn pull_and_stage_database_config_once(coordinator: &RuntimeCoordinator) -
 
 fn spawn_node_database_config_worker() {
     tokio::spawn(async {
+        let coordinator = RuntimeCoordinator::new();
         let mut interval=tokio::time::interval(std::time::Duration::from_secs(30));
         loop {
             interval.tick().await;
-            match pull_and_stage_database_config_once().await {
+            match pull_and_stage_database_config_once(&coordinator).await {
                 Ok(())=>{},
-                Err(error)=>tracing::warn!(%error,"database configuration pull/stage cycle failed; current gateway configuration is unchanged"),
+                Err(error)=>tracing::warn!(%error,"database configuration reconciliation cycle failed; current runtime state is retained"),
             }
         }
     });
