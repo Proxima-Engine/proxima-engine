@@ -66,7 +66,8 @@ impl Kube {
     }
 
     fn path(&self, resource: &str, name: Option<&str>) -> String {
-        let root = format!("/apis/apps/v1/namespaces/{}/{}", self.namespace, resource);
+        let api = if resource == "services" { "/api/v1" } else { "/apis/apps/v1" };
+        let root = format!("{api}/namespaces/{}/{}", self.namespace, resource);
         match name {
             Some(name) => format!("{root}/{name}?fieldManager={}&force=true", self.field_manager),
             None => root,
