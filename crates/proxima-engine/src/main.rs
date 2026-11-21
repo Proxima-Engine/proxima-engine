@@ -561,6 +561,39 @@ async fn bootstrap_node_identity() -> Result<(), Box<dyn std::error::Error + Sen
     Ok(())
 }
 
+fn validate_tenant_bindings(record: &serde_json::Value) -> Result<(), &'static str> {
+    let bindings = record.get("tenant_bindings")
+        .and_then(serde_json::Value::as_array)
+        .ok_or("tenant database bindings are missing or invalid")?;
+    if bindings.len() > 10_000 {
+        return Err("tenant database binding count exceeds the supported limit");
+    }
+    let mut tenant_ids = std::collections::HashSet::new();
+    let mut namespaces = std::collections::HashSet::new();
+    for binding in bindings {
+        let tenant_id = binding.get("tenant_id").and_then(serde_json::Value::as_str)
+            .filter(|value| !value.is_empty()).ok_or("tenant binding has no tenant ID")?;
+        let namespace = binding.get("namespace").and_then(serde_json::Value::as_str)
+            .filter(|value| !value.is_empty()).ok_or("tenant binding has no namespace")?;
+        let status = binding.get("status").and_then(serde_json::Value::as_str)
+            .ok_or("tenant binding has no lifecycle status")?;
+        if !matches!(status, "pending" | "provisioning" | "active") {
+            return Err("tenant binding lifecycle status is not deployable");
+        }
+        if tenant_id.len() > 128 || namespace.len() > 255
+            || !tenant_id.bytes().all(|byte| byte.is_ascii_graphic())
+            || !namespace.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'))
+            || namespace.contains("..")
+        {
+            return Err("tenant binding contains an invalid tenant ID or namespace");
+        }
+        if !tenant_ids.insert(tenant_id) || !namespaces.insert(namespace) {
+            return Err("tenant bindings contain duplicate tenant IDs or namespaces");
+        }
+    }
+    Ok(())
+}
+
 async fn pull_and_stage_database_config_once() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     use std::{env, fs, io::Write, path::PathBuf, time::{SystemTime, UNIX_EPOCH}};
     let node_id = env::var("PROXIMA_NODE_ID")?;
@@ -624,6 +657,8 @@ async fn pull_and_stage_database_config_once() -> Result<(), Box<dyn std::error:
     let executable = env::current_exe()?;
     let executable_dir = executable.parent().ok_or("Engine executable directory is unavailable")?;
     for record in records {
+        validate_tenant_bindings(record)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
         if record.get("tls_mode").and_then(serde_json::Value::as_str) != Some("verify-full") {
             return Err("assigned database target does not require full upstream TLS verification".into());
         }
@@ -1633,6 +1668,46 @@ fn breaker_config_enabled() -> bool {
         mode.trim().to_ascii_lowercase().as_str(),
         "off" | "disabled" | "false" | "0"
     )
+}
+
+#[cfg(test)]
+mod tenant_database_binding_validation_tests {
+    use super::validate_tenant_bindings;
+
+    #[test]
+    fn accepts_distinct_tenant_namespaces() {
+        let record = serde_json::json!({"tenant_bindings":[
+            {"tenant_id":"tenant-a","namespace":"tenant_a","status":"active"},
+            {"tenant_id":"tenant-b","namespace":"tenant_b","status":"pending"}
+        ]});
+        assert!(validate_tenant_bindings(&record).is_ok());
+    }
+
+    #[test]
+    fn rejects_duplicate_tenant_ids_and_namespaces() {
+        let duplicate_tenant = serde_json::json!({"tenant_bindings":[
+            {"tenant_id":"tenant-a","namespace":"one","status":"active"},
+            {"tenant_id":"tenant-a","namespace":"two","status":"active"}
+        ]});
+        let duplicate_namespace = serde_json::json!({"tenant_bindings":[
+            {"tenant_id":"tenant-a","namespace":"shared","status":"active"},
+            {"tenant_id":"tenant-b","namespace":"shared","status":"active"}
+        ]});
+        assert!(validate_tenant_bindings(&duplicate_tenant).is_err());
+        assert!(validate_tenant_bindings(&duplicate_namespace).is_err());
+    }
+
+    #[test]
+    fn rejects_revoked_or_malformed_bindings() {
+        let revoked = serde_json::json!({"tenant_bindings":[
+            {"tenant_id":"tenant-a","namespace":"one","status":"revoked"}
+        ]});
+        let malformed = serde_json::json!({"tenant_bindings":[
+            {"tenant_id":"tenant-a","namespace":"../escape","status":"active"}
+        ]});
+        assert!(validate_tenant_bindings(&revoked).is_err());
+        assert!(validate_tenant_bindings(&malformed).is_err());
+    }
 }
 
 #[cfg(test)]
