@@ -171,7 +171,7 @@ mod tests {
             {"tenant_id":"tenant-b"}
         ]);
         let result = prepare_mysql(&assignment, &credentials, &executable_dir, temp.path());
-        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::PermissionDenied);
+        assert!(matches!(result, Err(ref error) if error.kind() == io::ErrorKind::PermissionDenied));
     }
 
     #[test]
