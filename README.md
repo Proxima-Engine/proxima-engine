@@ -17,7 +17,7 @@
 
 **Start:** [What is Agata Proxima?](#what-is-agata-proxima) · [Launch evaluation](docs/LAUNCH.md) · [Quickstart](docs/QUICKSTART.md) · [Local developer mode](docs/LOCAL_DEVELOPMENT.md) · [Engine CLI](docs/CLI.md) · [Documentation index](docs/README.md)
 
-**Technical guides:** [Architecture](docs/ARCHITECTURE.md) · [Phase One Cloud-to-Engine runtime](docs/CLOUD_ENGINE_RUNTIME_LIFECYCLE.md) · [Tenant isolation](docs/TENANT_ISOLATION.md) · [Driver integrations](docs/INTEGRATIONS.md) · [API and metrics](docs/API.md) · [Security](docs/SECURITY.md) · [Deployment](docs/DEPLOYMENT.md) · [Verification](docs/VERIFICATION.md)
+**Technical guides:** [Architecture](docs/ARCHITECTURE.md) · [Cloud-to-Engine runtime lifecycle](docs/CLOUD_ENGINE_RUNTIME_LIFECYCLE.md) · [Tenant isolation](docs/TENANT_ISOLATION.md) · [Driver integrations](docs/INTEGRATIONS.md) · [API and metrics](docs/API.md) · [Security](docs/SECURITY.md) · [Deployment](docs/DEPLOYMENT.md) · [Verification](docs/VERIFICATION.md)
 
 
 
