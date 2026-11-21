@@ -742,8 +742,12 @@ async fn pull_and_stage_database_config_once() -> Result<(), Box<dyn std::error:
             return Err("database target endpoint exceeds supported limits".into());
         }
         let mut item = record.clone();
+        // The shared desired-state file is consumed by the Kubernetes
+        // controller, so persist routing metadata only. Never place decrypted
+        // database usernames/passwords on the controller-readable PVC; the
+        // authenticated credential envelope is validated above and then dropped.
         item.as_object_mut().ok_or("assignment entry must be an object")?.remove("credential_envelope");
-        item.as_object_mut().unwrap().insert("credentials".into(), credentials);
+        item.as_object_mut().unwrap().remove("credentials");
         staged.push(item);
     }
 
