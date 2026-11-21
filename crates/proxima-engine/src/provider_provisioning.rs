@@ -526,6 +526,15 @@ mod tests {
             let runtime = mysql_gateway_runtime_config(plan.provider, &plan.identities, "db.example.com", 3306).unwrap();
             assert_eq!(runtime["users"].as_array().unwrap().len(), 2);
             assert_eq!(runtime["provider_key"], provider);
+            if provider == "mysql" {
+                assert_eq!(runtime["users"][0]["auth_plugin"], "caching_sha2_password");
+                assert!(runtime["users"][0].get("password_sha256").is_some());
+                assert!(runtime["users"][0].get("password_sha1").is_none());
+            } else {
+                assert_eq!(runtime["users"][0]["auth_plugin"], "mysql_native_password");
+                assert!(runtime["users"][0].get("password_sha1").is_some());
+                assert!(runtime["users"][0].get("password_sha256").is_none());
+            }
         }
     }
 
