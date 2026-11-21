@@ -600,7 +600,11 @@ pub async fn apply_tenant_revocation(
                     drop(connection);
                     return Err(ProvisioningError::ProviderIsolationFailed);
                 }
-                Err(error) if error.code().is_some() => {}
+                Err(error)
+                    if error.code().is_some_and(|code| {
+                        code == &tokio_postgres::error::SqlState::INVALID_PASSWORD
+                            || code == &tokio_postgres::error::SqlState::INVALID_AUTHORIZATION_SPECIFICATION
+                    }) => {}
                 Err(_) => return Err(ProvisioningError::ProviderConnectionFailed),
             }
         }
@@ -625,7 +629,10 @@ pub async fn apply_tenant_revocation(
                     drop(connection);
                     return Err(ProvisioningError::ProviderIsolationFailed);
                 }
-                Err(mysql_async::Error::Server(_)) => {}
+                Err(mysql_async::Error::Server(server))
+                    if server.code == 1045
+                        || server.code == 1698
+                        || server.state.as_deref() == Some("28000") => {}
                 Err(_) => return Err(ProvisioningError::ProviderConnectionFailed),
             }
         }
