@@ -63,7 +63,8 @@ mod tests {
     fn escapes_password_and_rejects_identifier_injection() {
         let t = CassandraTenant::new("tenant_a", "a-long-random-password-with-'quote").unwrap();
         assert!(t.provisioning_cql("dc1", 1).unwrap()[1].contains("''"));
-        assert!(matches!(CassandraTenant::new("a; DROP KEYSPACE x", "a-long-random-cassandra-secret"), Err(CassandraTenantError::InvalidTenantId)));\n        assert!(matches!(CassandraTenant::new("Customer_01", "a-long-random-cassandra-secret"), Err(CassandraTenantError::InvalidTenantId)));
+        assert!(matches!(CassandraTenant::new("a; DROP KEYSPACE x", "a-long-random-cassandra-secret"), Err(CassandraTenantError::InvalidTenantId)));
+        assert!(matches!(CassandraTenant::new("Customer_01", "a-long-random-cassandra-secret"), Err(CassandraTenantError::InvalidTenantId)));
     }
     #[test]
     fn rejects_weak_secrets_and_invalid_topology() {
