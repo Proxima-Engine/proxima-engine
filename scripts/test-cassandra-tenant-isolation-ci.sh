@@ -8,6 +8,7 @@ cleanup() { docker rm -f "$container" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 
 # Start an unauthenticated bootstrap instance; authentication is enabled after first startup.
+echo "Starting disposable Cassandra 5 container"
 docker run -d --name "$container" -p 127.0.0.1:19042:9042 cassandra:5.0 >/dev/null
 
 # Let the image finish its first boot before editing its effective config.
@@ -25,8 +26,10 @@ if [[ "$initial_ready" != 1 ]]; then
   echo "Cassandra did not complete its initial startup" >&2
   exit 1
 fi
+echo "Cassandra initial startup is ready"
 
-docker exec -u 0 "$container" bash -ec '
+docker exec -u 0 "$container" bash -ec 'set -eux
+
   config=/etc/cassandra/cassandra.yaml
   sed -i -E \
     -e "s/^([[:space:]]*authenticator:).*/\\1 PasswordAuthenticator/" \
@@ -34,9 +37,11 @@ docker exec -u 0 "$container" bash -ec '
     "$config"
   grep -Eq "^authenticator:[[:space:]]*PasswordAuthenticator$" "$config"
   grep -Eq "^authorizer:[[:space:]]*CassandraAuthorizer$" "$config"
-  grep -A2 -E "^role_manager:" "$config" | grep -Eq "class_name:[[:space:]]*CassandraRoleManager"
+  grep -A4 -E "^role_manager:" "$config" | grep -Eq "class_name:[[:space:]]*CassandraRoleManager"
 '
+echo "Cassandra authentication configuration updated"
 docker restart "$container" >/dev/null
+echo "Cassandra restarted with authentication enabled"
 
 ready=0
 for _ in $(seq 1 120); do
