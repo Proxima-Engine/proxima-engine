@@ -206,3 +206,12 @@ Run the real Oracle Free 23 acceptance fixture with Docker available:
     ORACLE_PASSWORD='a-long-random-local-test-password' bash scripts/test-oracle-tenant-isolation-ci.sh
 
 The test creates two schema owners with separate credentials and bounded tablespace quotas, verifies each tenant's local CRUD, and confirms that cross-schema reads and DBA role activation are denied. It destroys the disposable Oracle container on exit. See [Oracle tenant isolation](ORACLE_TENANCY.md).
+
+
+## 12. Verify Elasticsearch native tenant roles
+
+Run the real-cluster acceptance script against a disposable HTTPS Elasticsearch cluster with the required DLS/FLS feature entitlement:
+
+    bash scripts/test-elasticsearch-tenant-isolation.sh
+
+It creates two tenant API keys with independent index namespaces, then checks tenant-local reads, shared-index DLS filtering, FLS redaction, cross-index denial and cluster-privilege denial. The script invalidates its API keys and removes test indices on exit. It requires curl and jq. OpenSearch is not covered by this script and must be tested independently against its Security plugin.
