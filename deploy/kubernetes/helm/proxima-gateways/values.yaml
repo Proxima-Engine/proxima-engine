@@ -1,0 +1,74 @@
+image:
+  repository: ghcr.io/proxima-engine/proxima-engine
+  tag: latest
+  pullPolicy: IfNotPresent
+nameOverride: ""
+fullnameOverride: ""
+podAnnotations: {}
+imagePullSecrets: []
+serviceAccount:
+  create: true
+  name: ""
+  automountServiceAccountToken: false
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+  runAsNonRoot: true
+  runAsUser: 10001
+resources:
+  requests: {cpu: 100m, memory: 128Mi}
+  limits: {cpu: "1", memory: 512Mi}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+networkPolicy:
+  enabled: true
+  clientPodSelector:
+    proxima.io/client: "true"
+  egressCIDRs: []
+  egressPorts: []
+gateways:
+  mysql:
+    enabled: false
+    replicas: 2
+    port: 3307
+    secretName: proxima-mysql-gateway
+    registryKey: users.json
+    env:
+      PROXIMA_MYSQL_LISTEN_ADDR: "0.0.0.0:3307"
+      PROXIMA_MYSQL_IDENTITY_REGISTRY: /var/run/proxima/users.json
+  mongodb:
+    enabled: false
+    replicas: 2
+    port: 27018
+    secretName: proxima-mongodb-gateway
+    env:
+      PROXIMA_MONGODB_LISTEN_ADDR: "0.0.0.0:27018"
+      PROXIMA_MONGODB_IDENTITY_REGISTRY: /var/run/proxima/users.json
+      PROXIMA_MONGODB_UPSTREAM_ADDR: ""
+      PROXIMA_MONGODB_UPSTREAM_TLS: "true"
+      PROXIMA_MONGODB_UPSTREAM_TLS_SERVER_NAME: ""
+      PROXIMA_MONGODB_UPSTREAM_TLS_CA_FILE: /var/run/proxima/ca.crt
+      PROXIMA_MONGODB_TLS_CERT_FILE: /var/run/proxima/tls.crt
+      PROXIMA_MONGODB_TLS_KEY_FILE: /var/run/proxima/tls.key
+  redis:
+    enabled: false
+    replicas: 2
+    port: 6380
+    secretName: proxima-redis-gateway
+    env:
+      PROXIMA_REDIS_LISTEN_ADDR: "0.0.0.0:6380"
+      PROXIMA_REDIS_IDENTITY_REGISTRY: /var/run/proxima/users.json
+      PROXIMA_REDIS_UPSTREAM_ADDR: ""
+      PROXIMA_REDIS_UPSTREAM_TLS_SERVER_NAME: ""
+      PROXIMA_REDIS_UPSTREAM_TLS_CA_FILE: /var/run/proxima/ca.crt
+      PROXIMA_REDIS_TLS_CERT_FILE: /var/run/proxima/tls.crt
+      PROXIMA_REDIS_TLS_KEY_FILE: /var/run/proxima/tls.key
