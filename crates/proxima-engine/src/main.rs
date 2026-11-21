@@ -594,6 +594,32 @@ fn validate_tenant_bindings(record: &serde_json::Value) -> Result<(), &'static s
     Ok(())
 }
 
+/// The Engine's native PostgreSQL listener has one upstream, but gateway
+/// assignments are independent Kubernetes workloads and therefore each gets
+/// its own process. Do not impose the native listener's cardinality on gateways.
+fn validate_assignment_runtime_cardinality(records: &[serde_json::Value]) -> Result<(), &'static str> {
+    let mut native_engine_assignments = 0usize;
+    let mut assignment_ids = std::collections::HashSet::new();
+    for record in records {
+        let id = record.get("assignment_id").and_then(serde_json::Value::as_str)
+            .filter(|value| !value.trim().is_empty()).ok_or("assignment ID missing")?;
+        if !assignment_ids.insert(id) {
+            return Err("configuration bundle contains duplicate assignment IDs");
+        }
+        let runtime = record.get("gateway_runtime").and_then(serde_json::Value::as_str)
+            .ok_or("gateway runtime is missing")?;
+        if runtime == "proxima-engine" {
+            native_engine_assignments += 1;
+        } else if !matches!(runtime, "proxima-mysql-gateway" | "proxima-mongodb-gateway" | "proxima-redis-gateway") {
+            return Err("assigned gateway runtime is not supported");
+        }
+    }
+    if native_engine_assignments > 1 {
+        return Err("this Engine node supports one native proxima-engine upstream assignment");
+    }
+    Ok(())
+}
+
 async fn pull_and_stage_database_config_once() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     use std::{env, fs, io::Write, path::PathBuf, time::{SystemTime, UNIX_EPOCH}};
     let node_id = env::var("PROXIMA_NODE_ID")?;
@@ -651,9 +677,7 @@ async fn pull_and_stage_database_config_once() -> Result<(), Box<dyn std::error:
     let mut staged = Vec::new();
     let records = bundle.get("assignments").and_then(serde_json::Value::as_array)
         .ok_or("configuration bundle assignments must be an array")?;
-    if records.len() > 1 {
-        return Err("this Engine node supports one active upstream target per gateway process".into());
-    }
+    validate_assignment_runtime_cardinality(records)?;
     let executable = env::current_exe()?;
     let executable_dir = executable.parent().ok_or("Engine executable directory is unavailable")?;
     for record in records {
@@ -830,6 +854,43 @@ fn spawn_node_database_config_worker() {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod assignment_runtime_cardinality_tests {
+    use super::validate_assignment_runtime_cardinality;
+    use serde_json::json;
+
+    #[test]
+    fn accepts_multiple_independent_gateway_assignments() {
+        let records = vec![
+            json!({"assignment_id":"mysql-a","gateway_runtime":"proxima-mysql-gateway"}),
+            json!({"assignment_id":"mysql-b","gateway_runtime":"proxima-mysql-gateway"}),
+            json!({"assignment_id":"mongo-a","gateway_runtime":"proxima-mongodb-gateway"}),
+            json!({"assignment_id":"redis-a","gateway_runtime":"proxima-redis-gateway"}),
+        ];
+        assert!(validate_assignment_runtime_cardinality(&records).is_ok());
+    }
+
+    #[test]
+    fn keeps_native_engine_listener_single_upstream() {
+        let records = vec![
+            json!({"assignment_id":"pg-a","gateway_runtime":"proxima-engine"}),
+            json!({"assignment_id":"pg-b","gateway_runtime":"proxima-engine"}),
+        ];
+        assert!(validate_assignment_runtime_cardinality(&records).is_err());
+    }
+
+    #[test]
+    fn rejects_duplicate_assignment_ids_and_unknown_runtimes() {
+        let duplicate = vec![
+            json!({"assignment_id":"same","gateway_runtime":"proxima-mysql-gateway"}),
+            json!({"assignment_id":"same","gateway_runtime":"proxima-redis-gateway"}),
+        ];
+        let unknown = vec![json!({"assignment_id":"x","gateway_runtime":"made-up"})];
+        assert!(validate_assignment_runtime_cardinality(&duplicate).is_err());
+        assert!(validate_assignment_runtime_cardinality(&unknown).is_err());
+    }
 }
 
 #[tokio::main]
