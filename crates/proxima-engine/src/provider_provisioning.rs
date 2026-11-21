@@ -169,26 +169,27 @@ pub fn build_provisioning_plan(request: ProvisioningRequest<'_>) -> Result<Provi
                 let password = sql_literal(upstream_password.expose()?);
                 let schema_name = pg_identifier(&binding.namespace);
                 let database = pg_identifier(request.database_name);
-                statements.push(statement("create_or_rotate_role", format!(
-                    "CREATE ROLE IF NOT EXISTS {role}; ALTER ROLE {role} WITH PASSWORD = {password}"
-                )));
+                statements.push(statement("create_tenant_role", format!("CREATE ROLE IF NOT EXISTS {role}")));
+                statements.push(statement("rotate_tenant_role_password", format!("ALTER ROLE {role} WITH PASSWORD = {password}")));
                 statements.push(statement("create_tenant_schema", format!("CREATE SCHEMA IF NOT EXISTS {schema_name}")));
-                statements.push(statement("grant_database_connect", format!("GRANT CONNECT ON DATABASE {database} TO {role}")));
                 statements.push(statement("grant_tenant_schema", format!("GRANT USAGE, CREATE ON SCHEMA {schema_name} TO {role}")));
                 statements.push(statement("set_tenant_search_path", format!(
                     "ALTER ROLE {role} SET search_path = {schema_name}, public"
                 )));
             }
             CoreProvider::MySql | CoreProvider::MariaDb => {
-                let user = mysql_identifier(&username);
+                let user = sql_literal(&username);
                 let host = sql_literal("%");
                 let password = sql_literal(upstream_password.expose()?);
                 let database = mysql_identifier(&binding.namespace);
                 statements.push(statement("create_tenant_database", format!(
                     "CREATE DATABASE IF NOT EXISTS {database} CHARACTER SET utf8mb4"
                 )));
-                statements.push(statement("create_or_rotate_upstream_user", format!(
-                    "CREATE USER IF NOT EXISTS {user}@{host} IDENTIFIED BY {password}; ALTER USER {user}@{host} IDENTIFIED BY {password}"
+                statements.push(statement("create_tenant_upstream_user", format!(
+                    "CREATE USER IF NOT EXISTS {user}@{host} IDENTIFIED BY {password}"
+                )));
+                statements.push(statement("rotate_tenant_upstream_user", format!(
+                    "ALTER USER {user}@{host} IDENTIFIED BY {password}"
                 )));
                 statements.push(statement("grant_tenant_database", format!(
                     "GRANT SELECT, INSERT, UPDATE, DELETE ON {database}.* TO {user}@{host}"
@@ -260,11 +261,15 @@ pub fn build_revocation_statements(
     validate_username(provider, username)?;
     validate_database_name(database_name)?;
     validate_namespace(namespace)?;
-    let user = if provider.is_mysql_family() { mysql_identifier(username) } else { pg_identifier(username) };
+    let user = if provider.is_mysql_family() { sql_literal(username) } else { pg_identifier(username) };
     let statements = match provider {
-        CoreProvider::PostgreSql | CoreProvider::CockroachDb => vec![
+        CoreProvider::PostgreSql => vec![
             statement("disable_tenant_login", format!("ALTER ROLE {user} NOLOGIN")),
             statement("revoke_database_connect", format!("REVOKE CONNECT ON DATABASE {} FROM {user}", pg_identifier(database_name))),
+            statement("revoke_schema_privileges", format!("REVOKE ALL PRIVILEGES ON SCHEMA {} FROM {user}", pg_identifier(namespace))),
+        ],
+        CoreProvider::CockroachDb => vec![
+            statement("disable_tenant_login", format!("ALTER ROLE {user} NOLOGIN")),
             statement("revoke_schema_privileges", format!("REVOKE ALL PRIVILEGES ON SCHEMA {} FROM {user}", pg_identifier(namespace))),
         ],
         CoreProvider::MySql | CoreProvider::MariaDb => vec![
