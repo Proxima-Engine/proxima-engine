@@ -7,6 +7,9 @@ tenant_b_password="$(openssl rand -hex 24)"
 cleanup() { docker rm -f "$container" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 
+# Start an unauthenticated bootstrap instance; authentication is enabled after first startup.
+docker run -d --name "$container" -p 127.0.0.1:19042:9042 cassandra:5.0 >/dev/null
+
 # Let the image finish its first boot before editing its effective config.
 # Otherwise the entrypoint can race this change and start with AllowAll auth.
 initial_ready=0
