@@ -38,7 +38,7 @@ The Proxima Engine documentation covers the Rust data plane, database protocol g
 | MySQL | [Dedicated guide](MYSQL.md), [authentication](MYSQL_GATEWAY_AUTH.md) | proxima-mysql-gateway; MySQL 8.0 integration suite in CI |
 | MariaDB | [Dedicated guide](MARIADB.md), [authentication](MYSQL_GATEWAY_AUTH.md) | MySQL-compatible client protocol gateway |
 | CockroachDB 25.2+ | [Compatibility profile](COCKROACHDB_COMPATIBILITY.md) | PostgreSQL wire gateway with CockroachDB-native forced RLS and tenant-role acceptance test |
-| MongoDB 8 | [Restricted gateway guide](MONGODB_TENANT_ISOLATION.md) | Separate OP_MSG gateway; SCRAM-SHA-256, TLS, database-per-tenant isolation; restricted preview, not full feature parity |
+| MongoDB 8 | [Restricted gateway guide](MONGODB_TENANT_ISOLATION.md) | Separate OP_MSG gateway; SCRAM-SHA-256, TLS, database-per-tenant isolation; documented restricted command contract |
 | SQL Server | [Native tenant isolation](SQLSERVER_NATIVE_TENANCY.md) | Native database-per-tenant profile with dedicated SQL login; no Proxima TDS proxy or shared-database RLS gateway |
 | Redis | [Tenant gateway](REDIS_TENANT_GATEWAY.md) | Restricted RESP2 TLS gateway with immutable tenant sessions, namespace rewriting and upstream Redis ACL users; limited command compatibility |
 | SQLite | [Tenant isolation](SQLITE_TENANCY.md) | Native embedded storage; separate SQLite file per tenant with path and filesystem protections |
