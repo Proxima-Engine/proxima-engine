@@ -1,14 +1,16 @@
 # Proxima Engine documentation
 
-- [Cloud-to-Engine runtime reconciliation](CLOUD_ENGINE_RUNTIME_LIFECYCLE.md)
+- [Phase One Cloud-to-Engine runtime lifecycle](CLOUD_ENGINE_RUNTIME_LIFECYCLE.md) — node authentication, signed configuration, encrypted credentials, durable reconciliation, supervised activation, provider health checks, acknowledgement, revision replacement and revocation.
 
 The Proxima Engine documentation covers the Rust data plane, database protocol gateways, tenant identity, security controls, deployment and integration verification.
 
 ## Start here
 
-- **[Repository README](../README.md)** — product scope, database gateway matrix, architecture, clone instructions and quickstarts.
-- **[PostgreSQL documentation hub](POSTGRESQL.md)** — complete reference-database guide and navigation for setup, tenant isolation, drivers, deployment and evidence.
-- **[PostgreSQL quickstart](QUICKSTART.md)** — launch PostgreSQL and Proxima Engine, run SQL and inspect health and metrics.
+- **[Repository README](../README.md)** — product scope, multi-database integration matrix, architecture, clone instructions and quickstarts.
+- **[Architecture](ARCHITECTURE.md)** — request lifecycle, tenant identity, provider boundaries and control-plane responsibilities.
+- **[Phase One runtime lifecycle](CLOUD_ENGINE_RUNTIME_LIFECYCLE.md)** — complete Cloud-to-Engine assignment and runtime reference.
+- **[PostgreSQL documentation hub](POSTGRESQL.md)** — PostgreSQL setup, tenant isolation, drivers, deployment and evidence.
+- **[PostgreSQL quickstart](QUICKSTART.md)** — launch the local PostgreSQL profile, run SQL and inspect health and metrics.
 - **[MySQL documentation](MYSQL.md)** — provision MySQL tenant databases, configure client verifiers, connect clients and run the MySQL 8.0 integration suite.
 - **[MariaDB documentation](MARIADB.md)** — provision MariaDB tenant databases, configure client identities, connect clients and run the MariaDB 11.4 integration suite.
 - **[CockroachDB compatibility](COCKROACHDB_COMPATIBILITY.md)** — CockroachDB 25.2+ using the PostgreSQL wire gateway, native RLS, tenant roles and transaction retry behavior.
@@ -67,7 +69,7 @@ The Proxima Engine documentation covers the Rust data plane, database protocol g
 
 ## Multi-database Cloud architecture
 
-- [Database gateways in Agata Proxima Cloud](CLOUD_CONTROL_PLANE.md) — current PostgreSQL-oriented hosted contract, the current local MySQL/MariaDB Engine boundary, and the staged architecture for engine-aware database targets, gateway nodes, tenant bindings, policies, deployment and verification.
+- [Database gateways in Agata Proxima Cloud](CLOUD_CONTROL_PLANE.md) — organization-scoped database targets, enrolled Engine nodes, tenant bindings, signed configuration delivery, provider-specific runtime activation and lifecycle acknowledgements.
 
 ## Security and hosted product
 
