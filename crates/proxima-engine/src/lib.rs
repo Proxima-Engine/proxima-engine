@@ -39,3 +39,5 @@ pub mod opensearch_tenant;
 pub mod runtime_reconciliation;
 
 pub mod kubernetes_reconciler;
+
+pub mod provider_provisioning;
