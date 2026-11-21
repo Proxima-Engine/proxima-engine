@@ -52,6 +52,7 @@ impl fmt::Debug for Secret {
 pub enum ProvisioningError {
     UnsupportedProvider, InvalidTenantId, InvalidNamespace, InvalidDatabaseName,
     EmptyBindings, DuplicateTenant, DuplicateNamespace, RandomGenerationFailed, InvalidSecret,
+    ProviderConnectionFailed, ProviderStatementFailed, ProviderHealthCheckFailed, TlsConfigurationFailed,
 }
 impl fmt::Display for ProvisioningError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -266,7 +267,7 @@ pub fn build_rotation_statement(
     let sql = match provider {
         CoreProvider::PostgreSql => format!("ALTER ROLE {} WITH LOGIN PASSWORD {password}", pg_identifier(username)),
         CoreProvider::CockroachDb => format!("ALTER ROLE {} WITH PASSWORD = {password}", pg_identifier(username)),
-        CoreProvider::MySql | CoreProvider::MariaDb => format!("ALTER USER {}@'%' IDENTIFIED BY {password}", mysql_identifier(username)),
+        CoreProvider::MySql | CoreProvider::MariaDb => format!("ALTER USER {}@'%' IDENTIFIED BY {password}", sql_literal(username)),
     };
     Ok(statement("rotate_tenant_credential", sql))
 }
@@ -303,9 +304,10 @@ fn statement(purpose: &'static str, sql: String) -> ProvisioningStatement {
 fn random_hex_secret(bytes: usize) -> Result<Secret, ProvisioningError> {
     let mut raw = vec![0u8; bytes];
     SystemRandom::new().fill(&mut raw).map_err(|_| ProvisioningError::RandomGenerationFailed)?;
-    let encoded = hex::encode(&raw);
+    let mut encoded = vec![0u8; bytes * 2];
+    hex::encode_to_slice(&raw, &mut encoded).map_err(|_| ProvisioningError::RandomGenerationFailed)?;
     raw.fill(0);
-    Ok(Secret::new(encoded))
+    Ok(Secret(encoded))
 }
 fn provider_username(provider: CoreProvider, tenant_id: Uuid) -> String {
     let compact = tenant_id.simple().to_string();
