@@ -53,7 +53,7 @@ The exact flags may change during implementation, but the one-command and per-da
 | DynamoDB | Real AWS account and isolated test table | IAM `dynamodb:LeadingKeys` for exact tenant partition keys; deny missing/mismatched keys, Scan, table administration and cross-tenant requests; DynamoDB Local is not sufficient IAM evidence |
 | Apache Cassandra | Pinned disposable Cassandra cluster with authentication enabled | Separate keyspace and login role per tenant, SELECT/MODIFY-only privileges, cross-keyspace denial, credential rotation/revocation and TLS; execute generated CQL through a separate admin session |
 | Elasticsearch | Pinned Elasticsearch cluster with the exact security feature entitlement | Dedicated index namespace, role and API key per tenant; DLS/FLS where supported; test aliases, data streams, bulk, reindex, aggregations and forbidden cluster privileges |
-| OpenSearch | Pinned OpenSearch cluster with Security plugin enabled | Separate Security-plugin role/backend-role/API-key path; index namespace, DLS/FLS where supported; independently test aliases, data streams, bulk, reindex, aggregations and forbidden cluster privileges |
+| OpenSearch | Pinned OpenSearch cluster with Security plugin enabled | Separate Security-plugin role/backend-role path; index namespace, DLS/FLS where supported; run `scripts/test-opensearch-tenant-isolation.sh` and independently test aliases, data streams, bulk, reindex, aggregations and forbidden cluster privileges |
 
 The runner must clearly distinguish PASS, FAIL, SKIP, and NOT_IMPLEMENTED. A not-yet-implemented database must never be silently counted as a pass.
 
