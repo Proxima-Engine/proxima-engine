@@ -742,7 +742,7 @@ async fn pull_and_stage_database_config_once() -> Result<(), Box<dyn std::error:
             .ok_or("credential revision missing")?;
         let state_path = env::var_os("PROXIMA_NODE_RUNTIME_STATE_PATH").map(PathBuf::from)
             .unwrap_or_else(|| output_path.with_file_name("runtime-state.json"));
-        let mut state = if state_path.exists() {
+        let state = if state_path.exists() {
             let mut current = runtime_reconciliation::load(&state_path)?;
             current.update_desired(
                 assignment_id, target_id, provider, revision, credential_revision
