@@ -32,3 +32,5 @@ pub mod oracle_tenant;
 
 pub mod dynamodb_tenant;
 pub mod cassandra_tenant;
+
+pub mod elasticsearch_tenant;
