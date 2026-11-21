@@ -269,10 +269,15 @@ mod tests {
     fn desired_state_contract_rejects_wrong_schema_and_duplicate_ids() {
         let wrong_schema = json!({"schema_version":2,"node_id":"node-a","organization_id":"org-a","assignments":[]});
         let duplicate = json!({"schema_version":1,"node_id":"node-a","organization_id":"org-a","assignments":[
-            {"assignment_id":"same"},{"assignment_id":"same"}
+            {"assignment_id":"same","gateway_runtime":"proxima-mysql-gateway"},
+            {"assignment_id":"same","gateway_runtime":"proxima-redis-gateway"}
+        ]});
+        let unsupported = json!({"schema_version":1,"node_id":"node-a","organization_id":"org-a","assignments":[
+            {"assignment_id":"bad","gateway_runtime":"unknown-gateway"}
         ]});
         assert!(desired_assignments(&wrong_schema).is_err());
         assert!(desired_assignments(&duplicate).is_err());
+        assert!(desired_assignments(&unsupported).is_err());
     }
 
     #[test]
