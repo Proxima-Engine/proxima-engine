@@ -167,10 +167,30 @@ fn resources(assignment: &Value, namespace: &str) -> Result<Option<(Value, Value
     Ok(Some((deployment, service, name)))
 }
 
+fn desired_assignments(document: &Value) -> Result<&Vec<Value>, Box<dyn std::error::Error + Send + Sync>> {
+    if document.get("schema_version").and_then(Value::as_u64) != Some(1) {
+        return Err("unsupported Engine desired-state schema version".into());
+    }
+    for field in ["node_id", "organization_id"] {
+        if document.get(field).and_then(Value::as_str).is_none_or(|value| value.trim().is_empty()) {
+            return Err(format!("Engine desired state is missing {field}").into());
+        }
+    }
+    let assignments = document.get("assignments").and_then(Value::as_array)
+        .ok_or("desired state has no assignments array")?;
+    let mut ids = HashSet::new();
+    for assignment in assignments {
+        let id = assignment.get("assignment_id").and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty()).ok_or("desired assignment has no assignment_id")?;
+        if !ids.insert(id) { return Err("desired state contains duplicate assignment IDs".into()); }
+    }
+    Ok(assignments)
+}
+
 pub async fn reconcile_once(kube: &Kube, config_path: &PathBuf) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
     let raw = fs::read(config_path)?;
     let desired: Value = serde_json::from_slice(&raw)?;
-    let assignments = desired.get("assignments").and_then(Value::as_array).ok_or("desired state has no assignments array")?;
+    let assignments = desired_assignments(&desired)?;
     let mut desired_names = HashSet::new();
     let mut applied = 0usize;
     for assignment in assignments {
@@ -221,6 +241,35 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn desired_state_contract_accepts_multiple_gateway_assignments() {
+        let state = json!({
+            "schema_version":1,"node_id":"node-a","organization_id":"org-a",
+            "assignments":[
+                {"assignment_id":"mysql-a","gateway_runtime":"proxima-mysql-gateway"},
+                {"assignment_id":"mysql-b","gateway_runtime":"proxima-mysql-gateway"},
+                {"assignment_id":"mongo-a","gateway_runtime":"proxima-mongodb-gateway"}
+            ]
+        });
+        assert_eq!(desired_assignments(&state).unwrap().len(), 3);
+    }
+
+    #[test]
+    fn desired_state_contract_accepts_empty_revocation_document() {
+        let state = json!({"schema_version":1,"node_id":"node-a","organization_id":"org-a","assignments":[]});
+        assert!(desired_assignments(&state).unwrap().is_empty());
+    }
+
+    #[test]
+    fn desired_state_contract_rejects_wrong_schema_and_duplicate_ids() {
+        let wrong_schema = json!({"schema_version":2,"node_id":"node-a","organization_id":"org-a","assignments":[]});
+        let duplicate = json!({"schema_version":1,"node_id":"node-a","organization_id":"org-a","assignments":[
+            {"assignment_id":"same"},{"assignment_id":"same"}
+        ]});
+        assert!(desired_assignments(&wrong_schema).is_err());
+        assert!(desired_assignments(&duplicate).is_err());
+    }
+
     #[test]
     fn maps_only_existing_gateway_runtime_binaries() {
         assert_eq!(gateway(&json!({"gateway_runtime":"proxima-mysql-gateway"})).unwrap().0,"mysql");
