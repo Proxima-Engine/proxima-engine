@@ -55,11 +55,41 @@ resources with server-side apply, labels every managed object, and deletes
 only stale Deployments/Services carrying its own ownership label. It never
 reads, creates, or deletes Kubernetes Secrets.
 
-To enable it, first mount the same persistent volume claim into the Engine node
-at `/var/lib/proxima` (or configure
-`PROXIMA_NODE_DATABASE_CONFIG_PATH` to the shared file path). The controller
-mounts that claim read-only. Then configure the existing Secret names and
-enable the controller:
+To enable it, mount one shared PVC into both workloads. The Engine mounts
+it read-write at `/var/lib/proxima`; set
+`PROXIMA_NODE_DATABASE_CONFIG_PATH=/var/lib/proxima/database-targets.json`.
+The controller mounts the same claim read-only at `/var/lib/proxima` and
+polls that exact file every 15 seconds by default. Use a ReadWriteMany-capable
+claim when the pods may run on different nodes. The Engine writes the file by
+atomic same-directory rename, so the controller sees either the previous
+complete document or the next complete document, never a partially written
+JSON file. The document contains schema version, node/organization identity,
+assignment IDs, target IDs, gateway runtime, endpoint and revisions; decrypted
+upstream credentials are deliberately excluded. The controller validates the
+schema and assignment identities before applying anything. An authenticated
+empty assignment list removes only workloads owned by this controller.
+
+The chart refuses to enable the controller without an existing PVC. The Engine
+Deployment must independently mount the same claim read-write, for example:
+
+```yaml
+spec:
+  containers:
+    - name: proxima-engine
+      env:
+        - name: PROXIMA_NODE_DATABASE_CONFIG_PATH
+          value: /var/lib/proxima/database-targets.json
+      volumeMounts:
+        - name: node-state
+          mountPath: /var/lib/proxima
+  volumes:
+    - name: node-state
+      persistentVolumeClaim:
+        claimName: proxima-engine-state
+```
+
+The controller chart mounts that same claim read-only. Then configure the
+existing Secret names and enable the controller:
 
 ```yaml
 controller:
