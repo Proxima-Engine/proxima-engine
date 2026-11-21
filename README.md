@@ -4,7 +4,7 @@
 
 <h1 align="center">Agata Proxima · Proxima Engine</h1>
 <p align="center"><strong>Multi-database tenant isolation, enforced at the database connection boundary.</strong></p>
-<p align="center">Proxima Engine is the open-source Rust data plane for multi-database tenant security. It supports PostgreSQL, CockroachDB 25.2+, MySQL, MariaDB, MongoDB 8, Redis RESP2, SQLite tenant-file isolation, Oracle schema-per-tenant isolation, SQL Server's native database-per-tenant profile, DynamoDB IAM `LeadingKeys` policies, Cassandra keyspace-per-tenant roles, and an Elasticsearch tenant-role policy helper. Each database uses an isolation model appropriate to its architecture; these integrations are not presented as one interchangeable database protocol.</p>
+<p align="center">Proxima Engine is the open-source Rust data plane for multi-database tenant security. It supports PostgreSQL, CockroachDB 25.2+, MySQL, MariaDB, MongoDB 8, Redis RESP2, SQLite tenant-file isolation, Oracle schema-per-tenant isolation, SQL Server's native database-per-tenant profile, DynamoDB IAM `LeadingKeys` policies, Cassandra keyspace-per-tenant roles, and separate Elasticsearch/OpenSearch native-role policy helpers. Each database uses an isolation model appropriate to its architecture; these integrations are not presented as one interchangeable database protocol.</p>
 
 <p align="center">
   <a href="https://github.com/Proxima-Engine/proxima-engine/actions/workflows/ci.yml">Continuous integration</a> ·
