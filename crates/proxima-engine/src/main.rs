@@ -761,10 +761,15 @@ async fn pull_and_stage_database_config_once() -> Result<(), Box<dyn std::error:
         fs::set_permissions(&output_path,fs::Permissions::from_mode(0o600))?;
     }
 
-    // Persist the authenticated desired revision separately from the staged
-    // credential document. This is deliberately a Staged state: downloading,
-    // decrypting, and writing credentials must never imply runtime activation.
-    if let Some(record) = records.first() {
+    // Persist each assignment independently. A node may receive multiple
+    // target assignments; one shared state file must never silently track only
+    // the first assignment in the bundle.
+    let state_dir = env::var_os("PROXIMA_NODE_RUNTIME_STATE_DIR")
+        .map(PathBuf::from)
+        .or_else(|| output_path.parent().map(|parent| parent.join("runtime-state")))
+        .unwrap_or_else(|| PathBuf::from("data/runtime-state"));
+    fs::create_dir_all(&state_dir)?;
+    for record in &staged {
         let assignment_id = record.get("assignment_id").and_then(serde_json::Value::as_str)
             .ok_or("assignment ID missing")?;
         let target_id = record.get("database_target_id").and_then(serde_json::Value::as_str)
@@ -775,28 +780,17 @@ async fn pull_and_stage_database_config_once() -> Result<(), Box<dyn std::error:
             .ok_or("configuration revision missing")?;
         let credential_revision = record.get("credential_revision").and_then(serde_json::Value::as_u64)
             .ok_or("credential revision missing")?;
-        let state_path = env::var_os("PROXIMA_NODE_RUNTIME_STATE_PATH").map(PathBuf::from)
-            .unwrap_or_else(|| output_path.with_file_name("runtime-state.json"));
+        let state_path = state_dir.join(format!("{assignment_id}.json"));
         let state = if state_path.exists() {
             let mut current = runtime_reconciliation::load(&state_path)?;
-            current.update_desired(
-                assignment_id, target_id, provider, revision, credential_revision
-            )?;
+            current.update_desired(assignment_id, target_id, provider, revision, credential_revision)?;
             current
         } else {
-            RuntimeRecord::staged(
-                assignment_id.to_owned(), target_id.to_owned(), provider.to_owned(),
-                revision, credential_revision
-            )?
+            RuntimeRecord::staged(assignment_id.to_owned(), target_id.to_owned(), provider.to_owned(), revision, credential_revision)?
         };
         runtime_reconciliation::persist(&state_path, &state)?;
-        // Do not mark Applied here. The provider runtime supervisor and
-        // provider-specific health/isolation verification must own that transition.
         info!(
-            assignment_id,
-            target_id,
-            desired_revision = revision,
-            phase = "staged",
+            assignment_id, target_id, desired_revision = revision, phase = "staged",
             "authenticated database desired state persisted; runtime activation remains separate"
         );
     }
