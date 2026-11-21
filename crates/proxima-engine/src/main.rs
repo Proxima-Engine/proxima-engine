@@ -8,6 +8,7 @@ use hmac::Mac;
 use proxima_engine::{
     attestation::{AttestationConfig, AttestationLedger, SecurityState, TelemetrySummary},
     break_glass,
+    cloud_provisioning,
     config::{Config, UpstreamTlsMode},
     dashboard,
     metrics::{self, QueryLatencyTracker},
@@ -16,6 +17,7 @@ use proxima_engine::{
     session::{establish, BoxedPgStream},
     tenant::TenantTokenVerifier,
     tls::{accept_client_tls, client_acceptor, connect_upstream_tls, upstream_connector},
+    runtime_coordinator::RuntimeCoordinator,
     runtime_reconciliation::{self, RuntimeRecord},
 };
 use sha2::{Digest, Sha256};
@@ -620,7 +622,7 @@ fn validate_assignment_runtime_cardinality(records: &[serde_json::Value]) -> Res
     Ok(())
 }
 
-async fn pull_and_stage_database_config_once() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+async fn pull_and_stage_database_config_once(coordinator: &RuntimeCoordinator) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     use std::{env, fs, io::Write, path::PathBuf, time::{SystemTime, UNIX_EPOCH}};
     let node_id = env::var("PROXIMA_NODE_ID")?;
     let organization_id = env::var("PROXIMA_ORGANIZATION_ID")?;
@@ -675,6 +677,7 @@ async fn pull_and_stage_database_config_once() -> Result<(), Box<dyn std::error:
             .map_err(|_| io::Error::other("invalid database configuration envelope key"))?
     );
     let mut staged = Vec::new();
+    let mut decrypted_assignments: Vec<(serde_json::Value, serde_json::Value)> = Vec::new();
     let records = bundle.get("assignments").and_then(serde_json::Value::as_array)
         .ok_or("configuration bundle assignments must be an array")?;
     validate_assignment_runtime_cardinality(records)?;
@@ -748,6 +751,7 @@ async fn pull_and_stage_database_config_once() -> Result<(), Box<dyn std::error:
         // authenticated credential envelope is validated above and then dropped.
         item.as_object_mut().ok_or("assignment entry must be an object")?.remove("credential_envelope");
         item.as_object_mut().unwrap().remove("credentials");
+        decrypted_assignments.push((item.clone(), credentials));
         staged.push(item);
     }
 
