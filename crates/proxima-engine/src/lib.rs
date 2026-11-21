@@ -37,3 +37,5 @@ pub mod elasticsearch_tenant;
 pub mod opensearch_tenant;
 
 pub mod runtime_reconciliation;
+pub mod runtime_activation;
+pub mod runtime_coordinator;
