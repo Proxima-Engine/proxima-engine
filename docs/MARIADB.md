@@ -1,6 +1,6 @@
 # MariaDB gateway
 
-This guide configures Proxima's MySQL-compatible protocol gateway against a MariaDB upstream server. MariaDB accepts the MySQL client wire protocol, so clients use the dedicated proxima-mysql-gateway executable. The product guide is named MariaDB. The repository's current CI compatibility target is MariaDB Server 11.4; the version is recorded as a test target, not as the product name.
+This guide configures Proxima's MySQL-compatible protocol gateway against a MariaDB upstream. The dedicated proxima-mysql-gateway executable speaks the MySQL client wire protocol, authenticates each client, binds the session to an immutable tenant principal and opens a dedicated upstream connection using that tenant's least-privilege account.
 
 The gateway is a separate executable from the PostgreSQL Engine listener. It authenticates each client, binds the session to one immutable tenant principal, opens a dedicated upstream connection and validates the selected database before accepting the client session.
 
@@ -255,6 +255,6 @@ This integration test is ignored by default because it requires a live MariaDB s
 - [MariaDB integration test](../crates/proxima-engine/tests/mariadb_gateway_integration.rs)
 
 
-## CI compatibility target
+
 
 The repository CI workflow currently provisions mariadb:11.4. The dedicated integration suite validates tenant-local reads, cross-tenant read/write denial, database-switch denial, prepared statements and invalid-password rejection against that service. This is the tested CI target; rerun the suite before claiming compatibility with additional server versions.
