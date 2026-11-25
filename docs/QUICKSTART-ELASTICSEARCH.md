@@ -55,3 +55,37 @@ The trusted backend authenticates the user, resolves tenant membership and selec
 - TLS verification and credential rotation are tested.
 
 Run both distribution-specific scripts against their own disposable clusters. See [Elasticsearch / OpenSearch tenant isolation](ELASTICSEARCH_TENANCY.md) for the role model and deployment workflow.
+
+
+## Windows PowerShell: clone and build
+
+Install Git, stable Rust/Cargo and the Elasticsearch or OpenSearch client tools. Use a disposable HTTPS cluster for acceptance.
+
+```powershell
+git clone https://github.com/Proxima-Engine/proxima-engine.git
+Set-Location .\proxima-engine
+cargo build --locked --release -p proxima-engine
+if ($LASTEXITCODE -ne 0) { throw "Proxima build failed" }
+```
+
+If the repository is already extracted, enter its root folder rather than cloning another copy. Keep cluster administrator credentials and CA files outside source control.
+
+## Configure the distribution explicitly
+
+Do not assume Elasticsearch and OpenSearch have identical security APIs. Record which distribution and version you are testing, its HTTPS endpoint, CA certificate and administrator credential source. Create a separate tenant index namespace and role for each tenant. Keep the cluster administrator identity out of application configuration.
+
+## Runtime diagnostics
+
+Before running the acceptance script, verify that the cluster responds over HTTPS and that the configured CA validates the endpoint certificate. A TLS error is a trust-chain or server-name issue; do not disable verification. An authorization failure should be investigated by inspecting the effective tenant role and index permissions, not by granting broad cluster privileges.
+
+## Production handover checklist
+
+- Run the Elasticsearch and OpenSearch acceptance scripts independently against their matching distributions.
+- Verify tenant-local access and cross-index denial for both tenants.
+- Verify DLS/FLS only where supported by the selected distribution, version and license.
+- Confirm tenant roles cannot administer clusters, security settings, snapshots or unrelated indices.
+- Keep administrator credentials in a secret manager and rotate tenant credentials through the approved lifecycle.
+- Record provider version, Engine release, role descriptors, test results and configuration revision.
+- Monitor rejected requests, TLS errors, credential rotation and index permission changes.
+
+See [Elasticsearch / OpenSearch tenant isolation](ELASTICSEARCH_TENANCY.md) for distribution-specific security API behavior and cloud assignment.
