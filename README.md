@@ -125,7 +125,7 @@ The Cloud workspace manages provider discovery, target inventory, encrypted cred
 
 ## CLI and application integrations
 
-The Engine repository includes a local operator CLI for node bootstrap and diagnostics. For application-to-Engine connectivity, use your database's existing driver. For Agata Proxima Cloud management, use the server-side JavaScript client and CLI in the [Cloud integration starter kit](https://github.com/Agata-Proxima/Agata-proxima/tree/main/download-kit).
+The Engine repository includes a local operator CLI for node bootstrap and diagnostics. For application-to-Engine connectivity, use your database's existing driver. For Agata Proxima Cloud management, download the shared server-side JavaScript SDK and CLI from the [public developer downloads page](https://agataproxima.com/developers/downloads).
 
 - [Engine CLI](docs/CLI.md)
 - [Cloud API client and CLI](https://agataproxima.com/developers/downloads)
