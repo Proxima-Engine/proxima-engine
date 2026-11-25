@@ -27,6 +27,12 @@ Follow [MySQL gateway guide](MYSQL.md) to create separate tenant databases, rest
 export PROXIMA_MYSQL_IDENTITY_REGISTRY=./secrets/mysql-identities.json
 export PROXIMA_MYSQL_LISTEN_ADDR=127.0.0.1:3307
 RUST_LOG=info ./target/release/proxima-mysql-gateway
+
+In another terminal, wait for the gateway TCP listener:
+
+\`\`\`bash
+nc -z 127.0.0.1 3307
+\`\`\`
 ```
 
 In another terminal:
