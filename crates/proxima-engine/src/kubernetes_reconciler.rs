@@ -3,9 +3,9 @@
 use reqwest::{header, Client, Method, StatusCode};
 use serde_json::{json, Value};
 use std::{
+    io::Write,
     collections::{HashMap, HashSet},
     env, fs,
-    io::Write,
     path::{Path, PathBuf},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
