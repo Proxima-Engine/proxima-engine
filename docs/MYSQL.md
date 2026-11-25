@@ -7,12 +7,12 @@ The gateway is a separate executable from the PostgreSQL Engine listener. It aut
 ## 1. Requirements
 
 - Git and stable Rust/Cargo
-- MySQL server (the CI integration target is MySQL 8.0)
+- A MySQL server reachable from the Engine host
 - MySQL-compatible client utilities (mysql and mysqladmin)
 - Python 3 for generating password verifiers
 - A private directory for the identity registry and upstream credentials
 
-The gateway does not install or provision the MySQL server.
+Use the MySQL service already assigned to your application. Proxima runs as a separate gateway and preserves the existing database engine and client driver.
 
 ## 2. Clone and build
 
@@ -38,7 +38,7 @@ For a disposable local server matching the repository's current CI target, start
 docker run -d --name proxima-mysql \
   -e MYSQL_ROOT_PASSWORD=proxima-mysql-local \
   -p 127.0.0.1:3306:3306 \
-  mysql:8.0
+  mysql:8
 ~~~
 
 Wait until the server is ready:
