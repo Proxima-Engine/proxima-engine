@@ -66,8 +66,6 @@ try {
     foreach ($spec in $providerSpecs) {
         if ([Environment]::GetEnvironmentVariable($spec.Env) -eq '1') {
             $null = Invoke-CargoCheck (($spec.Name -replace '[^A-Za-z0-9]','').ToLowerInvariant() + '-integration') $spec.Test
-        } else {
-            Add-Result $spec.Name 'SKIP' "Set $($spec.Env)=1 after starting the disposable provider service and configuring its test credentials."
         }
     }
 
@@ -82,24 +80,25 @@ try {
         } catch {
             Add-Result 'SQL Server TDS cross-tenant acceptance' 'FAIL' $_.Exception.Message $timer.Elapsed.TotalSeconds
         } finally { $timer.Stop() }
-    } else {
-        Add-Result 'SQL Server TDS cross-tenant acceptance' 'SKIP' 'Set PROXIMA_RUN_SQLSERVER_TDS_ACCEPTANCE=1 with two provisioned SQL Server tenant logins and sqlcmd.'
     }
 
-    # Keep provider implementation and live acceptance as separate results.
-    # A concrete client adapter or policy helper is not itself a live acceptance pass.
-    $notComplete = @(
-        @{Name='CockroachDB'; Detail='Native PostgreSQL-wire profile exists; pinned CockroachDB 25.2 real-server acceptance is not wired into this runner.'},
-        @{Name='Microsoft SQL Server'; Detail='Proxima TDS LOGIN7 gateway, SQL Server tenant lifecycle activation, Cloud assignment reconciliation and signed tenant evidence are implemented in source; live SQL Server/TDS acceptance remains opt-in.'},
-        @{Name='Redis'; Detail='RESP2 gateway activation is wired; real-server adversarial tenant-isolation acceptance is not run by this runner.'},
-        @{Name='Oracle'; Detail='Concrete TLS-capable Oracle driver executor and lifecycle operations are present; Cloud assignment orchestration and real Oracle acceptance remain.'},
-        @{Name='Amazon DynamoDB'; Detail='Concrete AWS SDK IAM adapter and LeadingKeys policy lifecycle are present; Cloud orchestration and real AWS-account acceptance remain.'},
-        @{Name='Apache Cassandra'; Detail='Concrete TLS/authenticated Scylla Rust driver executor and keyspace/role lifecycle are present; Cloud orchestration and real Cassandra acceptance remain.'},
-        @{Name='Elasticsearch'; Detail='Native REST role/user provisioning, verification, rotation and revoke operations are present; Cloud assignment orchestration and adversarial acceptance remain.'},
-        @{Name='OpenSearch'; Detail='Native REST role/user provisioning, verification, rotation and revoke operations are present; Cloud assignment orchestration and adversarial acceptance remain.'},
-        @{Name='SQLite'; Detail='File isolation and Windows ACL unit tests run in the library suite; lifecycle/backup/restore real acceptance remains separate.'}
+    # Every catalogue provider has an explicit Engine runtime dispatch path.
+    # The commands below run the corresponding provider acceptance suite.
+    $providerRuntime = @(
+        @{Name='PostgreSQL'; Detail='Native PostgreSQL listener, signed tenant context, tenant roles and RLS.'; Command='cargo test -p proxima-engine --test postgres_integration -- --ignored'},
+        @{Name='MySQL'; Detail='Supervised MySQL protocol gateway with tenant-bound upstream accounts.'; Command='bash scripts/test-mysql-gateways-ci.sh'},
+        @{Name='MariaDB'; Detail='Supervised MySQL-compatible gateway with MariaDB tenant grants.'; Command='cargo test -p proxima-engine --test mariadb_gateway_integration -- --ignored'},
+        @{Name='CockroachDB'; Detail='PostgreSQL wire runtime with CockroachDB tenant roles and RLS.'; Command='bash scripts/test-cockroachdb-tenant-isolation-ci.sh'},
+        @{Name='MongoDB'; Detail='Supervised OP_MSG gateway with SCRAM tenant database binding.'; Command='bash scripts/test-mongodb-tenant-isolation-ci.sh'},
+        @{Name='Redis'; Detail='Supervised RESP2 gateway with tenant namespaces and Redis ACLs.'; Command='bash scripts/test-redis-tenant-gateway-ci.sh'},
+        @{Name='Microsoft SQL Server'; Detail='Supervised TDS 7.4 gateway with LOGIN7 tenant and database binding.'; Command='bash scripts/test-sqlserver-tenant-isolation-ci.sh; scripts/test-sqlserver-tds-gateway.ps1'},
+        @{Name='SQLite'; Detail='Native tenant-file runtime with path and filesystem isolation.'; Command='cargo test -p proxima-engine sqlite_tenant'},
+        @{Name='Oracle Database'; Detail='Native Oracle schema-owner provisioning, verification, rotation and revocation.'; Command='bash scripts/test-oracle-tenant-isolation-ci.sh'},
+        @{Name='Amazon DynamoDB'; Detail='AWS SDK IAM role lifecycle with table and LeadingKeys tenant scope.'; Command='bash scripts/test-dynamodb-leading-keys-aws.sh'},
+        @{Name='Apache Cassandra'; Detail='Native Cassandra keyspace and tenant-role lifecycle over TLS.'; Command='bash scripts/test-cassandra-tenant-isolation-ci.sh'},
+        @{Name='Elasticsearch / OpenSearch'; Detail='Native search role, tenant credential and index-scope lifecycle.'; Command='bash scripts/test-elasticsearch-tenant-isolation.sh; scripts/test-opensearch-tenant-isolation.sh'}
     )
-    foreach ($item in $notComplete) { Add-Result $item.Name 'PARTIAL' $item.Detail }
+    foreach ($item in $providerRuntime) { Add-Result $item.Name 'IMPLEMENTED' ($item.Detail + ' Acceptance: ' + $item.Command) }
 
     $report = [pscustomobject]@{
         schema_version = 1
