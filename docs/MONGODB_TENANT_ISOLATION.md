@@ -120,3 +120,18 @@ Transactions, replica-set failover, and sharded-cluster behavior are not support
 - Require verified TLS from clients and to non-local upstream servers.
 - Monitor rejected commands and authentication failures.
 - Treat unsupported operations as denied, not as a reason to bypass the gateway.
+
+## Clone, build and verify
+
+Clone the Engine repository and enter its root:
+
+```bash
+git clone https://github.com/Proxima-Engine/proxima-engine.git
+cd proxima-engine
+cargo build --release -p proxima-engine --bin proxima-mongodb-gateway
+bash scripts/test-mongodb-tenant-isolation-ci.sh
+```
+
+## Cloud assignment
+
+In **Agata Proxima Cloud → Dashboard → Databases**, register the existing MongoDB service, enroll an Engine node, assign the target to that node, create the tenant binding and deploy the configuration. The Engine activates the MongoDB runtime and reports the applied revision and tenant evidence to the workspace.
