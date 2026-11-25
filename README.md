@@ -1,12 +1,20 @@
-# Proxima Engine
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Proxima-Engine/proxima-engine/main/assets/agata-proxima-orbit.svg" alt="Agata Proxima" width="112" />
+</p>
 
-**Universal multi-database security runtime for Agata Proxima.**
+<h1 align="center">Proxima Engine</h1>
 
-Proxima Engine is the customer-deployed data plane for database connectivity, tenant identity enforcement and provider-aware isolation. It runs alongside existing applications and database services. Agata Proxima Cloud manages organizations, database targets, tenant bindings, policies and deployment intent; the Engine reconciles assigned runtime configuration and enforces the provider-specific data path.
+<p align="center"><strong>Open-source Rust engine for multi-database tenant isolation and security.</strong></p>
 
-Repository: [Proxima-Engine/proxima-engine](https://github.com/Proxima-Engine/proxima-engine)  
-Platform: [agataproxima.com](https://agataproxima.com)  
-Cloud: [Agata Proxima Cloud](https://github.com/Agata-Proxima/Agata-proxima)
+<p align="center">A customer-deployed data plane that works alongside existing applications and database services.</p>
+
+<p align="center">
+  <a href="https://github.com/Proxima-Engine/proxima-engine">Source code</a> ·
+  <a href="https://agataproxima.com">Agata Proxima platform</a> ·
+  <a href="https://agataproxima.com/developers/downloads">SDK and CLI downloads</a>
+</p>
+
+Proxima Engine connects applications to existing database services and enforces provider-aware tenant identity and isolation. It does not replace your database or require you to rewrite your existing application driver. The public Engine repository contains the customer-side data plane; the Agata Proxima management workspace is accessed separately through the platform website.
 
 ## Supported database systems
 
@@ -93,17 +101,17 @@ The Cloud workspace manages provider discovery, target inventory, encrypted cred
 ## Provider guides
 
 - [PostgreSQL](docs/POSTGRESQL.md) · [Quickstart](docs/QUICKSTART.md)
-- [MySQL](docs/MYSQL.md)
-- [MariaDB](docs/MARIADB.md)
-- [CockroachDB](docs/COCKROACHDB_COMPATIBILITY.md)
-- [MongoDB](docs/MONGODB_TENANT_ISOLATION.md)
-- [Redis](docs/REDIS_TENANT_GATEWAY.md)
-- [Microsoft SQL Server TDS gateway](docs/SQLSERVER_NATIVE_TENANCY.md)
-- [SQLite](docs/SQLITE_TENANCY.md)
-- [Oracle Database](docs/ORACLE_TENANCY.md)
-- [Amazon DynamoDB](docs/DYNAMODB_TENANCY.md)
-- [Apache Cassandra](docs/CASSANDRA_TENANCY.md)
-- [Elasticsearch / OpenSearch](docs/ELASTICSEARCH_TENANCY.md)
+- [MySQL](docs/MYSQL.md) · [Quickstart](docs/QUICKSTART-MYSQL.md)
+- [MariaDB](docs/MARIADB.md) · [Quickstart](docs/QUICKSTART-MARIADB.md)
+- [CockroachDB](docs/COCKROACHDB_COMPATIBILITY.md) · [Quickstart](docs/QUICKSTART-COCKROACHDB.md)
+- [MongoDB](docs/MONGODB_TENANT_ISOLATION.md) · [Quickstart](docs/QUICKSTART-MONGODB.md)
+- [Redis](docs/REDIS_TENANT_GATEWAY.md) · [Quickstart](docs/QUICKSTART-REDIS.md)
+- [Microsoft SQL Server TDS gateway](docs/SQLSERVER_NATIVE_TENANCY.md) · [Quickstart](docs/QUICKSTART-SQLSERVER.md)
+- [SQLite](docs/SQLITE_TENANCY.md) · [Quickstart](docs/QUICKSTART-SQLITE.md)
+- [Oracle Database](docs/ORACLE_TENANCY.md) · [Quickstart](docs/QUICKSTART-ORACLE.md)
+- [Amazon DynamoDB](docs/DYNAMODB_TENANCY.md) · [Quickstart](docs/QUICKSTART-DYNAMODB.md)
+- [Apache Cassandra](docs/CASSANDRA_TENANCY.md) · [Quickstart](docs/QUICKSTART-CASSANDRA.md)
+- [Elasticsearch / OpenSearch](docs/ELASTICSEARCH_TENANCY.md) · [Quickstart](docs/QUICKSTART-ELASTICSEARCH.md)
 
 ## Configuration and deployment
 
@@ -117,7 +125,7 @@ The Cloud workspace manages provider discovery, target inventory, encrypted cred
 
 ## CLI and application integrations
 
-The Engine repository includes a local operator CLI for node bootstrap and diagnostics. For application-to-Engine connectivity, use your database's existing driver. For Agata Proxima Cloud management, use the server-side JavaScript client and CLI in the [Cloud integration starter kit](https://github.com/Agata-Proxima/Agata-proxima/tree/main/download-kit).
+The Engine repository includes a local operator CLI for node bootstrap and diagnostics. For application-to-Engine connectivity, use your database's existing driver. For Agata Proxima Cloud management, download the shared server-side JavaScript SDK and CLI from the [public developer downloads page](https://agataproxima.com/developers/downloads).
 
 - [Engine CLI](docs/CLI.md)
 - [Cloud API client and CLI](https://agataproxima.com/developers/downloads)
