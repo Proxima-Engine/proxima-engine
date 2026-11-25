@@ -90,6 +90,9 @@ jobs:
         run: |
           mkdir -p secrets
           printf 'test-enrollment-token' > secrets/node_enrollment_token
+          printf 'ci-only-sqlserver-ca' > secrets/sqlserver-tds-upstream-ca.pem
+          printf 'ci-only-sqlserver-client-cert' > secrets/sqlserver-tds-client-cert.pem
+          printf 'ci-only-sqlserver-client-key' > secrets/sqlserver-tds-client-key.pem
           printf '{"users":[]}' > secrets/mysql-identities.json
           printf '{"users":[{"username":"tenant_a_gateway","tenant_id":"tenant-a","database":"tenant_a_db"}]}' > secrets/mongodb-identities.json
           printf 'ci-only-gateway-cert' > secrets/mongodb-gateway-cert.pem
@@ -109,6 +112,8 @@ jobs:
           PROXIMA_MONGODB_UPSTREAM_TLS_SERVER_NAME=localhost
           PROXIMA_REDIS_UPSTREAM_ADDR=redis:6379
           PROXIMA_REDIS_UPSTREAM_TLS_SERVER_NAME=redis
+          PROXIMA_SQLSERVER_TDS_LISTEN_ADDR=0.0.0.0:14330
+          PROXIMA_SQLSERVER_TDS_ALLOW_NON_LOOPBACK=true
           EOF
           docker compose -f compose.customer.yaml config --quiet
           docker compose -f compose.customer.yaml --profile mongodb config --quiet
@@ -125,6 +130,8 @@ jobs:
         run: cargo build -p proxima-engine --bin proxima-mongodb-gateway
       - name: Build Redis RESP2 gateway
         run: cargo build -p proxima-engine --bin proxima-redis-gateway
+      - name: Build SQL Server TDS 7.4 gateway
+        run: cargo build -p proxima-engine --bin proxima-sqlserver-tds-gateway
       - name: Install database clients for acceptance tests
         run: |
           sudo apt-get update
@@ -162,7 +169,7 @@ jobs:
       - name: Build container image
         run: docker build -t proxima-engine:ci .
       - name: Verify packaged gateway executables
-        run: docker run --rm --entrypoint /bin/sh proxima-engine:ci -c 'test -x /usr/local/bin/proxima-engine && test -x /usr/local/bin/proxima-mysql-gateway && test -x /usr/local/bin/proxima-mongodb-gateway && test -x /usr/local/bin/proxima-redis-gateway'
+        run: docker run --rm --entrypoint /bin/sh proxima-engine:ci -c 'test -x /usr/local/bin/proxima-engine && test -x /usr/local/bin/proxima-mysql-gateway && test -x /usr/local/bin/proxima-mongodb-gateway && test -x /usr/local/bin/proxima-redis-gateway && test -x /usr/local/bin/proxima-sqlserver-tds-gateway'
       - name: Verify PgBouncer tenant-pool isolation
         run: bash scripts/test-pgbouncer-pooling.sh
 

@@ -1,0 +1,38 @@
+use async_trait::async_trait;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CassandraTenantError { InvalidTenantId, WeakPassword, InvalidReplicationFactor, InvalidDatacenter, Provider(String) }
+impl std::fmt::Display for CassandraTenantError { fn fmt(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result { match self { Self::InvalidTenantId=>write!(f,"invalid Cassandra tenant identifier"),Self::WeakPassword=>write!(f,"Cassandra tenant password must contain at least 24 printable ASCII characters"),Self::InvalidReplicationFactor=>write!(f,"Cassandra replication factor must be between 1 and 5"),Self::InvalidDatacenter=>write!(f,"invalid Cassandra datacenter identifier"),Self::Provider(e)=>write!(f,"Cassandra operation failed: {e}") } } }
+impl std::error::Error for CassandraTenantError {}
+
+/// Keyspace-per-tenant identity and executable lifecycle operations.
+pub struct CassandraTenant { tenant_id:String, keyspace:String, role:String, password:String }
+impl CassandraTenant {
+ pub fn new(tenant_id:&str,password:&str)->Result<Self,CassandraTenantError>{
+  if tenant_id.is_empty()||tenant_id.len()>32||!tenant_id.bytes().all(|b|b.is_ascii_lowercase()||b.is_ascii_digit()||b==b'_'){return Err(CassandraTenantError::InvalidTenantId)}
+  validate_password(password)?;let id=tenant_id.to_owned();Ok(Self{tenant_id:id.clone(),keyspace:format!("proxima_{id}"),role:format!("proxima_{id}_app"),password:password.to_owned()})
+ }
+ pub fn tenant_id(&self)->&str{&self.tenant_id} pub fn keyspace(&self)->&str{&self.keyspace} pub fn role(&self)->&str{&self.role}
+ pub fn provisioning_cql(&self,dc:&str,rf:u8)->Result<Vec<String>,CassandraTenantError>{
+  validate_topology(dc,rf)?;Ok(vec![format!("CREATE KEYSPACE IF NOT EXISTS {} WITH replication = {{'class': 'NetworkTopologyStrategy', '{}': {}}} AND durable_writes = true",self.keyspace,dc,rf),format!("CREATE ROLE IF NOT EXISTS {} WITH PASSWORD = '{}' AND LOGIN = true",self.role,esc_cql(&self.password)),format!("GRANT SELECT ON KEYSPACE {} TO {}",self.keyspace,self.role),format!("GRANT MODIFY ON KEYSPACE {} TO {}",self.keyspace,self.role)])
+ }
+ pub async fn provision<E:CassandraExecutor>(&self,exec:&E,dc:&str,rf:u8)->Result<(),CassandraTenantError>{for cql in self.provisioning_cql(dc,rf)?{exec.execute(&cql).await.map_err(provider)?;}self.verify(exec).await}
+ pub async fn verify<E:CassandraExecutor>(&self,exec:&E)->Result<(),CassandraTenantError>{
+  let ks=exec.exists("SELECT keyspace_name FROM system_schema.keyspaces WHERE keyspace_name = ?",&self.keyspace).await.map_err(provider)?;
+  let role=exec.exists("SELECT role FROM system_auth.roles WHERE role = ?",&self.role).await.map_err(provider)?;
+  let select=exec.has_grant(&self.role,&format!("KEYSPACE {}",self.keyspace),"SELECT").await.map_err(provider)?;
+  let modify=exec.has_grant(&self.role,&format!("KEYSPACE {}",self.keyspace),"MODIFY").await.map_err(provider)?;
+  if !(ks&&role&&select&&modify){return Err(provider("keyspace, login role, or required grants are missing"))}Ok(())
+ }
+ pub async fn rotate<E:CassandraExecutor>(&mut self,exec:&E,new_password:&str)->Result<(),CassandraTenantError>{validate_password(new_password)?;exec.execute(&format!("ALTER ROLE {} WITH PASSWORD = '{}'",self.role,esc_cql(new_password))).await.map_err(provider)?;self.password=new_password.to_owned();self.verify(exec).await}
+ /// Revocation removes the login principal first. Keyspace data is retained by default.
+ pub async fn revoke<E:CassandraExecutor>(&self,exec:&E)->Result<(),CassandraTenantError>{exec.execute(&format!("ALTER ROLE {} WITH LOGIN = false",self.role)).await.map_err(provider)?;exec.execute(&format!("REVOKE SELECT ON KEYSPACE {} FROM {}",self.keyspace,self.role)).await.map_err(provider)?;exec.execute(&format!("REVOKE MODIFY ON KEYSPACE {} FROM {}",self.keyspace,self.role)).await.map_err(provider)?;Ok(())}
+ /// Destructive tenant offboarding; call only after an explicit data-retention decision.
+ pub async fn destroy<E:CassandraExecutor>(&self,exec:&E)->Result<(),CassandraTenantError>{self.revoke(exec).await?;exec.execute(&format!("DROP ROLE {}",self.role)).await.map_err(provider)?;exec.execute(&format!("DROP KEYSPACE {}",self.keyspace)).await.map_err(provider)}
+}
+#[async_trait] pub trait CassandraExecutor:Send+Sync { async fn execute(&self,cql:&str)->Result<(),String>; async fn exists(&self,cql:&str,value:&str)->Result<bool,String>; async fn has_grant(&self,role:&str,resource:&str,permission:&str)->Result<bool,String>; }
+fn provider(e:impl ToString)->CassandraTenantError{CassandraTenantError::Provider(e.to_string())}
+fn esc_cql(s:&str)->String{s.replace('\'','\'\'')}
+fn validate_password(p:&str)->Result<(),CassandraTenantError>{if p.len()<24||!p.bytes().all(|b|(33..=126).contains(&b)){Err(CassandraTenantError::WeakPassword)}else{Ok(())}}
+fn validate_topology(dc:&str,rf:u8)->Result<(),CassandraTenantError>{if dc.is_empty()||dc.len()>48||!dc.bytes().all(|b|b.is_ascii_alphanumeric()||b==b'_'){return Err(CassandraTenantError::InvalidDatacenter)}if !(1..=5).contains(&rf){return Err(CassandraTenantError::InvalidReplicationFactor)}Ok(())}
+#[cfg(test)]mod tests{use super::*;#[test]fn generates_restricted_cql(){let t=CassandraTenant::new("customer_01","a-long-random-cassandra-secret").unwrap();let s=t.provisioning_cql("dc1",3).unwrap().join("\n");assert!(s.contains("NetworkTopologyStrategy"));assert!(s.contains("GRANT SELECT"));assert!(!s.contains("GRANT ALL"));}#[test]fn rejects_injection_and_weak_password(){assert!(CassandraTenant::new("bad;drop","a-long-random-cassandra-secret").is_err());assert!(CassandraTenant::new("tenant","short").is_err());}}

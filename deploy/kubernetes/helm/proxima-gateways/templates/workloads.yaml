@@ -28,6 +28,8 @@ spec:
       automountServiceAccountToken: false
       securityContext:
         {{- toYaml $root.Values.securityContext | nindent 8 }}
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
       {{- with $root.Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
@@ -36,7 +38,7 @@ spec:
         - name: {{ $name }}-gateway
           image: "{{ $root.Values.image.repository }}:{{ $root.Values.image.tag }}"
           imagePullPolicy: {{ $root.Values.image.pullPolicy }}
-          command: ["/usr/local/bin/proxima-{{ $name }}-gateway"]
+          command: ['/usr/local/bin/{{ default (printf "proxima-%s-gateway" $name) $cfg.binary }}']
           ports:
             - name: client
               containerPort: {{ $cfg.port }}

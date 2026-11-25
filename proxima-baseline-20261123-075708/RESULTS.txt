@@ -1,0 +1,10 @@
+AGATA PROXIMA ENGINE BASELINE RESULTS
+Project: C:\Users\HomePC\source\proxima-engine
+Metadata exit: 0
+Format exit: 1
+Check exit: 101
+Test exit: 101
+Full log: C:\Users\HomePC\source\proxima-engine\proxima-baseline-20261123-075708\cargo-baseline.log
+
+Upload cargo-baseline.log back into this chat.
+Do not edit source files before returning this baseline.

@@ -16,10 +16,15 @@ flowchart TD
 
 ## 1. Run Rust tests and build the release binary
 
-```bash
-cargo test -p proxima-engine
+```powershell
+cargo fmt --all
+cargo check --workspace --all-targets
+cargo test -p proxima-engine --lib
+cargo test -p proxima-engine --bin proxima-engine
 cargo build -p proxima-engine --release
 ```
+
+The library and binary test commands run the Engine unit suites without requiring a live database. The integration tests under `tests/` are separate and must be run only after their corresponding disposable provider service is running.
 
 The PostgreSQL-backed integration test connects to a local PostgreSQL service at `127.0.0.1:5432` using:
 
@@ -37,9 +42,15 @@ docker run --rm --name proxima-ci-postgres \
   -p 127.0.0.1:5432:5432 postgres:17
 ```
 
-Keep it running in one terminal, then run the Rust test command in another. The integration test creates the `proxima_e2e` schema and tenant roles in that database. Use a disposable instance because the test drops and recreates its test schema.
+Keep it running in one terminal, then run the integration test in another PowerShell window:
 
-GitHub Actions provisions the PostgreSQL service automatically.
+```powershell
+cargo test -p proxima-engine --test postgres_integration -- --ignored
+```
+
+The integration test creates the `proxima_e2e` schema and tenant roles in that database. Use a disposable instance because the test drops and recreates its test schema.
+
+The local test does not start PostgreSQL automatically. GitHub Actions provisions a service only when a workflow is run; this local handoff does not trigger Actions.
 
 ## 2. Run the two-tenant acceptance test
 

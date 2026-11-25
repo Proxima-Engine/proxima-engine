@@ -8,6 +8,8 @@ Proxima Engine is the customer-side data plane and the runtime authority. It aut
 
 Database traffic remains in the customer's environment. Cloud manages assignment intent and receives lifecycle results; it is not placed in the application's database request path.
 
+**Implementation boundary:** this lifecycle is not yet end-to-end for all twelve providers. Cloud-connected supervised gateway activation is implemented for MySQL/MariaDB, MongoDB and Redis. MySQL/MariaDB validate exact tenant coverage, protect the identity registry, start the packaged gateway, probe each configured upstream account with `SELECT 1`, persist the applied revision and send a signed `applied` acknowledgement. MongoDB validates exact tenant/database coverage, protects the SCRAM identity registry, verifies upstream TLS and MongoDB `hello`, starts the OP_MSG gateway and acknowledges the healthy runtime; its SCRAM exchanges are passed through and still require tenant-specific adversarial acceptance. Redis validates exact tenant coverage, protects the ACL identity registry, starts the RESP2 gateway and authenticates every configured upstream ACL identity over verified TLS with `AUTH` + `PING` before acknowledging the runtime. Other provider assignments remain `staged` until their concrete provider adapters, health checks and isolation evidence are integrated. The [provider status matrix](PROVIDER_IMPLEMENTATION_STATUS.md) is authoritative.
+
 ## End-to-end assignment lifecycle
 
 1. **Node identity.** The Engine loads its persisted node identity and signing credential. The identity binds the node to its organization.
@@ -59,7 +61,7 @@ Each assignment has a durable record with these fields:
 | `last_error_code` | Bounded, non-secret failure classification |
 | `updated_at_unix` | Last state transition time |
 
-The default reconciliation record is `runtime-state.json` beside the database-target document. `PROXIMA_NODE_RUNTIME_STATE_PATH` selects another path. The desired database-target document defaults to `database-targets.json`; `PROXIMA_NODE_DATABASE_CONFIG_PATH` selects another path.
+The Engine stores one reconciliation record per assignment under the `runtime-state` directory beside the database-target document by default. `PROXIMA_NODE_RUNTIME_STATE_DIR` selects another directory. The desired database-target document defaults to `database-targets.json`; `PROXIMA_NODE_DATABASE_CONFIG_PATH` selects another path.
 
 State writes use a same-directory temporary file, flush the file, atomically rename it into place and synchronize the parent directory. On Unix, the runtime state file is owner-only (mode `0600`).
 
@@ -83,16 +85,7 @@ The runtime supervisor owns child processes by assignment ID. It serializes conc
 
 The readiness address must be a loopback address. Startup waits until the listener accepts a TCP connection, checks that the child is still running and enforces the configured startup timeout. If startup fails or times out, the attempted child is stopped.
 
-The coordinator applies a revision in this order:
-
-1. Stop the prior child owned by the assignment.
-2. Persist the `applying` transition for the desired configuration and credential revisions.
-3. Start the prepared gateway process.
-4. Wait for loopback listener readiness.
-5. Run the provider-specific authenticated health check.
-6. Persist `applied` only after the health check succeeds.
-
-If process startup, provider health verification or state persistence fails, the coordinator stops the attempted child and records a failed transition where possible. Shutdown stops all child processes owned by the supervisor.
+For the implemented MySQL/MariaDB, MongoDB and Redis activation paths, the Engine validates the provider-specific identity registry and loopback listener configuration, protects the registry file, persists the `applying` transition, starts the selected gateway, waits for loopback readiness, performs the provider-specific upstream health check and persists `applied` only after success. MySQL/MariaDB authenticate each configured upstream account and run `SELECT 1`; MongoDB verifies upstream TLS and the `hello` command; Redis authenticates each configured upstream ACL identity over TLS and runs `PING`. If startup or health verification fails, the attempted child is stopped and a failed transition is recorded where possible. The supervisor owns child processes in memory for the configuration worker lifetime; durable restart recovery and automatic rollback to a previous child process remain release work.
 
 ## Provider runtime contracts
 
@@ -113,7 +106,7 @@ The Engine uses provider-specific runtime contracts. A provider's native securit
 | Cassandra | Keyspace-per-tenant roles and native authorization; not a CQL proxy. |
 | Elasticsearch and OpenSearch | Separate provider-native role and index policy integrations using distribution-specific authorization APIs. |
 
-For supervised process activation, the executable, identity registry format, listener and health check must match the provider contract. The MySQL/MariaDB preparation path validates that the registry contains exactly one identity for each assigned tenant binding, validates the gateway registry format, writes the registry privately, starts the packaged gateway and checks authenticated upstream connectivity. MongoDB and Redis retain their own protocol and identity formats. Native, file and API integrations use their provider-native security boundary rather than being launched as generic TCP gateways.
+For supervised process activation, the executable, identity registry format, listener and health check must match the provider contract. The MySQL/MariaDB preparation path validates exactly one identity for each assigned tenant binding, writes the registry privately, starts the packaged gateway and checks authenticated upstream connectivity. MongoDB validates exact tenant/database coverage and checks TLS plus the upstream hello command; it does not claim the hello probe proves each SCRAM identity. Redis validates exact tenant coverage and checks every upstream ACL identity with authenticated TLS sessions. Native, file and API integrations use their provider-native security boundary rather than being launched as generic TCP gateways.
 
 ## Tenant identity and isolation
 
@@ -166,3 +159,10 @@ The test suite includes runtime-state transitions, revision rollback rejection, 
 Run provider acceptance scripts against disposable provider instances and credentials configured in the local environment. For a Cloud-connected acceptance run, enroll a test node, create a test database target and tenant bindings, assign the target to that node, then verify the Engine's applied acknowledgement and provider-side isolation behavior. Repeat with a newer configuration revision, credential rotation, a failed health check and assignment revocation.
 
 A Rust build or unit test validates the code paths exercised by that test. Real-provider acceptance validates the actual database, identity, TLS and authorization configuration in the target environment.
+
+
+## Cloud-driven assignment removal
+
+The authenticated configuration bundle is a complete desired-state snapshot for the enrolled node, not a patch. After persisting the new routing document, the Engine compares persisted assignment records with the current enabled assignment IDs. An assignment omitted from the snapshot, or present but no longer enabled, is revoked locally: the matching MySQL/MariaDB, MongoDB or Redis child gateway is stopped; its node-local identity registry file is removed; and the durable runtime record is marked `revoked`. Native listener assignments have their staged routing entry removed and their durable record revoked. Revoked assignment IDs cannot be reused for a later revision; Cloud must issue a new assignment identity for a fresh binding.
+
+This local revocation does not remotely drop provider users, IAM policies, Cassandra roles, Oracle schemas, Elasticsearch roles, OpenSearch mappings or SQL Server logins. Those remote lifecycle operations require concrete provider administration adapters and remain provider-specific release gates.

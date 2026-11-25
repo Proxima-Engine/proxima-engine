@@ -10,6 +10,19 @@ pub enum RespError {
     UnsupportedCommand,
     InvalidTenant,
 }
+impl std::fmt::Display for RespError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let message = match self {
+            Self::Malformed => "malformed Redis RESP command",
+            Self::LimitExceeded => "Redis RESP command exceeds configured limits",
+            Self::UnsupportedCommand => "unsupported Redis command",
+            Self::InvalidTenant => "invalid Redis tenant identifier",
+        };
+        f.write_str(message)
+    }
+}
+
+impl std::error::Error for RespError {}
 
 pub fn parse_command(input: &[u8]) -> Result<Option<(Vec<Vec<u8>>, usize)>, RespError> {
     if input.len() > MAX_FRAME_BYTES {

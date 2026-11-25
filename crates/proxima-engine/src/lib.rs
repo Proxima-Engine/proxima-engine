@@ -3,11 +3,13 @@ pub mod break_glass;
 pub mod config;
 pub mod dashboard;
 pub mod metrics;
+pub mod native_provider_runtime;
 pub mod policy;
 pub mod protocol;
 pub mod security_breaker;
 pub mod session;
 pub mod tenant;
+pub mod tenant_binding_coordinator;
 pub mod tls;
 
 pub mod mysql_policy;
@@ -42,4 +44,12 @@ pub mod kubernetes_reconciler;
 
 pub mod runtime_activation;
 
+pub mod mongodb_runtime;
+pub mod mysql_runtime;
+pub mod redis_runtime;
 pub mod runtime_coordinator;
+pub mod search_cluster;
+pub mod sqlserver_tenant;
+
+pub mod sqlserver_runtime;
+pub mod sqlserver_tds_gateway;

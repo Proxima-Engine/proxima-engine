@@ -1,5 +1,5 @@
 {{- if .Values.controller.enabled }}
-{{- if or .Values.gateways.mysql.enabled .Values.gateways.mongodb.enabled .Values.gateways.redis.enabled }}{{- fail "disable static gateways.*.enabled workloads when the assignment controller is enabled" }}{{- end }}
+{{- if or .Values.gateways.mysql.enabled .Values.gateways.mongodb.enabled .Values.gateways.redis.enabled .Values.gateways.sqlserver.enabled }}{{- fail "disable static gateways.*.enabled workloads when the assignment controller is enabled" }}{{- end }}
 {{- if not .Values.controller.configVolume.existingClaim }}
 {{- fail "controller.enabled requires controller.configVolume.existingClaim shared with the Engine node" }}
 {{- end }}
@@ -30,6 +30,8 @@ spec:
         runAsNonRoot: true
         runAsUser: 10001
         runAsGroup: 10001
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
         seccompProfile:
           type: RuntimeDefault
       containers:
@@ -44,16 +46,14 @@ spec:
               value: {{ .Values.controller.reconcileSeconds | quote }}
             - name: PROXIMA_KUBERNETES_GATEWAY_IMAGE
               value: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
-            - name: PROXIMA_K8S_MYSQL_GATEWAY_SECRET
-              value: {{ .Values.controller.secrets.mysql | quote }}
-            - name: PROXIMA_K8S_MONGODB_GATEWAY_SECRET
-              value: {{ .Values.controller.secrets.mongodb | quote }}
-            - name: PROXIMA_K8S_REDIS_GATEWAY_SECRET
-              value: {{ .Values.controller.secrets.redis | quote }}
+            - name: PROXIMA_NODE_DATABASE_SECRETS_PATH
+              value: "{{ .Values.controller.configVolume.mountPath }}/database-target-secrets.json"
+            - name: PROXIMA_NODE_GATEWAY_STATUS_PATH
+              value: "{{ .Values.controller.configVolume.mountPath }}/gateway-runtime-status.json"
           volumeMounts:
             - name: engine-desired-state
               mountPath: {{ .Values.controller.configVolume.mountPath }}
-              readOnly: true
+              readOnly: false
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
