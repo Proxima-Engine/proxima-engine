@@ -18,7 +18,9 @@ Proxima Engine connects applications to existing database services and enforces 
 
 ## Why Agata Proxima?
 
-Applications serving multiple customers need a reliable way to keep each customer's data within its authorized boundary. Agata Proxima provides a dedicated tenant-isolation layer across existing database systems, combining trusted tenant identity, provider-specific access controls, and verification evidence. Teams can strengthen how tenant access is enforced while continuing to use the databases and application drivers they already operate.
+Modern software platforms need reliable ways to protect customer data and enforce tenant boundaries across the databases their applications depend on. This applies to B2B SaaS and multi-tenant applications, enterprise software, developer platforms, security-sensitive workloads, financial services and fintech, healthcare and digital health, digital marketplaces and commerce, API-first platforms, data and analytics services, AI and machine-learning applications, managed service providers, and internal enterprise platforms.
+
+Agata Proxima provides a unified, multi-database security and tenant-isolation layer for these environments. Whether an application serves multiple business customers, exposes APIs, processes financial or healthcare data, powers AI services and agents, or operates shared enterprise infrastructure, Agata coordinates trusted tenant identity, provider-specific access enforcement, secure Engine delivery, and verifiable operational evidence—while allowing teams to continue using their existing databases and application drivers.
 
 ## Supported database systems
 
