@@ -27,9 +27,21 @@ Follow [MariaDB gateway guide](MARIADB.md) to create separate tenant databases a
 export PROXIMA_MYSQL_IDENTITY_REGISTRY=./secrets/mysql-identities.json
 export PROXIMA_MYSQL_LISTEN_ADDR=127.0.0.1:3307
 RUST_LOG=info ./target/release/proxima-mysql-gateway
+
+In another terminal, wait for the gateway TCP listener:
+
+\`\`\`bash
+nc -z 127.0.0.1 3307
+\`\`\`
 ```
 
-Connect Tenant A using `mysql --protocol=TCP -h 127.0.0.1 -P 3307 -u tenant_a_app -p tenant_a`, then repeat with Tenant B. Verify tenant-local CRUD, cross-tenant denial and database-switch denial using the acceptance procedure in the full guide.
+Connect Tenant A using `mysql --protocol=TCP -h 127.0.0.1 -P 3307 -u tenant_a_app -p tenant_a`, then repeat with Tenant B. Run the MariaDB integration suite against the disposable service:
+
+\`\`\`bash
+cargo test -p proxima-engine --test mariadb_gateway_integration -- --ignored
+\`\`\`
+
+Verify tenant-local CRUD, cross-tenant denial and database-switch denial.
 
 ## 5. Stop
 
