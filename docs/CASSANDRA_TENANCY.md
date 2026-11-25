@@ -28,3 +28,18 @@ A keyspace is a logical isolation boundary inside a cluster, not a separate clus
 ## Verification
 
 Unit tests cover tenant-specific keyspace and role generation, password escaping, identifier injection rejection and least-privilege grants. The real Cassandra acceptance test provisions two tenant roles, verifies tenant-local CRUD and verifies cross-keyspace reads are denied. It does not certify multi-node replication, production TLS, backup/restore or operational readiness.
+
+## Clone, build and verify
+
+Clone the Engine repository and enter its root:
+
+```bash
+git clone https://github.com/Proxima-Engine/proxima-engine.git
+cd proxima-engine
+cargo build --release -p proxima-engine
+bash scripts/test-cassandra-tenant-isolation-ci.sh
+```
+
+## Cloud assignment
+
+In **Agata Proxima Cloud → Dashboard → Databases**, register the existing Apache Cassandra service, enroll an Engine node, assign the target to that node, configure its datacenter and replication factor, create the tenant binding and deploy the configuration. The Engine provisions or verifies the tenant keyspace and role, then reports the applied revision and tenant evidence to the workspace.
