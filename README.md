@@ -124,6 +124,7 @@ The Engine repository includes a local operator CLI for node bootstrap and diagn
 - [Integration examples](docs/INTEGRATIONS.md)
 - [Database reference](docs/README.md)
 - [Provider runtime and acceptance reference](docs/PROVIDER_IMPLEMENTATION_STATUS.md)
+- [Provider runtime and acceptance reference](docs/PROVIDER_IMPLEMENTATION_STATUS.md)
 
 ## License
 
