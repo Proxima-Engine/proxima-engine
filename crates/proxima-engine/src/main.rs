@@ -1053,7 +1053,7 @@ async fn pull_and_stage_database_config_once(
             .create_new(true)
             .mode(0o600)
             .open(&temporary)?;
-        file.write_all(serde_json::to_string_pretty(&document)?.as_bytes())?;
+        std::io::Write::write_all(&mut file, serde_json::to_string_pretty(&document)?.as_bytes())?;
         file.sync_all()?;
     }
     #[cfg(not(unix))]
