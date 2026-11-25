@@ -1,10 +1,10 @@
 # Proxima Engine — Database Provider Runtime Reference
 
-Proxima Engine includes a supervised runtime path for every database in the Agata Proxima provider catalogue. The Engine receives its organization-scoped assignments from Cloud, validates the signed configuration, activates the provider runtime, provisions or verifies tenant identities, and reports the applied revision and provider evidence.
+Proxima Engine includes a supervised runtime path for every database in the Agata Proxima provider catalogue. The Engine receives organization-scoped assignments from Cloud, validates signed configuration, activates the provider runtime, provisions or verifies tenant identities, and reports the applied revision and provider evidence.
 
 ## Provider runtime matrix
 
-| Database | Engine runtime | Tenant security boundary | Run the provider acceptance |
+| Database | Engine runtime | Tenant security boundary | Run provider acceptance |
 |---|---|---|---|
 | PostgreSQL | Native PostgreSQL wire listener | Signed tenant context, tenant roles and row-level security | `cargo test -p proxima-engine --test postgres_integration -- --ignored` and [PostgreSQL quickstart](QUICKSTART.md) |
 | MySQL | `proxima-mysql-gateway` | Authenticated tenant identity and dedicated upstream account/database | `bash scripts/test-mysql-gateways-ci.sh` |
@@ -25,10 +25,10 @@ Proxima Engine includes a supervised runtime path for every database in the Agat
 2. Enroll the customer-hosted Engine node and confirm its signed heartbeat.
 3. Assign the database target to a node that advertises the provider runtime.
 4. Create a tenant binding with the provider-specific namespace and identity reference.
-5. Cloud advances the desired configuration revision and delivers the signed, encrypted, node-bound configuration.
+5. Cloud advances the desired configuration revision and delivers signed, encrypted, node-bound configuration.
 6. The Engine supervisor dispatches the assignment to the matching gateway or native provider runtime.
-7. The runtime activates the listener or provider authorization lifecycle, verifies the configured identities and records tenant-binding evidence.
-8. The Engine acknowledges the applied revision and runtime state to Cloud. The workspace exposes the resulting target, binding, node and verification state.
+7. The runtime activates the listener or provider authorization lifecycle, verifies configured identities and records tenant-binding evidence.
+8. The Engine acknowledges the applied revision and runtime state to Cloud. The workspace exposes the target, binding, node and verification state.
 
 ## Build and local verification
 
@@ -41,16 +41,16 @@ cargo test --workspace --all-targets
 cargo build --workspace --bins --release
 ```
 
-Run the provider acceptance command in the matrix against its dedicated disposable service or test account. The scripts create isolated tenant fixtures, exercise tenant-local operations, verify cross-tenant denial, and clean up their test resources.
+Run the provider acceptance command in the matrix against its dedicated disposable service or test account. The scripts create isolated tenant fixtures, exercise tenant-local operations, verify cross-tenant denial and clean up their test resources.
 
 ## Runtime configuration
 
-Provider configuration is delivered through the authenticated Cloud assignment. The Engine validates the provider key, runtime name, configuration revision, tenant binding coverage and required TLS or cloud identity settings before applying it. Gateway registries and provider credentials are written to the Engine's private runtime directory with restrictive file permissions.
+Provider configuration is delivered through the authenticated Cloud assignment. The Engine validates the provider key, runtime name, configuration revision, tenant-binding coverage and required TLS or cloud identity settings before applying it. Gateway registries and provider credentials are written to the Engine's private runtime directory with restrictive file permissions.
 
 - Network gateways use their provider-specific listener, identity registry and verified upstream connection.
 - Native providers use the database's schema, role, IAM, keyspace, index or file authorization model.
 - Credential rotation advances the desired revision and is reconciled by the assigned Engine.
-- Revoked bindings are processed by the matching runtime and represented in the applied-state evidence.
+- Revoked bindings are processed by the matching runtime and represented in applied-state evidence.
 
 ## Developer entry points
 
