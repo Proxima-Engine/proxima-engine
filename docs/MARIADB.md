@@ -12,7 +12,7 @@ The gateway is a separate executable from the PostgreSQL Engine listener. It aut
 - Python 3 for generating password verifiers
 - A private directory for the identity registry and upstream credentials
 
-The gateway does not install or provision a MariaDB server.
+Connect the gateway to the MariaDB service assigned to your application.
 
 ## 2. Clone and build
 
@@ -209,7 +209,7 @@ Use a MariaDB-compatible client that supports the configured authentication plug
 - Concurrent connections are bounded; upstream connection and query operations have deadlines.
 - Non-loopback upstream URLs must require verified TLS with require_ssl=true.
 
-SQL admission supplements database grants; it does not replace them. Keep upstream accounts least-privileged and isolated by tenant. Remote upstream TLS must validate the server certificate.
+Enforce least privilege in both gateway admission and upstream database grants. Keep upstream accounts isolated by tenant and validate the server certificate for remote TLS.
 
 ## 10. Integration verification
 
