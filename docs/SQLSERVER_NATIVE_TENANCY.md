@@ -120,3 +120,18 @@ Use a disposable SQL Server environment for real server acceptance. Verify a val
 - Monitor gateway logs and the Engine's runtime health and assignment acknowledgement state.
 - Do not share SQL Server connection pools between tenant credentials.
 
+## Clone, build and verify
+
+Clone the Engine repository and enter its root:
+
+```bash
+git clone https://github.com/Proxima-Engine/proxima-engine.git
+cd proxima-engine
+cargo build --release -p proxima-engine --bin proxima-sqlserver-tds-gateway
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-sqlserver-tds-gateway.ps1
+bash scripts/test-sqlserver-tenant-isolation-ci.sh
+```
+
+## Cloud assignment
+
+In **Agata Proxima Cloud → Dashboard → Databases**, register the existing Microsoft SQL Server service, enroll an Engine node, assign the target to that node, create the tenant binding and deploy the configuration. The Engine activates the Microsoft SQL Server runtime and reports the applied revision and tenant evidence to the workspace.
