@@ -5,6 +5,17 @@ MARIADB_ROOT_PASSWORD="${MARIADB_ROOT_PASSWORD:-proxima-mariadb-ci}"
 GATEWAY_PID=""
 cleanup() { if [[ -n "$GATEWAY_PID" ]]; then kill "$GATEWAY_PID" 2>/dev/null || true; wait "$GATEWAY_PID" 2>/dev/null || true; GATEWAY_PID=""; fi; }
 trap cleanup EXIT
+# The gateway intentionally refuses to start without a TLS certificate and key.
+# Generate a disposable CI-only certificate for the loopback integration listener.
+MYSQL_TLS_DIR="$(mktemp -d)"
+cleanup_all() {
+ cleanup
+ rm -rf "$MYSQL_TLS_DIR"
+}
+trap cleanup_all EXIT
+openssl req -x509 -newkey rsa:2048 -nodes -keyout "$MYSQL_TLS_DIR/gateway.key" -out "$MYSQL_TLS_DIR/gateway.crt" -days 1 -subj "/CN=localhost" >/dev/null 2>&1
+export PROXIMA_MYSQL_TLS_CERT_FILE="$MYSQL_TLS_DIR/gateway.crt"
+export PROXIMA_MYSQL_TLS_KEY_FILE="$MYSQL_TLS_DIR/gateway.key"
 wait_db() { local p="$1" pw="$2"; for _ in $(seq 1 60); do mysqladmin --protocol=TCP -h 127.0.0.1 -P "$p" -uroot -p"$pw" ping --silent >/dev/null 2>&1 && return 0; sleep 2; done; return 1; }
 provision() {
  mysql --protocol=TCP -h 127.0.0.1 -P "$1" -uroot -p"$2" <<'SQL'
