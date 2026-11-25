@@ -14,8 +14,11 @@ async fn verify_tenant(
         "tenant_b"
     };
 
+    // The CI gateway requires TLS. Its certificate is generated for this
+    // disposable loopback-only test, so the test client opts out of CA and
+    // hostname validation here; production clients must retain verification.
     let url = format!(
-        "mysql://{}:{}@127.0.0.1:3307/{}",
+        "mysql://{}:{}@127.0.0.1:3307/{}?require_ssl=true&verify_ca=false&verify_identity=false&prefer_socket=false",
         username, password, own_database
     );
 
@@ -99,7 +102,7 @@ async fn verify_tenant(
 
 async fn verify_caching_sha2_rejects_wrong_password() -> Result<(), Box<dyn std::error::Error>> {
     let pool = Pool::new(Opts::from_url(
-        "mysql://client_a:DefinitelyWrongPassword@127.0.0.1:3307/tenant_a",
+        "mysql://client_a:DefinitelyWrongPassword@127.0.0.1:3307/tenant_a?require_ssl=true&verify_ca=false&verify_identity=false&prefer_socket=false",
     )?);
     assert!(
         pool.get_conn().await.is_err(),
