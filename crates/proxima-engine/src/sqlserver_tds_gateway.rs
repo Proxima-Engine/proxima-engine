@@ -133,6 +133,16 @@ impl SqlServerTdsConfig {
     }
 }
 
+fn max_connections_from_env() -> io::Result<usize> {
+    let value = std::env::var("PROXIMA_SQLSERVER_TDS_MAX_CONNECTIONS")
+        .unwrap_or_else(|_| DEFAULT_MAX_CONNECTIONS.to_string());
+    let max_connections = value.parse::<usize>().map_err(invalid)?;
+    if max_connections == 0 || max_connections > 65_536 {
+        return Err(invalid("PROXIMA_SQLSERVER_TDS_MAX_CONNECTIONS must be between 1 and 65536"));
+    }
+    Ok(max_connections)
+}
+
 pub async fn run(config: SqlServerTdsConfig) -> io::Result<()> {
     let _ = tokio_rustls::rustls::crypto::ring::default_provider().install_default();
     config.validate()?;
@@ -166,13 +176,7 @@ pub async fn run(config: SqlServerTdsConfig) -> io::Result<()> {
             (t.tenant_id.clone(), t.database.clone()),
         );
     }
-    let max_connections = std::env::var("PROXIMA_SQLSERVER_TDS_MAX_CONNECTIONS")
-        .unwrap_or_else(|_| DEFAULT_MAX_CONNECTIONS.to_string())
-        .parse::<usize>()
-        .map_err(invalid)?;
-    if max_connections == 0 || max_connections > 65_536 {
-        return Err(invalid("PROXIMA_SQLSERVER_TDS_MAX_CONNECTIONS must be between 1 and 65536"));
-    }
+    let max_connections = max_connections_from_env()?;
     let gateway = Gateway {
         upstream,
         upstream_name: config.upstream_server_name.clone(),
@@ -664,6 +668,22 @@ fn invalid(e: impl std::fmt::Display) -> io::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn sqlserver_connection_limit_defaults_and_rejects_unsafe_values() {
+        std::env::remove_var("PROXIMA_SQLSERVER_TDS_MAX_CONNECTIONS");
+        assert_eq!(max_connections_from_env().unwrap(), DEFAULT_MAX_CONNECTIONS);
+
+        std::env::set_var("PROXIMA_SQLSERVER_TDS_MAX_CONNECTIONS", "0");
+        assert!(max_connections_from_env().is_err());
+
+        std::env::set_var("PROXIMA_SQLSERVER_TDS_MAX_CONNECTIONS", "65537");
+        assert!(max_connections_from_env().is_err());
+
+        std::env::set_var("PROXIMA_SQLSERVER_TDS_MAX_CONNECTIONS", "64");
+        assert_eq!(max_connections_from_env().unwrap(), 64);
+        std::env::remove_var("PROXIMA_SQLSERVER_TDS_MAX_CONNECTIONS");
+    }
+
     #[test]
     fn prelogin_advertises_tls() {
         let p = build_prelogin(1);
