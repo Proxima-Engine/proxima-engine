@@ -34,3 +34,29 @@ docker compose -f compose.customer.yaml logs -f redis-gateway
 Connect each tenant's Redis client over TLS with its own credentials. Run `bash scripts/test-redis-tenant-gateway-ci.sh` against the disposable Redis fixture and verify cross-tenant key access and administrative commands are rejected.
 
 **Next:** [Complete Redis guide](REDIS_TENANT_GATEWAY.md) · [Deployment](DEPLOYMENT.md)
+
+
+## 2A. Configure Redis ACLs
+
+Create one Redis ACL user per tenant. Restrict each user to its generated tenant key namespace and only the commands required by the application. Do not use logical database numbers as the tenant security boundary. Do not give tenant users administrative commands, ACL management or access to another tenant's namespace.
+
+The gateway registry maps each client principal to its tenant and upstream ACL identity. Keep the registry, gateway private key and upstream CA in protected secret storage; never commit them.
+
+## 2B. Keep both TLS legs verified
+
+Configure client-to-gateway TLS with the gateway certificate and key. Configure gateway-to-Redis TLS with the trusted CA and the upstream certificate's server name. Keep the gateway listener on a private interface reachable only by application services.
+
+## 2C. Application connection
+
+Use the application's existing Redis client and point it at the gateway. Authenticate with the tenant-specific gateway credential and enable TLS. The gateway enforces supported RESP2 commands and key namespace rewriting; do not assume unsupported commands or RESP3 behavior is automatically available.
+
+## 2D. Acceptance checklist
+
+- Tenant A keys are rewritten into Tenant A's assigned namespace.
+- Tenant B keys are rewritten into Tenant B's assigned namespace.
+- Cross-tenant key reads and writes are denied.
+- Administrative and ACL commands are denied to tenant application identities.
+- Both TLS legs validate their certificates.
+- Credential rotation and revocation are tested.
+
+See [Redis tenant gateway](REDIS_TENANT_GATEWAY.md) for the full ACL pattern, identity registry, Compose profile and command compatibility matrix.
