@@ -58,6 +58,12 @@ The gateway loads a JSON registry from `PROXIMA_SQLSERVER_TDS_CONFIG`. The regis
 
 Each tenant binding has a unique tenant ID, SQL Server login and database. Usernames and database names must be valid SQL identifiers. A login can map to one tenant database in the registry.
 
+The gateway also enforces bounded resource use:
+- `PROXIMA_SQLSERVER_TDS_MAX_CONNECTIONS` limits concurrent client sessions (default 128; accepted range 1..=65536).
+- PRELOGIN, client TLS, LOGIN7, upstream PRELOGIN and upstream TLS handshakes have 10-second deadlines.
+- Upstream TCP connection establishment has a 10-second deadline.
+- Connections are rejected when the configured concurrency limit is exhausted.
+
 The gateway requires:
 - A PEM certificate and private key for the client-facing TLS listener.
 - A PEM CA bundle used to verify the SQL Server upstream certificate.
