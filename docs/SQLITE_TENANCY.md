@@ -39,3 +39,18 @@ Use separate volumes or OS identities when stronger infrastructure separation is
 ## Verification
 
 `cargo test -p proxima-engine sqlite_tenant` exercises physical file separation, invalid/path-traversal tenant IDs, symlink rejection, and Unix file permissions. The complete engine test suite runs these tests in CI.
+
+## Clone, build and verify
+
+Clone the Engine repository and enter its root:
+
+```bash
+git clone https://github.com/Proxima-Engine/proxima-engine.git
+cd proxima-engine
+cargo build --release -p proxima-engine
+cargo test -p proxima-engine sqlite_tenant
+```
+
+## Cloud assignment
+
+In **Agata Proxima Cloud → Dashboard → Databases**, register the existing SQLite service, enroll an Engine node, assign the target to that node, create the tenant binding and deploy the configuration. The Engine activates the SQLite runtime and reports the applied revision and tenant evidence to the workspace.
