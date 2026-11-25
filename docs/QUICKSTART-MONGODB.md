@@ -34,3 +34,29 @@ Use the configured TLS server name and verify the upstream certificate. The cust
 Connect with a MongoDB driver using TLS and `directConnection=true`. Run `bash scripts/test-mongodb-tenant-isolation-ci.sh` against the disposable service to verify authentication, database binding, cross-database denial and rejected unsupported commands.
 
 **Next:** [Complete MongoDB guide](MONGODB_TENANT_ISOLATION.md) · [Deployment](DEPLOYMENT.md)
+
+
+## 2A. Create tenant database users
+
+Create one MongoDB database and one upstream user per tenant. Assign each user a role scoped to its own database. Do not grant `root`, `readWriteAnyDatabase`, `dbAdminAnyDatabase` or cluster-wide privileges. The gateway identity registry contains the client username, tenant ID, database and auth source; it does not store upstream passwords.
+
+A tenant maps to exactly one database, and one database cannot be assigned to multiple tenant IDs. Review the registry before starting the gateway.
+
+## 2B. Configure TLS and Compose
+
+Client-to-gateway TLS is mandatory. Mount the gateway certificate and private key, and configure the upstream CA file and certificate server name. The optional customer Compose `mongodb` profile is available for deployments that use the repository's customer Compose file. Create all referenced secret files before starting that profile.
+
+## 2C. Application connection
+
+Use the application's existing MongoDB driver pointed at the gateway. Enable TLS and `directConnection=true`; use the assigned tenant username and its upstream password. Resolve tenant membership on the trusted backend and select the matching credential. Do not expose tenant credentials or registry contents to browser clients.
+
+## 2D. Acceptance checklist
+
+- SCRAM-SHA-256 succeeds for an assigned tenant principal.
+- The authenticated principal is bound to its configured database.
+- Cross-database commands are denied.
+- Unsupported commands and topology information that could bypass the boundary are rejected or sanitized as specified in the full guide.
+- Client TLS and verified upstream TLS both succeed.
+- Upstream MongoDB roles are database-scoped and least-privilege.
+
+See [MongoDB tenant isolation](MONGODB_TENANT_ISOLATION.md) for the registry schema, complete Compose secret list, supported command behavior and test details.
