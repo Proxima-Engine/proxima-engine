@@ -5,6 +5,7 @@ use serde_json::{json, Value};
 use std::{
     collections::{HashMap, HashSet},
     env, fs,
+    io::Write,
     path::{Path, PathBuf},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
