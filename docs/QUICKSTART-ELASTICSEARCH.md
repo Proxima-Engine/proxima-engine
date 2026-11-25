@@ -89,3 +89,78 @@ Before running the acceptance script, verify that the cluster responds over HTTP
 - Monitor rejected requests, TLS errors, credential rotation and index permission changes.
 
 See [Elasticsearch / OpenSearch tenant isolation](ELASTICSEARCH_TENANCY.md) for distribution-specific security API behavior and cloud assignment.
+
+
+## Use the shared Agata Proxima SDK and CLI
+
+The SDK and `agata` CLI are shared across all twelve database providers. You do not install a separate SDK or CLI for Elasticsearch or OpenSearch. Download the integration starter kit from the public developer downloads page and extract it.
+
+Linux/macOS:
+
+```bash
+curl -fL https://agataproxima.com/downloads/agata-proxima-integration-starter-kit.zip -o agata-proxima-integration-starter-kit.zip
+unzip agata-proxima-integration-starter-kit.zip -d agata-proxima-integration-starter-kit
+cd agata-proxima-integration-starter-kit
+npm ci
+npm run check
+npm link
+agata --help
+```
+
+Windows PowerShell:
+
+```powershell
+Invoke-WebRequest "https://agataproxima.com/downloads/agata-proxima-integration-starter-kit.zip" -OutFile ".\agata-proxima-integration-starter-kit.zip"
+Expand-Archive ".\agata-proxima-integration-starter-kit.zip" -DestinationPath ".\agata-proxima-integration-starter-kit" -Force
+Set-Location ".\agata-proxima-integration-starter-kit"
+npm ci
+npm run check
+npm link
+agata --help
+```
+
+Set the Cloud API origin and organization-scoped API key in the trusted backend environment or secret manager. Never expose the key in browser code, source control, command-line arguments or logs.
+
+```bash
+export AGATA_API_BASE_URL=https://api.agataproxima.com
+export AGATA_API_KEY=aga_your_organization_key
+agata health
+agata whoami
+agata databases providers
+agata databases targets
+agata nodes list
+agata deployments list
+agata verification list
+```
+
+For PowerShell, set `$env:AGATA_API_BASE_URL` and `$env:AGATA_API_KEY`. Create a reviewed private `target.json` for the selected distribution and use `agata databases targets create target.json`. Assign it with `agata databases targets assign TARGET_ID NODE_ID`, create a tenant binding with `agata databases bindings create binding.json`, and inspect deployment and verification records. Use the full guide for the exact Elasticsearch/OpenSearch distribution and role fields.
+
+The same JavaScript SDK is available to trusted Node.js services:
+
+```js
+import { AgataClient, createProviderRuntimeConfig } from "./node/agata-client.mjs";
+
+const agata = new AgataClient();
+const [health, providers, targets] = await Promise.all([
+  agata.health(),
+  agata.listDatabaseProviders(),
+  agata.listDatabaseTargets(),
+]);
+const runtimeConfig = createProviderRuntimeConfig("elasticsearch", {
+  host: "search.example.internal",
+  distribution: "elasticsearch",
+});
+console.log({ health, providers, targets, runtimeConfig });
+```
+
+## End-to-end Cloud workflow
+
+1. Register the HTTPS search cluster and selected distribution as a database target.
+2. Enroll the customer-hosted Engine node and confirm its signed heartbeat.
+3. Assign the target to a node advertising the native search runtime.
+4. Create one tenant binding per tenant with a distinct index namespace and identity.
+5. Deploy the desired configuration and wait for applied revision and provider evidence.
+6. Connect the application using its existing Elasticsearch or OpenSearch client with the tenant-specific credentials.
+7. Run the matching distribution-specific positive and cross-tenant negative acceptance script before production.
+
+Useful links: [Shared SDK and CLI downloads](https://agataproxima.com/developers/downloads) · [Cloud API reference](https://agataproxima.com/developers/api-reference) · [Engine provider runtime reference](PROVIDER_RUNTIME_REFERENCE.md).
