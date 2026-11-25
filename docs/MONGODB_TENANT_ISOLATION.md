@@ -4,9 +4,9 @@
 
 The initial supported isolation mode is **database per tenant**. Each tenant is assigned one MongoDB database and one MongoDB user whose upstream roles are scoped only to that database. Proxima binds the authenticated SCRAM username to an immutable tenant/database identity. Every admitted data command must target that exact database.
 
-MongoDB RBAC is a mandatory second enforcement boundary. Proxima's command policy is not a replacement for upstream privileges. Do not give gateway users `root`, `readWriteAnyDatabase`, `dbAdminAnyDatabase`, or other cluster-wide roles.
+Keep MongoDB RBAC enabled as the second enforcement boundary. Assign each upstream identity a tenant-scoped database role; gateway users must not receive `root`, `readWriteAnyDatabase`, `dbAdminAnyDatabase` or other cluster-wide privileges.
 
-The gateway does not store user passwords. It terminates client TLS, identifies the principal from the SCRAM-SHA-256 client-first message, and forwards the SCRAM exchange to MongoDB. MongoDB verifies the password and performs authentication. The identity registry only maps usernames to tenant IDs and database names.
+MongoDB validates the SCRAM-SHA-256 exchange and performs upstream authentication. The gateway maps the authenticated principal to its tenant ID and database namespace; the identity registry contains the mapping required for that decision.
 
 ## Gateway executable
 
@@ -88,14 +88,14 @@ docker compose -f compose.customer.yaml --profile mongodb up -d --build mongodb-
 docker compose -f compose.customer.yaml logs -f mongodb-gateway
 ```
 
-The gateway listens on `127.0.0.1:27018` by default. Keep it on loopback when the application shares the host; otherwise use a private interface, firewall rules and verified client TLS. The profile requires a verified upstream TLS CA and server name. It does not create MongoDB users or databases; provision each upstream identity with the least-privilege role described in the security model before starting it.
+The gateway listens on `127.0.0.1:27018` by default. Keep it on loopback when the application shares the host; otherwise use a private interface, firewall rules and verified client TLS. The profile requires a verified upstream TLS CA and server name. Provision the upstream MongoDB user and tenant database with the least-privilege role described in the security model before starting the gateway.
 
 
 ## Wire protocol and command policy
 
 The gateway parses MongoDB OP_MSG frames and BSON command documents. It removes speculative authentication and compression negotiation from hello messages so that commands remain inspectable. Document sequences for insert, update, and delete are decoded and included in policy validation.
 
-The gateway uses one configured upstream address. It removes upstream replica-set topology fields from hello replies so drivers cannot discover member addresses and bypass the gateway. Configure a standalone node or a stable writable-primary endpoint; multi-host discovery and gateway-managed failover are not implemented. Client URIs must use `directConnection=true`.
+The gateway uses one configured upstream address. It removes upstream replica-set topology fields from hello replies so drivers cannot discover member addresses and bypass the gateway. Configure a standalone node or a stable writable-primary endpoint; Use a stable writable-primary endpoint and set `directConnection=true` in the client URI. The gateway owns the configured upstream address and removes topology fields that could route clients around it.
 
 The initial admitted data command set is deliberately narrow:
 
@@ -110,7 +110,7 @@ Aggregation pipelines are inspected recursively. Cross-database lookup/union/gra
 
 This is a restricted wire gateway, not full MongoDB server feature parity. The initial implementation supports OP_MSG only, SCRAM-SHA-256 only, and `admin` as the SCRAM authentication source. OP_QUERY, OP_COMPRESSED, OP_MSG checksums, exhaust streams, speculative authentication, SCRAM-SHA-1, PLAIN, X.509, LDAP, and unsupported commands are not admitted. Compression is intentionally not negotiated.
 
-Transactions, replica-set failover, and sharded-cluster behavior are not supported by this initial profile. CI uses a real MongoDB 8 standalone service and verifies SCRAM authentication, tenant database binding, topology-field sanitization, cross-database denial, cross-database aggregation denial, transaction denial, database enumeration denial at the gateway, and cursor continuation.
+The command policy accepts the supported tenant CRUD and cursor operations and rejects transaction commands. The CI suite uses a real MongoDB standalone service and verifies SCRAM authentication, tenant database binding, topology-field sanitization, cross-database and aggregation denial, transaction-command rejection, database enumeration controls and cursor continuation.
 
 ## Defense in depth
 
