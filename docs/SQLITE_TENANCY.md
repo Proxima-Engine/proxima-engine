@@ -2,7 +2,7 @@
 
 ## Support model
 
-SQLite is embedded storage, not a separately authenticated database server. Proxima uses a database-file-per-tenant model. The trusted application resolves an authenticated tenant ID and opens that tenant's file through the native SQLite tenant module.
+SQLite is embedded storage. Proxima isolates tenants with a private database file per tenant; the trusted application resolves the authenticated tenant ID and opens the corresponding file through the native SQLite module.
 
 The module is in `crates/proxima-engine/src/sqlite_tenant.rs` and is exported as `proxima_engine::sqlite_tenant::SqliteTenantDatabase`.
 
@@ -32,10 +32,25 @@ Tenant IDs must come from the trusted authentication and authorization layer. Ne
 
 ## Security boundary and operational requirements
 
-SQLite does not implement database users, server-side roles, or network authentication. File permissions protect data from other operating-system users; they do not isolate tenants from a malicious process running under the same OS identity. Proxima's trusted application layer must be the only component allowed to select tenant files. Do not expose raw SQLite connections to untrusted clients, and do not use a shared process with unrestricted filesystem access as a substitute for OS-level isolation in hostile multi-tenant environments.
+SQLite isolation is file- and process-based. The trusted application must be the only component allowed to resolve tenant file paths. Apply restrictive filesystem permissions and use separate OS identities or volumes when tenants require stronger infrastructure separation. Keep raw SQLite connections inside the trusted application boundary.
 
 Use separate volumes or OS identities when stronger infrastructure separation is required. Back up each tenant file together with its WAL state using SQLite's online backup API or a quiesced/consistent backup procedure; copying only the main file while a WAL database is active is not a valid backup strategy.
 
 ## Verification
 
 `cargo test -p proxima-engine sqlite_tenant` exercises physical file separation, invalid/path-traversal tenant IDs, symlink rejection, and Unix file permissions. The complete engine test suite runs these tests in CI.
+
+## Clone, build and verify
+
+Clone the Engine repository and enter its root:
+
+```bash
+git clone https://github.com/Proxima-Engine/proxima-engine.git
+cd proxima-engine
+cargo build --release -p proxima-engine
+cargo test -p proxima-engine sqlite_tenant
+```
+
+## Cloud assignment
+
+In **Agata Proxima Cloud → Dashboard → Databases**, register the existing SQLite service, enroll an Engine node, assign the target to that node, create the tenant binding and deploy the configuration. The Engine activates the SQLite runtime and reports the applied revision and tenant evidence to the workspace.

@@ -95,7 +95,7 @@ The Markdown report should summarize the same facts and link to the detailed log
 - Use ephemeral service containers and unique test credentials.
 - Run the full database matrix on pull requests affecting gateway, policy, identity, deployment, or shared protocol code, and on scheduled main-branch verification.
 - Preserve the existing PostgreSQL, CockroachDB, MySQL, MariaDB, MongoDB and PgBouncer checks.
-- Add SQL Server, Redis, Cassandra, DynamoDB, Elasticsearch and OpenSearch to the matrix only after their provider-specific real-service suites exist; do not count helper-only checks as provider acceptance.
+- The SQL Server native lifecycle suite is available as `sqlserver_native_integration`; the Proxima TDS gateway compatibility suite is still a separate requirement. Redis, Cassandra, DynamoDB, Elasticsearch and OpenSearch still need their full provider-specific adversarial real-service suites; do not count helper-only checks as provider acceptance.
 - Fail CI if a database marked implemented has no acceptance suite, or if an expected suite is skipped.
 - Keep build-only and mock-only tests separate from real-server acceptance results.
 
@@ -114,4 +114,30 @@ A local or CI run can establish the first five levels within its tested scope. I
 
 ## Current implementation state
 
-This document specifies the target verification system. The unified all-database runner remains a separate follow-up. Per-database scripts and CI checks are authoritative. DynamoDB AWS IAM and Elasticsearch/OpenSearch cluster acceptance are external provider gates until their live-service suites and provisioning executors are implemented. SQLite isolation is exercised by the Rust unit suite; Oracle isolation is exercised against a disposable Oracle Free 23 instance by scripts/test-oracle-tenant-isolation-ci.sh. A green run establishes only the documented profile and tested version, not universal production certification.
+This document specifies the target verification system. The unified all-database runner remains a separate follow-up. Per-database scripts and CI checks are authoritative. The Engine wires supervised Cloud assignment activation for MySQL/MariaDB, MongoDB and Redis. MySQL/MariaDB activation authenticates each configured upstream account and runs `SELECT 1`; MongoDB activation verifies upstream TLS and `hello` but does not provision users or prove each tenant SCRAM identity; Redis activation authenticates each configured upstream ACL identity over TLS and runs `PING`. These paths do not provision upstream tenant accounts or ACLs and do not replace adversarial real-server acceptance. SQL Server now has a TLS-verified native database-per-tenant lifecycle executor and a disposable native lifecycle integration test, but no Proxima TDS server. DynamoDB has a concrete AWS SDK IAM adapter; Cassandra has a concrete TLS-authenticated Scylla driver executor; Oracle has a concrete TLS/wallet-capable TNS executor. These three adapters still require Cloud assignment orchestration and live-service acceptance. Elasticsearch/OpenSearch native REST identity operations now include OpenSearch role mapping and tenant-authentication verification, but still require end-to-end assignment lifecycle and distribution-specific acceptance. SQLite isolation is exercised by the Rust unit suite. A green run establishes only the documented profile and tested version, not universal production certification.
+
+
+## SQL Server native lifecycle acceptance
+
+Start a disposable SQL Server 2019/2022 instance with TLS enabled and set the following PowerShell environment variables. `PROXIMA_SQLSERVER_CA_FILE` is optional when the certificate chains to the Windows trust store.
+
+```powershell
+$env:PROXIMA_SQLSERVER_HOST = "localhost"
+$env:PROXIMA_SQLSERVER_PORT = "1433"
+$env:PROXIMA_SQLSERVER_ADMIN_USER = "sa"
+$env:PROXIMA_SQLSERVER_ADMIN_PASSWORD = "<disposable-admin-password>"
+$env:PROXIMA_SQLSERVER_CA_FILE = "C:\certs\sqlserver-ca.pem"
+cargo test -p proxima-engine --test sqlserver_native_integration -- --ignored
+```
+
+The test creates two disposable tenant databases and logins, checks that each tenant principal maps only to its own database, verifies that no elevated server/database role was granted, rotates one password, disables the login, and removes the test resources.
+
+## Windows verification runner
+
+Run the Engine build and unit checks from PowerShell:
+
+```powershell
+.\scripts\verify-provider-matrix.ps1 -ProjectRoot .
+```
+
+The runner writes timestamped JSON and Markdown reports under `verification-results/`. It records build/format/unit checks as PASS or FAIL, optional PostgreSQL/MySQL/MariaDB/MongoDB real-service tests as SKIP unless their explicit `PROXIMA_RUN_*_ACCEPTANCE=1` opt-in is set, and providers without an end-to-end Engine adapter/suite as NOT_IMPLEMENTED. SKIP and NOT_IMPLEMENTED are never counted as PASS. The runner intentionally does not claim to orchestrate every database container or certify provider isolation.

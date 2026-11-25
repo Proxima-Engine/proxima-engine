@@ -51,7 +51,29 @@ if (-not (Test-Path -LiteralPath $tokenPath -PathType Leaf)) {
 }
 Remove-Item Env:PROXIMA_NODE_ENROLLMENT_TOKEN -ErrorAction SilentlyContinue
 
-$dockerOs = docker info --format '{{.OSType}}'
+# Gateway TLS Docker secrets. Replace placeholders with customer-issued CA
+# and gateway certificates before enabling the corresponding database provider.
+$SecretsDir = Join-Path $root "secrets"
+New-Item -ItemType Directory -Force -Path $SecretsDir | Out-Null
+foreach ($Secret in @(
+  "mysql-gateway-cert.pem", "mysql-gateway-key.pem", "mysql-upstream-ca.pem",
+  "mongodb-gateway-cert.pem", "mongodb-gateway-key.pem", "mongodb-upstream-ca.pem",
+  "redis-gateway-cert.pem", "redis-gateway-key.pem", "redis-upstream-ca.pem",
+  "sqlserver-tds-upstream-ca.pem", "sqlserver-tds-client-cert.pem", "sqlserver-tds-client-key.pem"
+)) {
+  $SecretPath = Join-Path $SecretsDir $Secret
+  if (-not (Test-Path -LiteralPath $SecretPath -PathType Leaf)) {
+    [System.IO.File]::WriteAllText($SecretPath, "REPLACE_WITH_CUSTOMER_ISSUED_PEM_MATERIAL", [System.Text.UTF8Encoding]::new($false))
+  }
+}
+foreach ($Registry in @("mysql-identities.json", "mongodb-identities.json", "redis-identities.json")) {
+  $RegistryPath = Join-Path $SecretsDir $Registry
+  if (-not (Test-Path -LiteralPath $RegistryPath -PathType Leaf)) {
+    [System.IO.File]::WriteAllText($RegistryPath, '{"schema_version":1,"users":[]}', [System.Text.UTF8Encoding]::new($false))
+  }
+}
+
+$dockerOs = docker info --format '{{.OSType}}' 
 if ($LASTEXITCODE -ne 0) {
   throw "Docker Desktop is not running or the Docker daemon is unavailable. Start Docker Desktop, wait until it reports Engine running, and rerun this script."
 }

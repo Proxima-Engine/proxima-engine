@@ -1,9 +1,11 @@
 use hmac::{Hmac, Mac};
 use sha2::{Digest, Sha256};
+use std::collections::HashSet;
 use std::fmt;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::{Arc, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 type HmacSha256 = Hmac<Sha256>;
@@ -31,6 +33,7 @@ pub enum TenantTokenError {
     EmergencyTokenLifetimeInvalid,
     EmergencyTokenReplay,
     EmergencyReplayStoreUnavailable,
+    TenantNotAssigned,
 }
 
 impl fmt::Display for TenantTokenError {
@@ -49,6 +52,7 @@ impl fmt::Display for TenantTokenError {
             Self::EmergencyReplayStoreUnavailable => {
                 write!(f, "emergency replay protection is unavailable")
             }
+            Self::TenantNotAssigned => write!(f, "tenant is not assigned to this Engine node"),
         }
     }
 }
@@ -60,6 +64,7 @@ pub struct TenantTokenVerifier {
     secret: Vec<u8>,
     previous_secret: Option<Vec<u8>>,
     replay_dir: PathBuf,
+    allowed_tenants: Arc<RwLock<Option<HashSet<String>>>>,
 }
 
 impl TenantTokenVerifier {
@@ -76,6 +81,7 @@ impl TenantTokenVerifier {
             secret: secret.to_vec(),
             previous_secret: None,
             replay_dir,
+            allowed_tenants: Arc::new(RwLock::new(None)),
         })
     }
 
@@ -96,6 +102,7 @@ impl TenantTokenVerifier {
             secret: secret.to_vec(),
             previous_secret: previous_secret.map(|previous| previous.as_bytes().to_vec()),
             replay_dir,
+            allowed_tenants: Arc::new(RwLock::new(None)),
         })
     }
 
@@ -111,7 +118,30 @@ impl TenantTokenVerifier {
             secret: secret.to_vec(),
             previous_secret: None,
             replay_dir,
+            allowed_tenants: Arc::new(RwLock::new(None)),
         })
+    }
+
+    /// Replace the Cloud-authoritative tenant allowlist for this Engine node.
+    /// `None` means standalone mode; `Some(empty)` denies all tenant tokens.
+    pub fn set_allowed_tenants(&self, tenants: Option<HashSet<String>>) {
+        if let Ok(mut current) = self.allowed_tenants.write() {
+            *current = tenants;
+        }
+    }
+
+    fn ensure_tenant_assigned(&self, tenant_id: &str) -> Result<(), TenantTokenError> {
+        let guard = self
+            .allowed_tenants
+            .read()
+            .map_err(|_| TenantTokenError::TenantNotAssigned)?;
+        if guard
+            .as_ref()
+            .is_some_and(|allowed| !allowed.contains(tenant_id))
+        {
+            return Err(TenantTokenError::TenantNotAssigned);
+        }
+        Ok(())
     }
 
     pub fn verify(
@@ -157,6 +187,7 @@ impl TenantTokenVerifier {
         if !valid_current && !valid_previous {
             return Err(TenantTokenError::InvalidSignature);
         }
+        self.ensure_tenant_assigned(tenant_id)?;
 
         Ok(TenantContext {
             tenant_id: tenant_id.to_owned(),
@@ -204,6 +235,7 @@ impl TenantTokenVerifier {
         if !valid_current && !valid_previous {
             return Err(TenantTokenError::InvalidSignature);
         }
+        self.ensure_tenant_assigned(tenant_id)?;
         fs::create_dir_all(&self.replay_dir)
             .map_err(|_| TenantTokenError::EmergencyReplayStoreUnavailable)?;
         let nonce_hash = format!("{:x}", Sha256::digest(nonce.as_bytes()));
@@ -436,5 +468,18 @@ mod previous_key_tests {
             verifier.verify(&token, 1000),
             Err(TenantTokenError::InvalidSignature)
         );
+    }
+
+    #[test]
+    fn cloud_allowlist_rejects_signed_tokens_for_unassigned_tenants() {
+        let verifier = TenantTokenVerifier::new(b"0123456789abcdef0123456789abcdef").unwrap();
+        let token = verifier.sign_for_test("tenant_a", 2_000_000_000);
+        verifier.set_allowed_tenants(Some(HashSet::from(["tenant_b".to_owned()])));
+        assert_eq!(
+            verifier.verify(&token, 1_900_000_000),
+            Err(TenantTokenError::TenantNotAssigned)
+        );
+        verifier.set_allowed_tenants(Some(HashSet::from(["tenant_a".to_owned()])));
+        assert!(verifier.verify(&token, 1_900_000_000).is_ok());
     }
 }

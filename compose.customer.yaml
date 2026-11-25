@@ -17,10 +17,37 @@ services:
       PROXIMA_UPSTREAM_ADDR: ${PROXIMA_UPSTREAM_ADDR:?Set PROXIMA_UPSTREAM_ADDR in .env}
       PROXIMA_DASHBOARD_ENABLED: "false"
       PROXIMA_METRICS_LISTEN_ADDR: 127.0.0.1:9090
+      PROXIMA_MYSQL_TLS_CERT_FILE: /run/secrets/mysql_gateway_cert
+      PROXIMA_MYSQL_TLS_KEY_FILE: /run/secrets/mysql_gateway_key
+      PROXIMA_MYSQL_UPSTREAM_TLS_CA_FILE: /run/secrets/mysql_upstream_ca
+      PROXIMA_MONGODB_UPSTREAM_TLS_CA_FILE: /run/secrets/mongodb_upstream_ca
+      PROXIMA_MONGODB_TLS_CERT_FILE: /run/secrets/mongodb_gateway_cert
+      PROXIMA_MONGODB_TLS_KEY_FILE: /run/secrets/mongodb_gateway_key
+      PROXIMA_REDIS_UPSTREAM_TLS_CA_FILE: /run/secrets/redis_upstream_ca
+      PROXIMA_REDIS_TLS_CERT_FILE: /run/secrets/redis_gateway_cert
+      PROXIMA_REDIS_TLS_KEY_FILE: /run/secrets/redis_gateway_key
+      PROXIMA_SQLSERVER_TDS_UPSTREAM_CA_PEM: /run/secrets/sqlserver_tds_upstream_ca
+      PROXIMA_SQLSERVER_TDS_CLIENT_CERT_PEM: /run/secrets/sqlserver_tds_client_cert
+      PROXIMA_SQLSERVER_TDS_CLIENT_KEY_PEM: /run/secrets/sqlserver_tds_client_key
+      PROXIMA_SQLSERVER_TDS_LISTEN_ADDR: ${PROXIMA_SQLSERVER_TDS_LISTEN_ADDR:-0.0.0.0:14330}
+      PROXIMA_SQLSERVER_TDS_ALLOW_NON_LOOPBACK: ${PROXIMA_SQLSERVER_TDS_ALLOW_NON_LOOPBACK:-true}
     ports:
       - "${PROXIMA_BIND_ADDRESS:-127.0.0.1}:6432:6432"
+      - "${PROXIMA_SQLSERVER_TDS_BIND_ADDRESS:-127.0.0.1}:14330:14330"
     secrets:
       - node_enrollment_token
+      - mysql_gateway_cert
+      - mysql_gateway_key
+      - mysql_upstream_ca
+      - mongodb_gateway_cert
+      - mongodb_gateway_key
+      - mongodb_upstream_ca
+      - redis_gateway_cert
+      - redis_gateway_key
+      - redis_upstream_ca
+      - sqlserver_tds_upstream_ca
+      - sqlserver_tds_client_cert
+      - sqlserver_tds_client_key
     volumes:
       - proxima-node-data:/var/lib/proxima
     healthcheck:
@@ -46,11 +73,18 @@ services:
     environment:
       PROXIMA_MYSQL_IDENTITY_REGISTRY: /run/secrets/mysql_identity_registry
       PROXIMA_MYSQL_LISTEN_ADDR: 0.0.0.0:3307
+      PROXIMA_MYSQL_TLS_CERT_FILE: /run/secrets/mysql_gateway_cert
+      PROXIMA_MYSQL_TLS_KEY_FILE: /run/secrets/mysql_gateway_key
+      PROXIMA_MYSQL_UPSTREAM_TLS_CA_FILE: /run/secrets/mysql_upstream_ca
+      PROXIMA_MYSQL_ALLOW_NON_LOOPBACK: "true"
       RUST_LOG: ${PROXIMA_MYSQL_RUST_LOG:-info}
     ports:
       - "${PROXIMA_MYSQL_BIND_ADDRESS:-127.0.0.1}:3307:3307"
     secrets:
       - mysql_identity_registry
+      - mysql_gateway_cert
+      - mysql_gateway_key
+      - mysql_upstream_ca
     security_opt:
       - no-new-privileges:true
     read_only: true
@@ -122,6 +156,12 @@ services:
 secrets:
   mysql_identity_registry:
     file: ./secrets/mysql-identities.json
+  mysql_gateway_cert:
+    file: ./secrets/mysql-gateway-cert.pem
+  mysql_gateway_key:
+    file: ./secrets/mysql-gateway-key.pem
+  mysql_upstream_ca:
+    file: ./secrets/mysql-upstream-ca.pem
   node_enrollment_token:
     file: ./secrets/node_enrollment_token
   mongodb_identity_registry:
@@ -140,6 +180,12 @@ secrets:
     file: ./secrets/redis-gateway-cert.pem
   redis_gateway_key:
     file: ./secrets/redis-gateway-key.pem
+  sqlserver_tds_upstream_ca:
+    file: ./secrets/sqlserver-tds-upstream-ca.pem
+  sqlserver_tds_client_cert:
+    file: ./secrets/sqlserver-tds-client-cert.pem
+  sqlserver_tds_client_key:
+    file: ./secrets/sqlserver-tds-client-key.pem
 
 networks:
   default:

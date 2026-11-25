@@ -1,18 +1,18 @@
 # MySQL gateway
 
-This guide configures Proxima's MySQL-compatible protocol gateway against a MySQL upstream server. The gateway uses the MySQL client wire protocol and the dedicated proxima-mysql-gateway executable. The product guide is named MySQL. The repository's current CI compatibility target is MySQL Server 8.0; the version is recorded as a test target, not as the product name.
+This guide configures Proxima's MySQL-compatible protocol gateway against a MySQL upstream. The dedicated proxima-mysql-gateway executable speaks the MySQL client wire protocol, authenticates each client, binds the session to an immutable tenant principal and opens a dedicated upstream connection using that tenant's least-privilege account.
 
 The gateway is a separate executable from the PostgreSQL Engine listener. It authenticates each client, binds the session to one immutable tenant principal, opens a dedicated upstream connection and validates the selected database before accepting the client session.
 
 ## 1. Requirements
 
 - Git and stable Rust/Cargo
-- MySQL server (the CI integration target is MySQL 8.0)
+- A MySQL server reachable from the Engine host
 - MySQL-compatible client utilities (mysql and mysqladmin)
 - Python 3 for generating password verifiers
 - A private directory for the identity registry and upstream credentials
 
-The gateway does not install or provision the MySQL server.
+Use the MySQL service already assigned to your application. Proxima runs as a separate gateway and preserves the existing database engine and client driver.
 
 ## 2. Clone and build
 
@@ -32,13 +32,13 @@ cargo build --release -p proxima-engine --bin proxima-mysql-gateway
 
 ## 3. Start a disposable MySQL server
 
-For a disposable local server matching the repository's current CI target, start MySQL 8.0 in Docker:
+Start a disposable MySQL service in Docker:
 
 ~~~bash
 docker run -d --name proxima-mysql \
   -e MYSQL_ROOT_PASSWORD=proxima-mysql-local \
   -p 127.0.0.1:3306:3306 \
-  mysql:8.0
+  mysql:8
 ~~~
 
 Wait until the server is ready:
@@ -209,13 +209,13 @@ Use a MySQL client that supports the configured authentication plugin. The upstr
 - Concurrent connections are bounded; upstream connection and query operations have deadlines.
 - Non-loopback upstream URLs must require verified TLS with require_ssl=true.
 
-SQL admission supplements database grants; it does not replace them. Keep upstream accounts least-privileged and isolated by tenant. Remote upstream TLS must validate the server certificate.
+Enforce least privilege in both gateway admission and upstream database grants. Keep upstream accounts isolated by tenant and validate the server certificate for remote TLS.
 
 ## 10. Integration verification
 
-The MySQL-specific ignored integration test is crates/proxima-engine/tests/mysql_gateway_integration.rs. CI provisions mysql:8.0 on port 3306.
+The MySQL-specific ignored integration test is crates/proxima-engine/tests/mysql_gateway_integration.rs. CI provisions mysql:8 on port 3306.
 
-The CI runner provisions a disposable MySQL 8.0 service, creates two tenant databases and restricted upstream accounts, generates client verifiers, starts the gateway and runs the MySQL integration suite.
+The CI runner provisions a disposable MySQL service, creates two tenant databases and restricted upstream accounts, generates client verifiers, starts the gateway and runs the MySQL integration suite.
 
 The tests verify correct authentication, rejection of incorrect caching SHA-2 credentials, tenant-local reads, denial of cross-tenant reads and writes, denial of database switching, persistent session binding after denied operations, and prepared SELECT/INSERT statements.
 
@@ -255,12 +255,12 @@ These tests are ignored by default because they require live database services a
 
 
 
-## CI compatibility target
+
 
 The repository CI workflow currently provisions mysql:8.0. The integration suite validates tenant-local reads, cross-tenant read/write denial, database-switch denial, prepared statements and invalid-password rejection against that service. This is the tested CI target; rerun the suite before claiming compatibility with additional server versions.
 
 
-## 10. Run the gateway from the customer container image
+## Customer container deployment
 
 The customer image includes the PostgreSQL Engine, MySQL-compatible gateway, and MongoDB gateway executables. The default Compose profile starts only the PostgreSQL Engine. Enable the optional `mysql` profile when deploying a MySQL or MariaDB target.
 
@@ -286,4 +286,4 @@ Inspect its logs:
 docker compose -f compose.customer.yaml logs --tail 100 mysql-gateway
 ~~~
 
-The MySQL gateway is a separate runtime from the PostgreSQL Engine service. It does not share the PostgreSQL listener or automatically inherit PostgreSQL tenant configuration. The identity registry and upstream account grants must be configured for the MySQL or MariaDB target. Cloud enrollment and remote configuration delivery for this gateway are separate Control Plane integration work.
+The MySQL gateway runs as its own provider runtime with a MySQL identity registry and upstream account grants. Cloud onboarding uses the shared database lifecycle: register the target, assign an enrolled Engine node, create a tenant binding, then verify the applied runtime configuration.

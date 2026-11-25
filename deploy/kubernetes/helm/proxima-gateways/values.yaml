@@ -39,10 +39,6 @@ controller:
   gatewayImage:
     repository: ghcr.io/proxima-engine/proxima-engine
     tag: latest
-  secrets:
-    mysql: proxima-mysql-gateway
-    mongodb: proxima-mongodb-gateway
-    redis: proxima-redis-gateway
 networkPolicy:
   enabled: true
   clientPodSelector:
@@ -86,3 +82,13 @@ gateways:
       PROXIMA_REDIS_UPSTREAM_TLS_CA_FILE: /var/run/proxima/ca.crt
       PROXIMA_REDIS_TLS_CERT_FILE: /var/run/proxima/tls.crt
       PROXIMA_REDIS_TLS_KEY_FILE: /var/run/proxima/tls.key
+
+  sqlserver:
+    enabled: false
+    replicas: 2
+    port: 14330
+    secretName: proxima-sqlserver-tds-gateway
+    binary: proxima-sqlserver-tds-gateway
+    env:
+      PROXIMA_SQLSERVER_TDS_CONFIG: /var/run/proxima/config.json
+      PROXIMA_SQLSERVER_TDS_ALLOW_NON_LOOPBACK: "true"

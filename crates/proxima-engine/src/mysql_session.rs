@@ -87,6 +87,7 @@ mod tests {
             tenant_id: tenant.to_string(),
             database: database.to_string(),
             upstream_url: "mysql://user:secret@127.0.0.1:3306/db".to_string(),
+            upstream_tls_ca_file: None,
             auth_plugin: "mysql_native_password",
             password_sha1: Some([0; 20]),
             password_sha256: None,

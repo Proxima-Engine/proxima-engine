@@ -142,7 +142,7 @@ fn start_proxima(port: u16) -> Result<Child, Box<dyn Error>> {
     Ok(child)
 }
 
-async fn wait_for_port(port: u16) -> Result<(), Box<dyn Error>> {
+async fn wait_for_port(port: u16, child: &mut Child) -> Result<(), Box<dyn Error>> {
     for _ in 0..50 {
         if tokio::net::TcpStream::connect(("127.0.0.1", port))
             .await
@@ -150,22 +150,42 @@ async fn wait_for_port(port: u16) -> Result<(), Box<dyn Error>> {
         {
             return Ok(());
         }
+        if let Some(status) = child.try_wait()? {
+            return Err(format!("Proxima exited before opening 127.0.0.1:{port} (status: {status}); retrying with a fresh ephemeral port").into());
+        }
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
 
-    Err("Proxima did not start listening".into())
+    Err(format!("Proxima did not start listening on 127.0.0.1:{port}").into())
+}
+
+async fn start_proxima_ready() -> Result<(Child, u16), Box<dyn Error>> {
+    let mut last_error = String::from("no startup attempt made");
+    for attempt in 1..=8 {
+        let port = allocate_proxima_port()?;
+        let mut child = start_proxima(port)?;
+        match wait_for_port(port, &mut child).await {
+            Ok(()) => return Ok((child, port)),
+            Err(error) => {
+                last_error = error.to_string();
+                let _ = child.kill();
+                let _ = child.wait();
+                if attempt < 8 {
+                    tokio::time::sleep(std::time::Duration::from_millis(100 * attempt)).await;
+                }
+            }
+        }
+    }
+    Err(format!("Proxima failed to bind after 8 fresh-port attempts: {last_error}").into())
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn real_postgres_session_enforces_tenant_isolation() -> Result<(), Box<dyn Error>> {
     setup_database().await?;
 
-    let proxima_port = allocate_proxima_port()?;
-    let mut proxima = start_proxima(proxima_port)?;
+    let (mut proxima, proxima_port) = start_proxima_ready().await?;
 
     let result = async {
-        wait_for_port(proxima_port).await?;
-
         let tenant_a = connect_tenant("tenant_a", "tenant-a-password", proxima_port).await?;
         let tenant_b = connect_tenant("tenant_b", "tenant-b-password", proxima_port).await?;
 

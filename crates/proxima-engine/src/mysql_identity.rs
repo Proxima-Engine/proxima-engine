@@ -10,6 +10,7 @@ pub struct TenantPrincipal {
     pub tenant_id: String,
     pub database: String,
     pub upstream_url: String,
+    pub upstream_tls_ca_file: Option<String>,
     pub(crate) auth_plugin: &'static str,
     pub(crate) password_sha1: Option<[u8; 20]>,
     pub(crate) password_sha256: Option<[u8; 32]>,
@@ -65,6 +66,12 @@ impl MysqlIdentityRegistry {
             ));
         }
 
+        let upstream_tls_ca_file = root
+            .get("upstream_tls_ca_file")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned);
         let mut principals = HashMap::new();
 
         for (index, user) in users.iter().enumerate() {
@@ -171,10 +178,10 @@ impl MysqlIdentityRegistry {
             if !matches!(
                 upstream_options.ip_or_hostname(),
                 "localhost" | "127.0.0.1" | "::1"
-            ) && upstream_options.ssl_opts().is_none()
+            ) && (upstream_options.ssl_opts().is_none() || upstream_tls_ca_file.is_none())
             {
                 return Err(IdentityError::InvalidRegistry(format!(
-                    "users[{index}].upstream_url must require verified TLS for non-loopback upstream hosts (add require_ssl=true)"
+                    "users[{index}].upstream_url must require verified TLS and the registry must provide upstream_tls_ca_file for non-loopback hosts"
                 )));
             }
 
@@ -189,6 +196,7 @@ impl MysqlIdentityRegistry {
                 tenant_id,
                 database,
                 upstream_url,
+                upstream_tls_ca_file: upstream_tls_ca_file.clone(),
                 auth_plugin: expected_plugin,
                 password_sha1,
                 password_sha256,
@@ -544,10 +552,15 @@ mod tests {
 
     #[test]
     fn accepts_remote_upstream_with_tls() {
-        let json = registry_json().replace(
-            "127.0.0.1:3306/tenant_a_db",
-            "db.example.com:3306/tenant_a_db?require_ssl=true",
-        );
+        let json = registry_json()
+            .replace(
+                "\"users\"",
+                "\"upstream_tls_ca_file\":\"/etc/ssl/certs/mysql-ca.pem\",\"users\"",
+            )
+            .replace(
+                "127.0.0.1:3306/tenant_a_db",
+                "db.example.com:3306/tenant_a_db?require_ssl=true",
+            );
         assert!(MysqlIdentityRegistry::from_json(&json).is_ok());
     }
 

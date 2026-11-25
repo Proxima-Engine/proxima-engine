@@ -161,7 +161,7 @@ Download the [Proxima Engine source ZIP](https://github.com/Proxima-Engine/proxi
 
 - Docker Desktop installed and running with its WSL 2 backend.
 - Docker Desktop switched to Linux containers.
-- Network access from the Engine container to the PostgreSQL upstream and Agata Proxima HTTPS enrollment/heartbeat endpoints.
+- Network access from the Engine container to the selected database provider and Agata Proxima HTTPS enrollment/heartbeat endpoints.
 
 **Install**
 
@@ -172,7 +172,7 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 .\install-customer.ps1
 ```
 
-The installer creates `.env` and `secrets/node_enrollment_token` from the copied node configuration. It asks for the PostgreSQL upstream host and port if `PROXIMA_UPSTREAM_ADDR` is not already set. It validates Docker Desktop's Linux-container mode and Compose v2, validates the Compose configuration, builds and starts the Engine, and waits up to 120 seconds for the actual Docker health state. On success, it prints the local PostgreSQL proxy endpoint `127.0.0.1:6432`.
+The installer creates `.env` and `secrets/node_enrollment_token` from the copied node configuration. For the PostgreSQL reference profile, it asks for the upstream host and port if `PROXIMA_UPSTREAM_ADDR` is not already set. Other provider profiles use their provider-specific runtime configuration and secret paths. It validates Docker Desktop's Linux-container mode and Compose v2, validates the Compose configuration, builds and starts the Engine, and waits up to 120 seconds for the actual Docker health state. On success, it prints the configured Engine health and connection endpoints for the selected deployment profile.
 
 ### Linux
 

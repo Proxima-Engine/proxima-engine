@@ -6,7 +6,7 @@ CockroachDB speaks the PostgreSQL wire protocol. Proxima reuses its existing Pos
 
 Set `PROXIMA_UPSTREAM_ADDR` to the CockroachDB SQL endpoint. The client connects to the normal Proxima PostgreSQL listener and supplies a signed Proxima tenant token in the startup parameter `proxima_tenant_token` (or the supported `PGOPTIONS` form). Proxima verifies the token and replaces the requested upstream role with `PROXIMA_TENANT_ROLE_PREFIX` plus the normalized tenant ID.
 
-Use CockroachDB 25.2 or later for native row-level security. Earlier versions do not provide the RLS enforcement required by this shared-table isolation profile.
+The shared-table isolation profile requires native row-level security and forced RLS. Use a cluster release that exposes these controls; the CI script uses CockroachDB 25.2 for its disposable test node.
 
 ## Required database controls
 
@@ -56,10 +56,25 @@ The client still uses a PostgreSQL-compatible driver. Its signed tenant token mu
 
 CockroachDB uses serializable transactions and can return SQLSTATE `40001` with a transaction-retry error under contention. Proxima must not blindly replay SQL transactions: replay can duplicate application side effects and cannot safely reconstruct arbitrary client transaction state. The proxy forwards CockroachDB's transaction result to the client. Applications must follow CockroachDB's retry protocol and retry the complete transaction when required.
 
-The PostgreSQL-wire compatibility path does not imply full PostgreSQL feature parity. Validate the exact CockroachDB release, SQL features, role grants, TLS mode, transaction retry behavior, and cluster topology used in deployment.
+The runtime uses the PostgreSQL wire protocol. Validate application SQL, role grants, TLS, transaction retries and cluster topology against the CockroachDB release used by your deployment.
 
 ## Verification
 
 `scripts/test-cockroachdb-tenant-isolation-ci.sh` starts a disposable CockroachDB 25.2 node, creates two least-privilege tenant roles and forced RLS policies, starts Proxima against the CockroachDB SQL endpoint, and verifies tenant A/B reads, cross-tenant read filtering, cross-tenant insert/update rejection, and invalid-token rejection.
 
-This test proves the shared PostgreSQL-wire path against a real CockroachDB service. It is not a substitute for testing production multi-node, multi-region, failover, backup, or contention workloads.
+The acceptance script exercises the shared PostgreSQL-wire path against a real CockroachDB service. Run the same workflow against the multi-node, multi-region, failover, backup and contention profile used in production.
+
+## Clone, build and verify
+
+Clone the Engine repository and enter its root:
+
+```bash
+git clone https://github.com/Proxima-Engine/proxima-engine.git
+cd proxima-engine
+cargo build --release -p proxima-engine --bin proxima-engine
+bash scripts/test-cockroachdb-tenant-isolation-ci.sh
+```
+
+## Cloud assignment
+
+In **Agata Proxima Cloud → Dashboard → Databases**, register the existing CockroachDB service, enroll an Engine node, assign the target to that node, create the tenant binding and deploy the configuration. The Engine activates the CockroachDB runtime and reports the applied revision and tenant evidence to the workspace.

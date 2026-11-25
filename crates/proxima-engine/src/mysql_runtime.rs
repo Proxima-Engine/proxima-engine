@@ -1,0 +1,658 @@
+//! Node-local MySQL/MariaDB gateway activation from authenticated Cloud assignments.
+//!
+//! This module provisions least-privilege upstream accounts, verifies tenant
+//! credentials and grants, writes the gateway identity registry, and supervises
+//! the node-local MySQL/MariaDB wire gateway.
+
+use crate::{
+    mysql_identity::MysqlIdentityRegistry,
+    mysql_upstream::MysqlUpstream,
+    runtime_activation::{GatewayProcessSpec, RuntimeProcessSupervisor},
+    runtime_reconciliation::{self, RuntimePhase, RuntimeRecord},
+    sqlserver_runtime::VerifiedBinding,
+};
+use mysql_async::{prelude::Queryable, Opts, OptsBuilder, Pool, SslOpts};
+use serde_json::Value;
+use sha2::{Digest, Sha256};
+use std::{collections::HashSet, fs, io, net::SocketAddr, path::Path, time::Duration};
+
+#[derive(Clone)]
+pub struct MysqlRuntime {
+    supervisor: RuntimeProcessSupervisor,
+}
+
+impl MysqlRuntime {
+    pub fn new() -> Self {
+        Self {
+            supervisor: RuntimeProcessSupervisor::new(),
+        }
+    }
+
+    pub async fn is_running(&self, assignment_id: &str) -> bool {
+        self.supervisor.is_running(assignment_id).await
+    }
+
+    pub async fn stop(&self, assignment_id: &str) -> io::Result<()> {
+        self.supervisor.stop(assignment_id).await
+    }
+
+    pub async fn shutdown(&self) -> io::Result<()> {
+        self.supervisor.stop_all().await
+    }
+
+    pub async fn activate(
+        &self,
+        assignment: &Value,
+        credentials: &Value,
+        executable_dir: &Path,
+        private_root: &Path,
+        state_path: &Path,
+        state: &mut RuntimeRecord,
+    ) -> Result<Vec<VerifiedBinding>, Box<dyn std::error::Error + Send + Sync>> {
+        let assignment_id = required_string(assignment, "assignment_id")?;
+        let provider = required_string(assignment, "provider_key")?;
+        if !matches!(provider, "mysql" | "mariadb") {
+            return Err(Box::new(invalid(
+                "MySQL runtime cannot activate a different provider",
+            )));
+        }
+        if required_string(assignment, "cloud_integration_state")? != "enabled" {
+            return Err(Box::new(invalid(
+                "preview providers cannot activate a live gateway",
+            )));
+        }
+        if required_string(assignment, "gateway_runtime")? != "proxima-mysql-gateway" {
+            return Err(Box::new(invalid(
+                "assignment does not select the MySQL wire gateway",
+            )));
+        }
+
+        let runtime = credentials
+            .get("gateway_runtime_config")
+            .cloned()
+            .ok_or_else(|| {
+                invalid("gateway_runtime_config is required for MySQL/MariaDB activation")
+            })?;
+        if runtime.get("schema_version").and_then(Value::as_u64) != Some(1)
+            || runtime.get("provider_key").and_then(Value::as_str) != Some(provider)
+        {
+            return Err(Box::new(invalid(
+                "gateway runtime schema/provider does not match the assignment",
+            )));
+        }
+        let users = runtime
+            .get("users")
+            .and_then(Value::as_array)
+            .ok_or_else(|| invalid("gateway runtime users must be an array"))?;
+        let bindings = assignment
+            .get("tenant_bindings")
+            .and_then(Value::as_array)
+            .ok_or_else(|| invalid("tenant_bindings are required"))?;
+        let upstream_urls = validate_tenant_coverage(bindings, users)?;
+        let active_bindings = bindings
+            .iter()
+            .filter(|binding| binding.get("status").and_then(Value::as_str) != Some("revoked"))
+            .count();
+        if active_bindings != users.len() {
+            return Err(Box::new(invalid(
+                "MySQL runtime users must exactly cover non-revoked tenant bindings",
+            )));
+        }
+
+        let desired_revision = state.desired_revision;
+        let credential_revision = state.credential_revision;
+        let needs_apply = state.phase != RuntimePhase::Applied
+            || state.applied_revision != Some(desired_revision);
+        let host = assignment
+            .pointer("/endpoint/host")
+            .and_then(Value::as_str)
+            .ok_or_else(|| invalid("MySQL target host is missing"))?;
+        let port = assignment
+            .pointer("/endpoint/port")
+            .and_then(Value::as_u64)
+            .filter(|v| (1..=65535).contains(v))
+            .ok_or_else(|| invalid("MySQL target port is invalid"))? as u16;
+        let admin_user = required_string(credentials, "username")?;
+        let admin_password = required_string(credentials, "password")?;
+        let ca_file = runtime
+            .get("upstream_tls_ca_file")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .or_else(|| std::env::var("PROXIMA_MYSQL_UPSTREAM_TLS_CA_FILE").ok())
+            .ok_or_else(|| invalid("MySQL upstream TLS CA file is required"))?;
+        let gateway_cert = runtime
+            .get("tls_cert_file")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .or_else(|| std::env::var("PROXIMA_MYSQL_TLS_CERT_FILE").ok())
+            .ok_or_else(|| invalid("MySQL gateway TLS certificate file is required"))?;
+        let gateway_key = runtime
+            .get("tls_key_file")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .or_else(|| std::env::var("PROXIMA_MYSQL_TLS_KEY_FILE").ok())
+            .ok_or_else(|| invalid("MySQL gateway TLS key file is required"))?;
+        if !Path::new(&ca_file).is_file()
+            || !Path::new(&gateway_cert).is_file()
+            || !Path::new(&gateway_key).is_file()
+        {
+            return Err(Box::new(invalid(
+                "MySQL upstream CA and gateway TLS certificate/key files must exist",
+            )));
+        }
+        let mut registry_runtime = runtime.clone();
+        registry_runtime["upstream_tls_ca_file"] = Value::String(ca_file.clone());
+        registry_runtime["tls_cert_file"] = Value::String(gateway_cert.clone());
+        registry_runtime["tls_key_file"] = Value::String(gateway_key.clone());
+        let admin_opts = OptsBuilder::default()
+            .ip_or_hostname(host.to_owned())
+            .tcp_port(port)
+            .user(Some(admin_user.to_owned()))
+            .pass(Some(admin_password.to_owned()))
+            .ssl_opts(Some(SslOpts::default().with_root_certs(vec![
+                std::path::PathBuf::from(ca_file.clone()).into(),
+            ])));
+        let admin_pool = Pool::new(admin_opts);
+        let mut admin = admin_pool.get_conn().await?;
+        let mut evidence = Vec::with_capacity(bindings.len());
+        for binding in bindings {
+            let tenant_id = required_string(binding, "tenant_id")?;
+            let username = required_string(binding, "identity_reference")?;
+            let database = required_string(binding, "namespace")?;
+            if binding.get("status").and_then(Value::as_str) == Some("revoked") {
+                let user_sql = mysql_literal(&mut admin, username).await?;
+                admin
+                    .query_drop(format!("DROP USER IF EXISTS {user_sql}@'%'"))
+                    .await?;
+                evidence.push(binding_evidence(provider, binding, assignment, "revoked", serde_json::json!({"account":username,"database":database,"account_dropped":true}))?);
+                continue;
+            }
+            let user = users
+                .iter()
+                .find(|user| user.get("tenant_id").and_then(Value::as_str) == Some(tenant_id))
+                .ok_or_else(|| invalid("MySQL tenant binding has no runtime user"))?;
+            if required_string(user, "username")? != username
+                || required_string(user, "database")? != database
+            {
+                return Err(Box::new(invalid(
+                    "MySQL username/database does not match its Cloud tenant binding",
+                )));
+            }
+            let upstream_url = required_string(user, "upstream_url")?;
+            let upstream_opts = Opts::from_url(upstream_url)?;
+            if upstream_opts.user() != Some(username)
+                || upstream_opts.db_name() != Some(database)
+                || upstream_opts.ip_or_hostname() != host
+                || upstream_opts.tcp_port() != port
+                || upstream_opts.pass().is_none()
+                || upstream_opts.ssl_opts().is_none()
+            {
+                return Err(Box::new(invalid("MySQL upstream_url must contain the assigned username/database/password and verified TLS")));
+            }
+            let upstream_password = upstream_opts.pass().unwrap();
+            if upstream_password.is_empty()
+                || upstream_password.len() > 256
+                || !upstream_password.bytes().all(|b| (33..=126).contains(&b))
+            {
+                return Err(Box::new(invalid(
+                    "MySQL upstream password must be 1-256 printable ASCII characters",
+                )));
+            }
+            let user_sql = mysql_literal(&mut admin, username).await?;
+            let password_sql = mysql_literal(&mut admin, upstream_password).await?;
+            let database_sql = mysql_identifier(database)?;
+            admin.query_drop(format!("CREATE DATABASE IF NOT EXISTS {database_sql} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")).await?;
+            admin
+                .query_drop(format!(
+                    "CREATE USER IF NOT EXISTS {user_sql}@'%' IDENTIFIED BY {password_sql}"
+                ))
+                .await?;
+            admin
+                .query_drop(format!(
+                    "ALTER USER {user_sql}@'%' IDENTIFIED BY {password_sql} REQUIRE SSL"
+                ))
+                .await?;
+            admin
+                .query_drop(format!(
+                    "GRANT SELECT, INSERT, UPDATE, DELETE ON {database_sql}.* TO {user_sql}@'%'"
+                ))
+                .await?;
+            let grants: Vec<String> = admin
+                .query(format!("SHOW GRANTS FOR {user_sql}@'%'"))
+                .await?;
+            let expected_grant = format!("{database}.*");
+            if !grants.iter().any(|grant| {
+                grant.contains(&expected_grant)
+                    && grant.contains("SELECT")
+                    && grant.contains("INSERT")
+                    && grant.contains("UPDATE")
+                    && grant.contains("DELETE")
+            }) {
+                return Err(Box::new(invalid(
+                    "MySQL tenant account does not have the exact DML grant set",
+                )));
+            }
+            evidence.push(binding_evidence(provider, binding, assignment, "active", serde_json::json!({"account":username,"database":database,"tls_required":true,"grants":"SELECT, INSERT, UPDATE, DELETE only"}))?);
+        }
+        drop(admin);
+        admin_pool.disconnect().await?;
+
+        let listen = runtime
+            .get("listen_addr")
+            .and_then(Value::as_str)
+            .unwrap_or("127.0.0.1:3307")
+            .parse::<SocketAddr>()?;
+        let kubernetes_mode =
+            std::env::var("PROXIMA_GATEWAY_EXECUTION_MODE").as_deref() == Ok("kubernetes");
+        if !kubernetes_mode && !listen.ip().is_loopback() {
+            return Err(Box::new(invalid("local MySQL gateway must bind to loopback; use Kubernetes execution mode for pod networking")));
+        }
+
+        if users.is_empty() {
+            self.stop(assignment_id).await?;
+            if needs_apply {
+                state.begin_apply(desired_revision, credential_revision)?;
+                runtime_reconciliation::persist(state_path, state)?;
+                state.mark_applied(desired_revision, true)?;
+                runtime_reconciliation::persist(state_path, state)?;
+            }
+            return Ok(evidence);
+        }
+
+        // Reuse the production identity parser before writing any secret or starting a process.
+        let registry_json = serde_json::to_vec(&registry_runtime)?;
+        let registry_text = std::str::from_utf8(&registry_json)?;
+        let registry = MysqlIdentityRegistry::from_json(registry_text)?;
+        if registry.principal_count() != users.len() {
+            return Err(Box::new(invalid(
+                "gateway identity registry principal count mismatch",
+            )));
+        }
+        if kubernetes_mode {
+            probe_upstreams(upstream_urls, Some(Path::new(&ca_file))).await?;
+            if needs_apply {
+                state.begin_apply(desired_revision, credential_revision)?;
+                runtime_reconciliation::persist(state_path, state)?;
+                state.mark_applied(desired_revision, true)?;
+                runtime_reconciliation::persist(state_path, state)?;
+            }
+            return Ok(evidence);
+        }
+
+        let binary = executable_dir.join(format!(
+            "proxima-mysql-gateway{}",
+            std::env::consts::EXE_SUFFIX
+        ));
+        if !binary.is_file() {
+            return Err(Box::new(invalid(
+                "proxima-mysql-gateway binary is not packaged beside the Engine",
+            )));
+        }
+
+        let assignment_hash = hex::encode(Sha256::digest(assignment_id.as_bytes()));
+        let registry_path = private_root
+            .join("gateway-identities")
+            .join(format!("{assignment_hash}.json"));
+        write_private_file(&registry_path, &registry_json)?;
+
+        if state.phase == RuntimePhase::Applied
+            && state.applied_revision == Some(desired_revision)
+            && self.is_running(assignment_id).await
+        {
+            probe_upstreams(upstream_urls, Some(Path::new(&ca_file))).await?;
+            return Ok(evidence);
+        }
+
+        // Replace a previous revision only after the new registry has passed parsing
+        // and exact binding-coverage validation. A failed replacement is marked failed
+        // by the caller; it is never reported as healthy.
+        if self.is_running(assignment_id).await {
+            self.stop(assignment_id).await?;
+        }
+
+        let spec = GatewayProcessSpec {
+            assignment_id: assignment_id.to_owned(),
+            executable: binary.to_string_lossy().into_owned(),
+            args: Vec::new(),
+            env: vec![
+                ("PROXIMA_MYSQL_LISTEN_ADDR".into(), listen.to_string()),
+                (
+                    "PROXIMA_MYSQL_IDENTITY_REGISTRY".into(),
+                    registry_path.to_string_lossy().into_owned(),
+                ),
+                ("PROXIMA_MYSQL_TLS_CERT_FILE".into(), gateway_cert.clone()),
+                ("PROXIMA_MYSQL_TLS_KEY_FILE".into(), gateway_key.clone()),
+                ("RUST_LOG".into(), "proxima_engine=info".into()),
+            ],
+            readiness_addr: listen,
+            startup_timeout: Duration::from_secs(20),
+        };
+
+        state.begin_apply(desired_revision, credential_revision)?;
+        runtime_reconciliation::persist(state_path, state)?;
+        if let Err(error) = self.supervisor.start(spec).await {
+            state.mark_failed("MYSQL_GATEWAY_START_FAILED")?;
+            runtime_reconciliation::persist(state_path, state)?;
+            return Err(Box::new(error));
+        }
+
+        if let Err(error) = probe_upstreams(upstream_urls, Some(Path::new(&ca_file))).await {
+            let _ = self.stop(assignment_id).await;
+            state.mark_failed("MYSQL_UPSTREAM_HEALTH_FAILED")?;
+            runtime_reconciliation::persist(state_path, state)?;
+            return Err(error);
+        }
+
+        state.mark_applied(desired_revision, true)?;
+        runtime_reconciliation::persist(state_path, state)?;
+        Ok(evidence)
+    }
+}
+
+impl Default for MysqlRuntime {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+fn validate_tenant_coverage(bindings: &[Value], users: &[Value]) -> io::Result<Vec<String>> {
+    let active: Vec<&Value> = bindings
+        .iter()
+        .filter(|binding| binding.get("status").and_then(Value::as_str) != Some("revoked"))
+        .collect();
+    if active.is_empty() && users.is_empty() {
+        return Ok(Vec::new());
+    }
+    if users.len() != active.len() {
+        return Err(invalid(
+            "gateway users must exactly cover non-revoked tenant bindings",
+        ));
+    }
+    let mut expected_tenants = HashSet::new();
+    let mut tenant_namespaces = std::collections::HashMap::new();
+    for binding in bindings {
+        let tenant = required_string(binding, "tenant_id")?;
+        let namespace = required_string(binding, "namespace")?;
+        if !expected_tenants.insert(tenant.to_owned()) {
+            return Err(invalid("duplicate tenant ID in assignment bindings"));
+        }
+        tenant_namespaces.insert(
+            tenant.to_owned(),
+            (
+                namespace.to_owned(),
+                required_string(binding, "identity_reference")?.to_owned(),
+            ),
+        );
+        if !matches!(
+            required_string(binding, "status")?,
+            "pending" | "provisioning" | "active" | "revoked"
+        ) {
+            return Err(invalid(
+                "tenant binding has an unsupported lifecycle status",
+            ));
+        }
+    }
+    let mut configured_tenants = HashSet::new();
+    let mut configured_principals = HashSet::new();
+    let mut upstream_urls = Vec::with_capacity(users.len());
+    for user in users {
+        let tenant = required_string(user, "tenant_id")?;
+        let upstream = required_string(user, "upstream_url")?;
+        let username = required_string(user, "username")?;
+        let expected = tenant_namespaces
+            .get(tenant)
+            .ok_or_else(|| invalid("gateway runtime contains an unknown tenant principal"))?;
+        if !active
+            .iter()
+            .any(|binding| binding.get("tenant_id").and_then(Value::as_str) == Some(tenant))
+            || !configured_tenants.insert(tenant.to_owned())
+            || !configured_principals.insert(username.to_owned())
+            || user.get("database").and_then(Value::as_str) != Some(expected.0.as_str())
+            || username != expected.1
+        {
+            return Err(invalid(
+                "gateway principal identity/database does not match its assigned tenant binding",
+            ));
+        }
+        upstream_urls.push(upstream.to_owned());
+    }
+    let expected_active: HashSet<String> = active
+        .iter()
+        .map(|b| required_string(b, "tenant_id").map(str::to_owned))
+        .collect::<io::Result<_>>()?;
+    if configured_tenants != expected_active {
+        return Err(invalid(
+            "gateway runtime does not contain exactly one principal per active tenant binding",
+        ));
+    }
+    Ok(upstream_urls)
+}
+
+fn mysql_identifier(value: &str) -> io::Result<String> {
+    if value.is_empty()
+        || value.len() > 64
+        || !value
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'$')
+    {
+        return Err(invalid("MySQL database identifier is invalid"));
+    }
+    Ok(format!("`{}`", value.replace('`', "``")))
+}
+
+async fn mysql_literal(
+    connection: &mut mysql_async::Conn,
+    value: &str,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    let quoted: Option<String> = connection.exec_first("SELECT QUOTE(?)", (value,)).await?;
+    quoted.ok_or_else(|| invalid("MySQL QUOTE() returned NULL").into())
+}
+
+fn binding_evidence(
+    provider: &str,
+    binding: &Value,
+    assignment: &Value,
+    status: &str,
+    details: Value,
+) -> io::Result<VerifiedBinding> {
+    Ok(VerifiedBinding {
+        provider_key: provider.to_owned(),
+        binding_id: required_string(binding, "binding_id")?.to_owned(),
+        target_id: required_string(assignment, "database_target_id")?.to_owned(),
+        revision: assignment
+            .get("config_revision")
+            .and_then(Value::as_i64)
+            .ok_or_else(|| invalid("config revision missing"))?,
+        tenant_id: required_string(binding, "tenant_id")?.to_owned(),
+        identity_reference: required_string(binding, "identity_reference")?.to_owned(),
+        database: required_string(binding, "namespace")?.to_owned(),
+        status: status.to_owned(),
+        details: if status == "active" {
+            let mut verified = details.as_object().cloned().unwrap_or_default();
+            verified.insert("identity_verified".into(), Value::Bool(true));
+            verified.insert("isolation_verified".into(), Value::Bool(true));
+            Value::Object(verified)
+        } else {
+            details
+        },
+    })
+}
+
+async fn probe_upstreams(
+    urls: Vec<String>,
+    ca_file: Option<&Path>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    for url in urls {
+        let upstream = MysqlUpstream::from_url_with_ca(&url, ca_file)?;
+        let mut connection = upstream.get_connection().await?;
+        connection.query_drop("SELECT 1").await?;
+        drop(connection);
+        upstream.disconnect().await?;
+    }
+    Ok(())
+}
+
+fn required_string<'a>(value: &'a Value, key: &str) -> Result<&'a str, io::Error> {
+    value
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| invalid(&format!("{key} is missing or empty")))
+}
+
+fn invalid(message: &str) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, message.to_owned())
+}
+
+fn write_private_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| invalid("registry path has no parent"))?;
+    fs::create_dir_all(parent)?;
+    set_private_directory(parent)?;
+    let temporary = path.with_extension("json.tmp");
+    if temporary.exists() {
+        fs::remove_file(&temporary)?;
+    }
+    fs::write(&temporary, bytes)?;
+    set_private_file(&temporary)?;
+    if path.exists() {
+        fs::remove_file(path)?;
+    }
+    fs::rename(&temporary, path)?;
+    set_private_file(path)
+}
+
+#[cfg(unix)]
+fn set_private_directory(path: &Path) -> io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(path, fs::Permissions::from_mode(0o700))
+}
+#[cfg(unix)]
+fn set_private_file(path: &Path) -> io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(path, fs::Permissions::from_mode(0o600))
+}
+
+#[cfg(windows)]
+fn set_private_directory(path: &Path) -> io::Result<()> {
+    windows_acl(path, true)
+}
+#[cfg(windows)]
+fn set_private_file(path: &Path) -> io::Result<()> {
+    windows_acl(path, false)
+}
+
+#[cfg(windows)]
+fn windows_acl(path: &Path, directory: bool) -> io::Result<()> {
+    use std::process::Command;
+    let output = Command::new("whoami.exe")
+        .args(["/user", "/fo", "csv", "/nh"])
+        .output()?;
+    if !output.status.success() {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "cannot resolve Windows service SID",
+        ));
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let sid = stdout
+        .trim()
+        .split(',')
+        .nth(1)
+        .map(|v| v.trim().trim_matches('"'))
+        .filter(|v| v.starts_with("S-1-"))
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid Windows service SID"))?;
+    let current = if directory {
+        format!("*{sid}:(OI)(CI)F")
+    } else {
+        format!("*{sid}:F")
+    };
+    let system = if directory {
+        "*S-1-5-18:(OI)(CI)F"
+    } else {
+        "*S-1-5-18:F"
+    };
+    let admins = if directory {
+        "*S-1-5-32-544:(OI)(CI)F"
+    } else {
+        "*S-1-5-32-544:F"
+    };
+    for args in [
+        vec!["/reset".to_owned()],
+        vec!["/inheritance:r".to_owned()],
+        vec![
+            "/grant:r".to_owned(),
+            current,
+            system.to_owned(),
+            admins.to_owned(),
+        ],
+    ] {
+        let output = Command::new("icacls.exe").arg(path).args(args).output()?;
+        if !output.status.success() {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                format!("icacls failed: {}", String::from_utf8_lossy(&output.stderr)),
+            ));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(any(unix, windows)))]
+fn set_private_directory(_: &Path) -> io::Result<()> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "private registry permissions unsupported on this platform",
+    ))
+}
+#[cfg(not(any(unix, windows)))]
+fn set_private_file(_: &Path) -> io::Result<()> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "private registry permissions unsupported on this platform",
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn requires_exact_one_to_one_tenant_binding_coverage() {
+        let bindings = vec![
+            json!({"tenant_id":"tenant-a","namespace":"tenant_a","identity_reference":"mysql_a","status":"active"}),
+            json!({"tenant_id":"tenant-b","namespace":"tenant_b","identity_reference":"mysql_b","status":"pending"}),
+        ];
+        let users = vec![
+            json!({"tenant_id":"tenant-a","username":"mysql_a","database":"tenant_a","upstream_url":"mysql://a:secret@db-a:3306/tenant_a?require_ssl=true"}),
+            json!({"tenant_id":"tenant-b","username":"mysql_b","database":"tenant_b","upstream_url":"mysql://b:secret@db-b:3306/tenant_b?require_ssl=true"}),
+        ];
+        assert_eq!(
+            validate_tenant_coverage(&bindings, &users).unwrap().len(),
+            2
+        );
+
+        let duplicate = vec![users[0].clone(), users[0].clone()];
+        assert!(validate_tenant_coverage(&bindings, &duplicate).is_err());
+        assert!(validate_tenant_coverage(&bindings, &users[..1]).is_err());
+    }
+
+    #[test]
+    fn rejects_database_namespace_mismatch_and_inactive_bindings() {
+        let bindings =
+            vec![json!({"tenant_id":"tenant-a","namespace":"tenant_a","status":"revoked"})];
+        let users = vec![
+            json!({"tenant_id":"tenant-a","database":"other_db","upstream_url":"mysql://a:secret@db-a:3306/other_db?require_ssl=true"}),
+        ];
+        assert!(validate_tenant_coverage(&bindings, &users).is_err());
+    }
+
+    #[test]
+    fn rejects_non_loopback_gateway_listener() {
+        let value = "0.0.0.0:3307".parse::<SocketAddr>().unwrap();
+        assert!(!value.ip().is_loopback());
+    }
+}

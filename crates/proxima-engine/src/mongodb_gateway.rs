@@ -193,7 +193,7 @@ impl MongoGatewayConfig {
 }
 
 pub async fn run_mongodb_gateway() -> io::Result<()> {
-    let _ = rustls::crypto::ring::default_provider().install_default();
+    let _ = tokio_rustls::rustls::crypto::ring::default_provider().install_default();
     let config = MongoGatewayConfig::from_env()?;
     let registry_path = env_required("PROXIMA_MONGODB_IDENTITY_REGISTRY")?;
     let cert_path = env_required("PROXIMA_MONGODB_TLS_CERT_FILE")?;

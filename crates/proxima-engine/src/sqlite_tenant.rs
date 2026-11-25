@@ -130,7 +130,24 @@ fn set_private_dir_permissions(path: &Path) -> io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
     fs::set_permissions(path, fs::Permissions::from_mode(0o700))
 }
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn set_private_dir_permissions(path: &Path) -> io::Result<()> {
+    use std::process::Command;
+    let sid = current_windows_user_sid()?;
+    let status = Command::new("icacls.exe")
+        .arg(path)
+        .args(["/inheritance:r", "/grant:r"])
+        .arg(format!("*{sid}:(OI)(CI)F"))
+        .status()?;
+    if !status.success() {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "could not apply owner-only ACL to SQLite tenant directory",
+        ));
+    }
+    Ok(())
+}
+#[cfg(all(not(unix), not(windows)))]
 fn set_private_dir_permissions(_: &Path) -> io::Result<()> {
     Ok(())
 }
@@ -139,9 +156,53 @@ fn set_private_file_permissions(path: &Path) -> io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
     fs::set_permissions(path, fs::Permissions::from_mode(0o600))
 }
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn set_private_file_permissions(path: &Path) -> io::Result<()> {
+    use std::process::Command;
+    let sid = current_windows_user_sid()?;
+    let status = Command::new("icacls.exe")
+        .arg(path)
+        .args(["/inheritance:r", "/grant:r"])
+        .arg(format!("*{sid}:F"))
+        .status()?;
+    if !status.success() {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "could not apply owner-only ACL to SQLite tenant file",
+        ));
+    }
+    Ok(())
+}
+#[cfg(all(not(unix), not(windows)))]
 fn set_private_file_permissions(_: &Path) -> io::Result<()> {
     Ok(())
+}
+
+#[cfg(windows)]
+fn current_windows_user_sid() -> io::Result<String> {
+    use std::process::Command;
+    let output = Command::new("whoami.exe")
+        .args(["/user", "/fo", "csv", "/nh"])
+        .output()?;
+    if !output.status.success() {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "could not determine current Windows service SID",
+        ));
+    }
+    let line = String::from_utf8_lossy(&output.stdout);
+    let sid = line
+        .split(',')
+        .nth(1)
+        .map(|value| value.trim().trim_matches('"'))
+        .filter(|value| value.starts_with("S-1-") && value.len() <= 184)
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "whoami did not return a valid Windows SID",
+            )
+        })?;
+    Ok(sid.to_owned())
 }
 
 #[cfg(test)]

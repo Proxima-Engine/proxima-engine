@@ -32,6 +32,26 @@ if [[ ! -f "$token_file" ]]; then
 fi
 unset PROXIMA_NODE_ENROLLMENT_TOKEN || true
 
+# Gateway TLS Docker secrets. Replace placeholders with customer-issued CA
+# and gateway certificates before enabling the corresponding database provider.
+mkdir -p secrets
+for secret in \
+  mysql-gateway-cert.pem mysql-gateway-key.pem mysql-upstream-ca.pem \
+  mongodb-gateway-cert.pem mongodb-gateway-key.pem mongodb-upstream-ca.pem \
+  redis-gateway-cert.pem redis-gateway-key.pem redis-upstream-ca.pem \
+  sqlserver-tds-upstream-ca.pem sqlserver-tds-client-cert.pem sqlserver-tds-client-key.pem; do
+  if [[ ! -f "secrets/$secret" ]]; then
+    printf '%s\n' 'REPLACE_WITH_CUSTOMER_ISSUED_PEM_MATERIAL' > "secrets/$secret"
+  fi
+  chmod 600 "secrets/$secret"
+done
+for registry in mysql-identities.json mongodb-identities.json redis-identities.json; do
+  if [[ ! -f "secrets/$registry" ]]; then
+    printf '%s\n' '{"schema_version":1,"users":[]}' > "secrets/$registry"
+  fi
+  chmod 600 "secrets/$registry"
+done
+
 docker compose version >/dev/null
 docker_os="$(docker info --format '{{.OSType}}')" || {
   echo "Docker daemon is unavailable. Start Docker Engine or Docker Desktop and rerun this installer." >&2

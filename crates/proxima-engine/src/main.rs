@@ -1,8 +1,11 @@
 mod canary_probe;
 
 use bytes::{Buf, BytesMut};
-use std::io;
-use std::sync::Arc;
+use std::{
+    env, fs, io,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use hmac::Mac;
 use proxima_engine::{
@@ -11,10 +14,15 @@ use proxima_engine::{
     config::{Config, UpstreamTlsMode},
     dashboard,
     metrics::{self, QueryLatencyTracker},
+    mongodb_runtime::MongoRuntime,
+    mysql_runtime::MysqlRuntime,
+    native_provider_runtime::NativeProviderRuntime,
     protocol::SSL_REQUEST_CODE,
-    runtime_reconciliation::{self, RuntimeRecord},
+    redis_runtime::RedisRuntime,
+    runtime_reconciliation::{self, RuntimePhase, RuntimeRecord},
     security_breaker::{BreakerConfig, SecurityBreaker},
     session::{establish, BoxedPgStream},
+    sqlserver_runtime::SqlServerRuntime,
     tenant::TenantTokenVerifier,
     tls::{accept_client_tls, client_acceptor, connect_upstream_tls, upstream_connector},
 };
@@ -175,6 +183,7 @@ fn runtime_capability_report_from(
     let mysql_gateway = has_gateway("proxima-mysql-gateway");
     let mongodb_gateway = has_gateway("proxima-mongodb-gateway");
     let redis_gateway = has_gateway("proxima-redis-gateway");
+    let sqlserver_tds_gateway = has_gateway("proxima-sqlserver-tds-gateway");
 
     let mut provider_keys = vec!["cockroachdb".to_owned(), "postgresql".to_owned()];
     if mysql_gateway {
@@ -187,6 +196,16 @@ fn runtime_capability_report_from(
     if redis_gateway {
         provider_keys.push("redis".to_owned());
     }
+    if sqlserver_tds_gateway {
+        provider_keys.push("sqlserver".to_owned());
+    }
+    provider_keys.extend([
+        "sqlite".to_owned(),
+        "oracle".to_owned(),
+        "dynamodb".to_owned(),
+        "cassandra".to_owned(),
+        "elasticsearch".to_owned(),
+    ]);
     provider_keys.sort();
 
     let capabilities = serde_json::json!({
@@ -195,13 +214,23 @@ fn runtime_capability_report_from(
             "postgresql_wire": true,
             "mysql_wire": mysql_gateway,
             "mongodb_op_msg": mongodb_gateway,
-            "redis_resp2": redis_gateway
+            "redis_resp2": redis_gateway,
+            "sqlserver_tds": sqlserver_tds_gateway
+        },
+        "native_provider_runtime": {
+            "sqlite": true,
+            "oracle": true,
+            "dynamodb": true,
+            "cassandra": true,
+            "elasticsearch": true,
+            "opensearch_distribution": true
         },
         "gateway_binaries": {
             "proxima-engine": true,
             "proxima-mysql-gateway": mysql_gateway,
             "proxima-mongodb-gateway": mongodb_gateway,
-            "proxima-redis-gateway": redis_gateway
+            "proxima-redis-gateway": redis_gateway,
+            "proxima-sqlserver-tds-gateway": sqlserver_tds_gateway
         },
         "isolation_profiles": {
             "postgresql": "roles-and-rls",
@@ -209,7 +238,13 @@ fn runtime_capability_report_from(
             "mysql": if mysql_gateway { "tenant-accounts-and-grants" } else { "unavailable" },
             "mariadb": if mysql_gateway { "tenant-accounts-and-grants" } else { "unavailable" },
             "mongodb": if mongodb_gateway { "database-per-tenant-rbac" } else { "unavailable" },
-            "redis": if redis_gateway { "resp2-tenant-key-namespace-and-acl" } else { "unavailable" }
+            "redis": if redis_gateway { "resp2-tenant-key-namespace-and-acl" } else { "unavailable" },
+            "sqlserver": if sqlserver_tds_gateway { "tds-login7-tenant-principal-and-database-binding" } else { "unavailable" },
+            "sqlite": "private-file-per-tenant",
+            "oracle": "schema-owner-per-tenant",
+            "dynamodb": "iam-leading-keys-per-tenant",
+            "cassandra": "keyspace-and-role-per-tenant",
+            "elasticsearch": "native-role-dls-fls-per-tenant"
         }
     });
 
@@ -576,6 +611,10 @@ async fn bootstrap_node_identity() -> Result<(), Box<dyn std::error::Error + Sen
 }
 
 fn validate_tenant_bindings(record: &serde_json::Value) -> Result<(), &'static str> {
+    let provider = record
+        .get("provider_key")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
     let bindings = record
         .get("tenant_bindings")
         .and_then(serde_json::Value::as_array)
@@ -600,7 +639,8 @@ fn validate_tenant_bindings(record: &serde_json::Value) -> Result<(), &'static s
             .get("status")
             .and_then(serde_json::Value::as_str)
             .ok_or("tenant binding has no lifecycle status")?;
-        if !matches!(status, "pending" | "provisioning" | "active") {
+        let allowed_status = matches!(status, "pending" | "provisioning" | "active");
+        if !allowed_status {
             return Err("tenant binding lifecycle status is not deployable");
         }
         if tenant_id.len() > 128
@@ -634,6 +674,13 @@ fn validate_assignment_runtime_cardinality(
             .and_then(serde_json::Value::as_str)
             .filter(|value| !value.trim().is_empty())
             .ok_or("assignment ID missing")?;
+        if id.len() > 128
+            || !id
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+        {
+            return Err("assignment ID contains unsafe path characters");
+        }
         if !assignment_ids.insert(id) {
             return Err("configuration bundle contains duplicate assignment IDs");
         }
@@ -645,7 +692,15 @@ fn validate_assignment_runtime_cardinality(
             native_engine_assignments += 1;
         } else if !matches!(
             runtime,
-            "proxima-mysql-gateway" | "proxima-mongodb-gateway" | "proxima-redis-gateway"
+            "proxima-mysql-gateway"
+                | "proxima-mongodb-gateway"
+                | "proxima-redis-gateway"
+                | "proxima-sqlserver-tds-gateway"
+                | "proxima-engine-native-sqlite"
+                | "proxima-engine-native-oracle"
+                | "proxima-engine-native-dynamodb"
+                | "proxima-engine-native-cassandra"
+                | "proxima-engine-native-search"
         ) {
             return Err("assigned gateway runtime is not supported");
         }
@@ -657,6 +712,12 @@ fn validate_assignment_runtime_cardinality(
 }
 
 async fn pull_and_stage_database_config_once(
+    mysql_runtime: &MysqlRuntime,
+    mongo_runtime: &MongoRuntime,
+    redis_runtime: &RedisRuntime,
+    sqlserver_runtime: &SqlServerRuntime,
+    native_runtime: &NativeProviderRuntime,
+    verifier: Option<&TenantTokenVerifier>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     use std::{
         env, fs,
@@ -741,6 +802,9 @@ async fn pull_and_stage_database_config_once(
             .map_err(|_| io::Error::other("invalid database configuration envelope key"))?,
     );
     let mut staged = Vec::new();
+    // Decrypted provider credentials remain in memory only. They are never
+    // copied into the shared routing document or the Kubernetes-readable PVC.
+    let mut decrypted_credentials = std::collections::HashMap::new();
     let records = bundle
         .get("assignments")
         .and_then(serde_json::Value::as_array)
@@ -753,9 +817,26 @@ async fn pull_and_stage_database_config_once(
     for record in records {
         validate_tenant_bindings(record)
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-        if record.get("tls_mode").and_then(serde_json::Value::as_str) != Some("verify-full") {
+        let provider_key = record
+            .get("provider_key")
+            .and_then(serde_json::Value::as_str)
+            .ok_or("database provider missing")?;
+        let sqlite_local = provider_key == "sqlite"
+            && record
+                .pointer("/endpoint/host")
+                .and_then(serde_json::Value::as_str)
+                == Some("local")
+            && record
+                .pointer("/endpoint/port")
+                .and_then(serde_json::Value::as_u64)
+                == Some(0)
+            && record.get("tls_mode").and_then(serde_json::Value::as_str) == Some("local");
+        if !sqlite_local
+            && record.get("tls_mode").and_then(serde_json::Value::as_str) != Some("verify-full")
+        {
             return Err(
-                "assigned database target does not require full upstream TLS verification".into(),
+                "assigned network database target does not require full upstream TLS verification"
+                    .into(),
             );
         }
         let gateway_runtime = record
@@ -763,7 +844,12 @@ async fn pull_and_stage_database_config_once(
             .and_then(serde_json::Value::as_str)
             .ok_or("gateway runtime is missing")?;
         let runtime_available = match gateway_runtime {
-            "proxima-engine" => true,
+            "proxima-engine"
+            | "proxima-engine-native-sqlite"
+            | "proxima-engine-native-oracle"
+            | "proxima-engine-native-dynamodb"
+            | "proxima-engine-native-cassandra"
+            | "proxima-engine-native-search" => true,
             "proxima-mysql-gateway" => executable_dir
                 .join(format!("proxima-mysql-gateway{}", env::consts::EXE_SUFFIX))
                 .is_file(),
@@ -776,6 +862,17 @@ async fn pull_and_stage_database_config_once(
             "proxima-redis-gateway" => executable_dir
                 .join(format!("proxima-redis-gateway{}", env::consts::EXE_SUFFIX))
                 .is_file(),
+            "proxima-sqlserver-tds-gateway" => executable_dir
+                .join(format!(
+                    "proxima-sqlserver-tds-gateway{}",
+                    env::consts::EXE_SUFFIX
+                ))
+                .is_file(),
+            "proxima-engine-native-sqlite"
+            | "proxima-engine-native-oracle"
+            | "proxima-engine-native-dynamodb"
+            | "proxima-engine-native-cassandra"
+            | "proxima-engine-native-search" => true,
             _ => false,
         };
         if !runtime_available {
@@ -837,18 +934,27 @@ async fn pull_and_stage_database_config_once(
             )
             .map_err(|_| io::Error::other("database credential envelope authentication failed"))?;
         let credentials: serde_json::Value = serde_json::from_slice(credentials)?;
+        let assignment_id = record
+            .get("assignment_id")
+            .and_then(serde_json::Value::as_str)
+            .ok_or("assignment ID missing")?;
+        decrypted_credentials.insert(assignment_id.to_owned(), credentials.clone());
+        let credentialless = matches!(provider_key, "sqlite" | "dynamodb");
         let username = credentials
             .get("username")
             .and_then(serde_json::Value::as_str)
-            .filter(|value| !value.trim().is_empty())
-            .ok_or("database target username is missing")?;
+            .unwrap_or_default();
         let password = credentials
             .get("password")
             .and_then(serde_json::Value::as_str)
-            .filter(|value| !value.is_empty())
-            .ok_or("database target password is missing")?;
-        if username.len() > 128 || password.len() > 4096 {
-            return Err("database target credentials exceed supported limits".into());
+            .unwrap_or_default();
+        if (!credentialless && (username.trim().is_empty() || password.is_empty()))
+            || username.len() > 128
+            || password.len() > 4096
+        {
+            return Err(
+                "database target credentials exceed supported limits or are missing".into(),
+            );
         }
         let endpoint = record
             .get("endpoint")
@@ -861,14 +967,19 @@ async fn pull_and_stage_database_config_once(
         let port = endpoint
             .get("port")
             .and_then(serde_json::Value::as_u64)
-            .filter(|value| (1..=65535).contains(value))
+            .filter(|value| {
+                (1..=65535).contains(value) || (provider_key == "sqlite" && *value == 0)
+            })
             .ok_or("database target port is invalid")?;
         let database_name = record
             .get("database_name")
             .and_then(serde_json::Value::as_str)
             .filter(|value| !value.trim().is_empty())
             .ok_or("database target database name is missing")?;
-        if host.len() > 255 || database_name.len() > 255 || port == 0 {
+        if host.len() > 255
+            || database_name.len() > 255
+            || (provider_key == "sqlite" && host != "local")
+        {
             return Err("database target endpoint exceeds supported limits".into());
         }
         let mut item = record.clone();
@@ -905,6 +1016,20 @@ async fn pull_and_stage_database_config_once(
         .parent()
         .ok_or("invalid database config output path")?;
     fs::create_dir_all(parent)?;
+    let delivery_id = uuid::Uuid::new_v4().to_string();
+    let secret_output_path = env::var_os("PROXIMA_NODE_DATABASE_SECRETS_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| parent.join("database-target-secrets.json"));
+    // Publish the secret manifest first. The routing manifest is atomically
+    // replaced last, so the controller never sees a new routing generation
+    // without its matching credential Secret material.
+    write_gateway_secret_manifest(
+        &staged,
+        &decrypted_credentials,
+        &node_id,
+        &delivery_id,
+        &secret_output_path,
+    )?;
     // An authenticated empty bundle explicitly revokes this node's assignment.
     // Replace the staged document with an empty assignment set so revoked
     // credentials are not left on disk as if they were still current.
@@ -912,6 +1037,7 @@ async fn pull_and_stage_database_config_once(
         "schema_version":1,
         "node_id":node_id,
         "organization_id":organization_id,
+        "delivery_id":delivery_id,
         "generated_at":bundle.get("generated_at"),
         "assignments":staged
     });
@@ -927,7 +1053,7 @@ async fn pull_and_stage_database_config_once(
             .create_new(true)
             .mode(0o600)
             .open(&temporary)?;
-        file.write_all(serde_json::to_string_pretty(&document)?.as_bytes())?;
+        std::io::Write::write_all(&mut file, serde_json::to_string_pretty(&document)?.as_bytes())?;
         file.sync_all()?;
     }
     #[cfg(not(unix))]
@@ -955,6 +1081,11 @@ async fn pull_and_stage_database_config_once(
         })
         .unwrap_or_else(|| PathBuf::from("data/runtime-state"));
     fs::create_dir_all(&state_dir)?;
+    let gateway_status_path = env::var_os("PROXIMA_NODE_GATEWAY_STATUS_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| output_path.with_file_name("gateway-runtime-status.json"));
+    let kubernetes_gateway_mode =
+        env::var("PROXIMA_GATEWAY_EXECUTION_MODE").as_deref() == Ok("kubernetes");
     for record in &staged {
         let assignment_id = record
             .get("assignment_id")
@@ -976,9 +1107,20 @@ async fn pull_and_stage_database_config_once(
             .get("credential_revision")
             .and_then(serde_json::Value::as_u64)
             .ok_or("credential revision missing")?;
-        let state_path = state_dir.join(format!("{assignment_id}.json"));
-        let state = if state_path.exists() {
-            let mut current = runtime_reconciliation::load(&state_path)?;
+        let state_key = hex::encode(Sha256::digest(assignment_id.as_bytes()));
+        let state_path = state_dir.join(format!("{state_key}.json"));
+        // Migrate state files written by the previous release, which used the
+        // raw assignment ID as a filename, without losing revision monotonicity.
+        let legacy_state_path = state_dir.join(format!("{assignment_id}.json"));
+        let existing_state_path = if state_path.exists() {
+            Some(state_path.as_path())
+        } else if legacy_state_path.exists() {
+            Some(legacy_state_path.as_path())
+        } else {
+            None
+        };
+        let state = if let Some(existing_path) = existing_state_path {
+            let mut current = runtime_reconciliation::load(existing_path)?;
             current.update_desired(
                 assignment_id,
                 target_id,
@@ -997,13 +1139,265 @@ async fn pull_and_stage_database_config_once(
             )?
         };
         runtime_reconciliation::persist(&state_path, &state)?;
+        if legacy_state_path.exists() && legacy_state_path != state_path {
+            fs::remove_file(legacy_state_path)?;
+        }
         info!(
             assignment_id,
             target_id,
             desired_revision = revision,
             phase = "staged",
-            "authenticated database desired state persisted; runtime activation remains separate"
+            "authenticated database desired state persisted"
         );
+    }
+
+    // Activate the supported node-local gateway runtimes from the authenticated
+    // bundle. The gateway modules are part of the Engine library and are invoked
+    // here rather than merely compiling as unused source files.
+    let private_root = env::var_os("PROXIMA_NODE_PRIVATE_ROOT")
+        .map(PathBuf::from)
+        .or_else(|| {
+            identity_path
+                .parent()
+                .map(|parent| parent.join("runtime-private"))
+        })
+        .unwrap_or_else(|| PathBuf::from("data/runtime-private"));
+    fs::create_dir_all(&private_root)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&private_root, fs::Permissions::from_mode(0o700))?;
+    }
+
+    // A signed desired-state bundle is authoritative. Assignments omitted from it
+    // are locally revoked: stop their node-local gateway, remove its private
+    // identity registry, and durably mark the assignment revoked.
+    let active_assignment_ids: std::collections::HashSet<String> = staged
+        .iter()
+        .filter_map(|record| {
+            record
+                .get("assignment_id")
+                .and_then(serde_json::Value::as_str)
+        })
+        .map(str::to_owned)
+        .collect();
+    for entry in fs::read_dir(&state_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.extension().and_then(|value| value.to_str()) != Some("json") {
+            continue;
+        }
+        let mut prior = match runtime_reconciliation::load(&path) {
+            Ok(record) => record,
+            Err(error) => {
+                tracing::error!(path=%path.display(), %error, "unreadable runtime state blocks safe automatic revocation");
+                continue;
+            }
+        };
+        if active_assignment_ids.contains(&prior.assignment_id)
+            || prior.phase == RuntimePhase::Revoked
+        {
+            continue;
+        }
+        match prior.provider.as_str() {
+            "mysql" | "mariadb" => mysql_runtime.stop(&prior.assignment_id).await?,
+            "mongodb" => mongo_runtime.stop(&prior.assignment_id).await?,
+            "redis" => redis_runtime.stop(&prior.assignment_id).await?,
+            "sqlserver" => sqlserver_runtime.stop(&prior.assignment_id).await?,
+            _ => {}
+        }
+        let identity_key = hex::encode(Sha256::digest(prior.assignment_id.as_bytes()));
+        let identity_path = private_root
+            .join("gateway-identities")
+            .join(format!("{identity_key}.json"));
+        if identity_path.exists() {
+            fs::remove_file(identity_path)?;
+        }
+        prior.begin_revocation();
+        runtime_reconciliation::persist(&path, &prior)?;
+        info!(assignment_id=%prior.assignment_id, "omitted Cloud assignment locally revoked");
+    }
+
+    let mut provider_binding_evidence: std::collections::HashMap<
+        String,
+        Vec<proxima_engine::sqlserver_runtime::VerifiedBinding>,
+    > = std::collections::HashMap::new();
+    let mut gateway_endpoints = std::collections::HashMap::<String, (String, u16)>::new();
+    for assignment in &staged {
+        let assignment_id = assignment
+            .get("assignment_id")
+            .and_then(serde_json::Value::as_str)
+            .ok_or("assignment ID missing")?;
+        let state_key = hex::encode(Sha256::digest(assignment_id.as_bytes()));
+        let state_path = state_dir.join(format!("{state_key}.json"));
+        let mut state = runtime_reconciliation::load(&state_path)?;
+        let Some(credentials) = decrypted_credentials.get(assignment_id) else {
+            state.mark_failed("CREDENTIAL_BUNDLE_MISSING")?;
+            runtime_reconciliation::persist(&state_path, &state)?;
+            continue;
+        };
+        // Preview integrations are allowed to stage authenticated desired state,
+        // but must never start a gateway or acknowledge an applied runtime.
+        if assignment
+            .get("cloud_integration_state")
+            .and_then(serde_json::Value::as_str)
+            != Some("enabled")
+        {
+            continue;
+        }
+        let activation = match assignment
+            .get("gateway_runtime")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("")
+        {
+            "proxima-mysql-gateway" => {
+                mysql_runtime
+                    .activate(
+                        assignment,
+                        credentials,
+                        executable_dir,
+                        &private_root,
+                        &state_path,
+                        &mut state,
+                    )
+                    .await
+            }
+            "proxima-mongodb-gateway" => {
+                mongo_runtime
+                    .activate(
+                        assignment,
+                        credentials,
+                        executable_dir,
+                        &private_root,
+                        &state_path,
+                        &mut state,
+                    )
+                    .await
+            }
+            "proxima-redis-gateway" => {
+                redis_runtime
+                    .activate(
+                        assignment,
+                        credentials,
+                        executable_dir,
+                        &private_root,
+                        &state_path,
+                        &mut state,
+                    )
+                    .await
+            }
+            "proxima-sqlserver-tds-gateway" => {
+                sqlserver_runtime
+                    .activate(
+                        assignment,
+                        credentials,
+                        executable_dir,
+                        &private_root,
+                        &state_path,
+                        &mut state,
+                    )
+                    .await
+            }
+            "proxima-engine" => {
+                native_runtime
+                    .activate_postgres(assignment, credentials, &state_path, &mut state)
+                    .await
+            }
+            "proxima-engine-native-sqlite"
+            | "proxima-engine-native-oracle"
+            | "proxima-engine-native-dynamodb"
+            | "proxima-engine-native-cassandra"
+            | "proxima-engine-native-search" => {
+                native_runtime
+                    .activate(
+                        assignment,
+                        credentials,
+                        &private_root,
+                        &state_path,
+                        &mut state,
+                    )
+                    .await
+            }
+            // All supported provider runtimes must be explicit; unknown artifacts
+            // are not acknowledged as applied.
+            _ => continue,
+        };
+        match activation {
+            Ok(evidence) => {
+                let runtime_name = assignment
+                    .get("gateway_runtime")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default();
+                if kubernetes_gateway_mode
+                    && matches!(
+                        runtime_name,
+                        "proxima-mysql-gateway"
+                            | "proxima-mongodb-gateway"
+                            | "proxima-redis-gateway"
+                            | "proxima-sqlserver-tds-gateway"
+                    )
+                {
+                    let active_tenants = assignment
+                        .get("tenant_bindings")
+                        .and_then(serde_json::Value::as_array)
+                        .map(|bindings| {
+                            bindings
+                                .iter()
+                                .filter(|binding| {
+                                    binding.get("status").and_then(serde_json::Value::as_str)
+                                        != Some("revoked")
+                                })
+                                .count()
+                        })
+                        .unwrap_or(0);
+                    match wait_for_kubernetes_gateway_status(
+                        &gateway_status_path,
+                        &node_id,
+                        &delivery_id,
+                        assignment_id,
+                        i64::try_from(state.desired_revision)?,
+                        active_tenants == 0,
+                    )
+                    .await
+                    {
+                        Ok(Some((host, port))) => {
+                            gateway_endpoints
+                                .insert(assignment_id.to_owned(), (host.clone(), port));
+                        }
+                        Ok(None) => {}
+                        Err(error) => {
+                            state.mark_failed("KUBERNETES_GATEWAY_NOT_READY")?;
+                            runtime_reconciliation::persist(&state_path, &state)?;
+                            tracing::error!(assignment_id, %error, "Kubernetes gateway did not become ready; Cloud binding remains pending");
+                            continue;
+                        }
+                    }
+                }
+                if !evidence.is_empty() {
+                    provider_binding_evidence.insert(assignment_id.to_owned(), evidence);
+                }
+            }
+            Err(error) => {
+                if state.phase != RuntimePhase::Failed {
+                    state.mark_failed("GATEWAY_ACTIVATION_FAILED")?;
+                }
+                runtime_reconciliation::persist(&state_path, &state)?;
+                tracing::error!(assignment_id, %error, "gateway assignment activation failed");
+            }
+        }
+    }
+
+    if let Some(verifier) = verifier {
+        let assigned_tenants = provider_binding_evidence
+            .values()
+            .flatten()
+            .filter(|evidence| {
+                matches!(evidence.provider_key.as_str(), "postgresql" | "cockroachdb")
+                    && evidence.status == "active"
+            })
+            .map(|evidence| evidence.tenant_id.clone())
+            .collect::<std::collections::HashSet<_>>();
+        verifier.set_allowed_tenants(Some(assigned_tenants));
     }
 
     for record in records {
@@ -1019,11 +1413,49 @@ async fn pull_and_stage_database_config_once(
             .get("config_revision")
             .and_then(serde_json::Value::as_i64)
             .ok_or("config revision missing")?;
+        let state_key = hex::encode(Sha256::digest(assignment_id.as_bytes()));
+        let state_path = state_dir.join(format!("{state_key}.json"));
+        let state = runtime_reconciliation::load(&state_path)?;
+        let (status, healthy, error_code) = match state.phase {
+            RuntimePhase::Applied
+                if state.runtime_health_passed
+                    && state.applied_revision == Some(state.desired_revision) =>
+            {
+                ("applied", true, None)
+            }
+            RuntimePhase::Failed => (
+                "failed",
+                false,
+                Some(
+                    state
+                        .last_error_code
+                        .unwrap_or_else(|| "RUNTIME_APPLY_FAILED".to_owned()),
+                ),
+            ),
+            _ => ("staged", false, None),
+        };
+        let endpoint = gateway_endpoints.get(assignment_id);
+        let runtime_endpoint = endpoint.map(|(host, _)| host.as_str());
+        let runtime_port = endpoint.map(|(_, port)| *port);
+        let health_label = if healthy { "healthy" } else { "unhealthy" };
         let ack_timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
         let ack_nonce = uuid::Uuid::new_v4().to_string();
         let ack_canonical = format!(
-            "proxima-node-config-ack-v1\n{}\n{}\n{}\n{}\n{}\n{}\n{}\nstaged\nunhealthy\n",
-            node_id, organization_id, ack_nonce, assignment_id, target_id, revision, ack_timestamp
+            "proxima-node-config-ack-v1\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
+            node_id,
+            organization_id,
+            ack_nonce,
+            assignment_id,
+            target_id,
+            revision,
+            ack_timestamp,
+            status,
+            health_label,
+            error_code.as_deref().unwrap_or(""),
+            runtime_endpoint.unwrap_or(""),
+            runtime_port
+                .map(|port| port.to_string())
+                .unwrap_or_default()
         );
         let mut ack_mac = hmac::Hmac::<Sha256>::new_from_slice(&signing_key)?;
         ack_mac.update(ack_canonical.as_bytes());
@@ -1033,23 +1465,451 @@ async fn pull_and_stage_database_config_once(
             .json(&serde_json::json!({
                 "node_id":node_id,"nonce":ack_nonce,"assignment_id":assignment_id,
                 "database_target_id":target_id,"config_revision":revision,
-                "timestamp":ack_timestamp,"status":"staged","runtime_health_passed":false,
-                "error_code":null,"signature":ack_signature
+                "timestamp":ack_timestamp,"status":status,"runtime_health_passed":healthy,
+                "runtime_endpoint":runtime_endpoint,"runtime_port":runtime_port,
+                "error_code":error_code,"signature":ack_signature
             }))
             .send()
             .await?
             .error_for_status()?;
+
+        // Tenant activation is reported only after the target-level acknowledgement
+        // has been accepted and the SQL Server login/database isolation checks passed.
+        if status == "applied" {
+            if let Some(evidence_items) = provider_binding_evidence.get(assignment_id) {
+                let node_uuid = uuid::Uuid::parse_str(&node_id)?;
+                let org_uuid = uuid::Uuid::parse_str(&organization_id)?;
+                let base_url = heartbeat_url
+                    .strip_suffix("/api/v1/nodes/heartbeat")
+                    .ok_or("node heartbeat URL is not canonical")?;
+                for evidence in evidence_items {
+                    let active = evidence.status == "active";
+                    let details = serde_json::json!({
+                        "provider_key":evidence.provider_key,
+                        "identity_reference":evidence.identity_reference,
+                        "identity_verified":active,
+                        "isolation_verified":active,
+                        "operation_id":uuid::Uuid::new_v4().to_string(),
+                        "observed_at_unix":SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs(),
+                        "details":evidence.details
+                    });
+                    let report_status = if active { "active" } else { "revoked" };
+                    if let Err(error) = proxima_engine::tenant_binding_coordinator::report(
+                        &client,
+                        base_url,
+                        node_uuid,
+                        org_uuid,
+                        &signing_key,
+                        uuid::Uuid::parse_str(&evidence.binding_id)?,
+                        uuid::Uuid::parse_str(&evidence.target_id)?,
+                        evidence.revision,
+                        report_status,
+                        details,
+                        None,
+                    )
+                    .await
+                    {
+                        tracing::error!(provider=%evidence.provider_key, binding_id=%evidence.binding_id, %error, "tenant provider evidence delivery failed; Cloud binding remains pending for retry");
+                    }
+                }
+            }
+        }
     }
-    info!(assignments=records.len(),path=%output_path.display(),"authenticated database configuration staged on node");
+    info!(assignments=records.len(),path=%output_path.display(),"authenticated database configuration reconciled on node");
     Ok(())
 }
 
-fn spawn_node_database_config_worker() {
-    tokio::spawn(async {
+fn write_gateway_secret_manifest(
+    assignments: &[serde_json::Value],
+    decrypted_credentials: &std::collections::HashMap<String, serde_json::Value>,
+    node_id: &str,
+    delivery_id: &str,
+    output_path: &Path,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    use base64::Engine as _;
+    let mut secret_assignments = Vec::new();
+    for assignment in assignments {
+        let assignment_id = assignment
+            .get("assignment_id")
+            .and_then(serde_json::Value::as_str)
+            .ok_or("assignment ID missing")?;
+        let runtime_name = assignment
+            .get("gateway_runtime")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        if !matches!(
+            runtime_name,
+            "proxima-mysql-gateway"
+                | "proxima-mongodb-gateway"
+                | "proxima-redis-gateway"
+                | "proxima-sqlserver-tds-gateway"
+        ) {
+            continue;
+        }
+        let credentials = decrypted_credentials
+            .get(assignment_id)
+            .ok_or("decrypted gateway credentials missing")?;
+        let mut runtime = credentials
+            .get("gateway_runtime_config")
+            .cloned()
+            .ok_or("gateway runtime config missing")?;
+        let mut files = serde_json::Map::new();
+        let mut add_file = |key: &str, source: &str| -> io::Result<()> {
+            let bytes = fs::read(source)?;
+            files.insert(
+                key.to_owned(),
+                serde_json::Value::String(base64::engine::general_purpose::STANDARD.encode(bytes)),
+            );
+            Ok(())
+        };
+        let secret_config = match runtime_name {
+            "proxima-mysql-gateway" => {
+                let ca = runtime
+                    .get("upstream_tls_ca_file")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned)
+                    .or_else(|| env::var("PROXIMA_MYSQL_UPSTREAM_TLS_CA_FILE").ok())
+                    .ok_or("MySQL upstream TLS CA file missing")?;
+                let cert = runtime
+                    .get("tls_cert_file")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned)
+                    .or_else(|| env::var("PROXIMA_MYSQL_TLS_CERT_FILE").ok())
+                    .ok_or("MySQL gateway TLS certificate missing")?;
+                let key = runtime
+                    .get("tls_key_file")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned)
+                    .or_else(|| env::var("PROXIMA_MYSQL_TLS_KEY_FILE").ok())
+                    .ok_or("MySQL gateway TLS key missing")?;
+                add_file("ca.crt", &ca)?;
+                add_file("tls.crt", &cert)?;
+                add_file("tls.key", &key)?;
+                runtime["upstream_tls_ca_file"] =
+                    serde_json::Value::String("/var/run/proxima/ca.crt".into());
+                runtime["tls_cert_file"] =
+                    serde_json::Value::String("/var/run/proxima/tls.crt".into());
+                runtime["tls_key_file"] =
+                    serde_json::Value::String("/var/run/proxima/tls.key".into());
+                serde_json::json!({"kind":"mysql","runtime_config":runtime})
+            }
+            "proxima-mongodb-gateway" => {
+                let ca = runtime
+                    .get("upstream_tls_ca_file")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned)
+                    .or_else(|| env::var("PROXIMA_MONGODB_UPSTREAM_TLS_CA_FILE").ok())
+                    .ok_or("MongoDB upstream TLS CA file missing")?;
+                let cert = runtime
+                    .get("tls_cert_file")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned)
+                    .or_else(|| env::var("PROXIMA_MONGODB_TLS_CERT_FILE").ok())
+                    .ok_or("MongoDB gateway TLS certificate missing")?;
+                let key = runtime
+                    .get("tls_key_file")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned)
+                    .or_else(|| env::var("PROXIMA_MONGODB_TLS_KEY_FILE").ok())
+                    .ok_or("MongoDB gateway TLS key missing")?;
+                add_file("ca.crt", &ca)?;
+                add_file("tls.crt", &cert)?;
+                add_file("tls.key", &key)?;
+                runtime["upstream_tls_ca_file"] =
+                    serde_json::Value::String("/var/run/proxima/ca.crt".into());
+                runtime["tls_cert_file"] =
+                    serde_json::Value::String("/var/run/proxima/tls.crt".into());
+                runtime["tls_key_file"] =
+                    serde_json::Value::String("/var/run/proxima/tls.key".into());
+                if let Some(users) = runtime
+                    .get_mut("users")
+                    .and_then(serde_json::Value::as_array_mut)
+                {
+                    for user in users {
+                        if let Some(object) = user.as_object_mut() {
+                            object.remove("password");
+                        }
+                    }
+                }
+                serde_json::json!({"kind":"mongodb","runtime_config":runtime})
+            }
+            "proxima-redis-gateway" => {
+                let ca = runtime
+                    .get("upstream_tls_ca_file")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned)
+                    .or_else(|| env::var("PROXIMA_REDIS_UPSTREAM_TLS_CA_FILE").ok())
+                    .ok_or("Redis upstream TLS CA file missing")?;
+                let cert = runtime
+                    .get("tls_cert_file")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned)
+                    .or_else(|| env::var("PROXIMA_REDIS_TLS_CERT_FILE").ok())
+                    .ok_or("Redis gateway TLS certificate missing")?;
+                let key = runtime
+                    .get("tls_key_file")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned)
+                    .or_else(|| env::var("PROXIMA_REDIS_TLS_KEY_FILE").ok())
+                    .ok_or("Redis gateway TLS key missing")?;
+                add_file("ca.crt", &ca)?;
+                add_file("tls.crt", &cert)?;
+                add_file("tls.key", &key)?;
+                runtime["upstream_tls_ca_file"] =
+                    serde_json::Value::String("/var/run/proxima/ca.crt".into());
+                runtime["tls_cert_file"] =
+                    serde_json::Value::String("/var/run/proxima/tls.crt".into());
+                runtime["tls_key_file"] =
+                    serde_json::Value::String("/var/run/proxima/tls.key".into());
+                serde_json::json!({"kind":"redis","runtime_config":runtime})
+            }
+            "proxima-sqlserver-tds-gateway" => {
+                let ca = runtime
+                    .get("upstream_ca_pem")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned)
+                    .or_else(|| env::var("PROXIMA_SQLSERVER_TDS_UPSTREAM_CA_PEM").ok())
+                    .ok_or("SQL Server upstream CA PEM path missing")?;
+                let cert = runtime
+                    .get("client_cert_pem")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned)
+                    .or_else(|| env::var("PROXIMA_SQLSERVER_TDS_CLIENT_CERT_PEM").ok())
+                    .ok_or("SQL Server gateway certificate path missing")?;
+                let key = runtime
+                    .get("client_key_pem")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned)
+                    .or_else(|| env::var("PROXIMA_SQLSERVER_TDS_CLIENT_KEY_PEM").ok())
+                    .ok_or("SQL Server gateway private key path missing")?;
+                add_file("upstream-ca.crt", &ca)?;
+                add_file("server.crt", &cert)?;
+                add_file("server.key", &key)?;
+                let host = assignment
+                    .pointer("/endpoint/host")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or("SQL Server upstream host missing")?;
+                let port = assignment
+                    .pointer("/endpoint/port")
+                    .and_then(serde_json::Value::as_u64)
+                    .ok_or("SQL Server upstream port missing")? as u16;
+                let users = runtime
+                    .get("users")
+                    .and_then(serde_json::Value::as_array)
+                    .ok_or("SQL Server runtime users missing")?;
+                let tenants =
+                    users
+                        .iter()
+                        .map(
+                            |user| -> io::Result<
+                                proxima_engine::sqlserver_tds_gateway::TdsTenantBinding,
+                            > {
+                                Ok(proxima_engine::sqlserver_tds_gateway::TdsTenantBinding {
+                                    tenant_id: user
+                                        .get("tenant_id")
+                                        .and_then(serde_json::Value::as_str)
+                                        .ok_or_else(|| {
+                                            io::Error::other("SQL Server tenant ID missing")
+                                        })?
+                                        .to_owned(),
+                                    username: user
+                                        .get("username")
+                                        .and_then(serde_json::Value::as_str)
+                                        .ok_or_else(|| {
+                                            io::Error::other("SQL Server tenant username missing")
+                                        })?
+                                        .to_owned(),
+                                    database: user
+                                        .get("database")
+                                        .and_then(serde_json::Value::as_str)
+                                        .ok_or_else(|| {
+                                            io::Error::other("SQL Server tenant database missing")
+                                        })?
+                                        .to_owned(),
+                                })
+                            },
+                        )
+                        .collect::<io::Result<Vec<_>>>()?;
+                let config = proxima_engine::sqlserver_tds_gateway::SqlServerTdsConfig {
+                    schema_version: 1,
+                    provider_key: "sqlserver".into(),
+                    listen_addr: "0.0.0.0:14330".into(),
+                    upstream_host: host.to_owned(),
+                    upstream_port: port,
+                    upstream_server_name: runtime
+                        .get("upstream_server_name")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or(host)
+                        .to_owned(),
+                    upstream_ca_pem: "/var/run/proxima/upstream-ca.crt".into(),
+                    client_cert_pem: "/var/run/proxima/server.crt".into(),
+                    client_key_pem: "/var/run/proxima/server.key".into(),
+                    allow_non_loopback: runtime
+                        .get("allow_non_loopback")
+                        .and_then(serde_json::Value::as_bool)
+                        .unwrap_or_else(|| {
+                            env::var("PROXIMA_SQLSERVER_TDS_ALLOW_NON_LOOPBACK").as_deref()
+                                == Ok("true")
+                        }),
+                    tenants,
+                };
+                serde_json::json!({"kind":"sqlserver","config":config})
+            }
+            _ => unreachable!(),
+        };
+        drop(add_file);
+        let active_tenant_count = assignment
+            .get("tenant_bindings")
+            .and_then(serde_json::Value::as_array)
+            .map(|bindings| {
+                bindings
+                    .iter()
+                    .filter(|binding| {
+                        binding.get("status").and_then(serde_json::Value::as_str) != Some("revoked")
+                    })
+                    .count()
+            })
+            .unwrap_or(0);
+        let config_revision = assignment
+            .get("config_revision")
+            .and_then(serde_json::Value::as_i64)
+            .ok_or("gateway assignment config_revision missing")?;
+        secret_assignments.push(serde_json::json!({
+            "assignment_id":assignment_id,
+            "config_revision":config_revision,
+            "gateway_runtime":runtime_name,
+            "active_tenant_count":active_tenant_count,
+            "secret_config":secret_config,
+            "files":files
+        }));
+    }
+    if let Some(parent) = output_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let document = serde_json::json!({"schema_version":1,"node_id":node_id,"delivery_id":delivery_id,"assignments":secret_assignments});
+    let temporary = output_path.with_extension("json.tmp");
+    if temporary.exists() {
+        fs::remove_file(&temporary)?;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&temporary)?;
+        std::io::Write::write_all(&mut file, serde_json::to_string_pretty(&document)?.as_bytes())?;
+        file.sync_all()?;
+    }
+    #[cfg(not(unix))]
+    fs::write(&temporary, serde_json::to_vec_pretty(&document)?)?;
+    if output_path.exists() {
+        fs::remove_file(output_path)?;
+    }
+    fs::rename(&temporary, output_path)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(output_path, fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(())
+}
+
+async fn wait_for_kubernetes_gateway_status(
+    status_path: &Path,
+    expected_node_id: &str,
+    expected_delivery_id: &str,
+    assignment_id: &str,
+    revision: i64,
+    expect_removed: bool,
+) -> Result<Option<(String, u16)>, Box<dyn std::error::Error + Send + Sync>> {
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(240);
+    loop {
+        if let Ok(bytes) = fs::read(status_path) {
+            if let Ok(document) = serde_json::from_slice::<serde_json::Value>(&bytes) {
+                if document.get("node_id").and_then(serde_json::Value::as_str)
+                    != Some(expected_node_id)
+                    || document
+                        .get("delivery_id")
+                        .and_then(serde_json::Value::as_str)
+                        != Some(expected_delivery_id)
+                {
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                    continue;
+                }
+                if let Some(entries) = document
+                    .get("assignments")
+                    .and_then(serde_json::Value::as_array)
+                {
+                    if let Some(entry) = entries.iter().find(|entry| {
+                        entry
+                            .get("assignment_id")
+                            .and_then(serde_json::Value::as_str)
+                            == Some(assignment_id)
+                    }) {
+                        let observed_revision = entry
+                            .get("config_revision")
+                            .and_then(serde_json::Value::as_i64);
+                        let status = entry.get("status").and_then(serde_json::Value::as_str);
+                        if observed_revision == Some(revision)
+                            && ((expect_removed && status == Some("removed"))
+                                || (!expect_removed && status == Some("ready")))
+                        {
+                            if expect_removed {
+                                return Ok(None);
+                            }
+                            let host = entry
+                                .get("service_dns")
+                                .and_then(serde_json::Value::as_str)
+                                .ok_or("Kubernetes gateway status has no service DNS name")?;
+                            let port = entry
+                                .get("port")
+                                .and_then(serde_json::Value::as_u64)
+                                .filter(|p| (1..=65535).contains(p))
+                                .ok_or("Kubernetes gateway status has no valid service port")?
+                                as u16;
+                            return Ok(Some((host.to_owned(), port)));
+                        }
+                        if observed_revision == Some(revision) && status == Some("failed") {
+                            return Err(format!("Kubernetes gateway reconciliation failed for assignment {assignment_id}").into());
+                        }
+                    }
+                }
+            }
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return Err(format!(
+                "timed out waiting for Kubernetes gateway readiness for assignment {assignment_id}"
+            )
+            .into());
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    }
+}
+
+fn spawn_node_database_config_worker(verifier: Option<TenantTokenVerifier>) {
+    tokio::spawn(async move {
+        // Keep supervisors alive for the worker lifetime. Recreating them on every
+        // poll would lose Child handles and repeatedly spawn gateways on occupied ports.
+        let mysql_runtime = MysqlRuntime::new();
+        let mongo_runtime = MongoRuntime::new();
+        let redis_runtime = RedisRuntime::new();
+        let sqlserver_runtime = SqlServerRuntime::new();
+        let native_runtime = NativeProviderRuntime;
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
         loop {
             interval.tick().await;
-            match pull_and_stage_database_config_once().await {
+            match pull_and_stage_database_config_once(
+                &mysql_runtime,
+                &mongo_runtime,
+                &redis_runtime,
+                &sqlserver_runtime,
+                &native_runtime,
+                verifier.as_ref(),
+            )
+            .await
+            {
                 Ok(()) => {}
                 Err(error) => {
                     tracing::warn!(%error,"database configuration pull/stage cycle failed; current gateway configuration is unchanged")
@@ -1085,6 +1945,15 @@ mod assignment_runtime_cardinality_tests {
     }
 
     #[test]
+    fn rejects_assignment_ids_that_could_escape_runtime_state_directory() {
+        let records = vec![json!({
+            "assignment_id": "..\\outside",
+            "gateway_runtime": "proxima-mysql-gateway"
+        })];
+        assert!(validate_assignment_runtime_cardinality(&records).is_err());
+    }
+
+    #[test]
     fn rejects_duplicate_assignment_ids_and_unknown_runtimes() {
         let duplicate = vec![
             json!({"assignment_id":"same","gateway_runtime":"proxima-mysql-gateway"}),
@@ -1113,10 +1982,6 @@ async fn main() -> io::Result<()> {
         eprintln!("Engine node bootstrap failed: {error}");
         std::process::exit(1);
     }
-    if std::env::var("PROXIMA_NODE_HEARTBEAT_URL").is_ok() {
-        spawn_node_database_config_worker();
-    }
-
     let config = Config::from_env()?;
     let config_tenant_role_prefix = config.tenant_role_prefix.clone();
 
@@ -1131,6 +1996,10 @@ async fn main() -> io::Result<()> {
         })
         .transpose()
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.to_string()))?;
+
+    if std::env::var("PROXIMA_NODE_HEARTBEAT_URL").is_ok() {
+        spawn_node_database_config_worker(verifier.clone());
+    }
 
     let client_acceptor = client_acceptor(&config)?;
     let upstream_connector = upstream_connector(&config)?;

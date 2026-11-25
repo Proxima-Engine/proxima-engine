@@ -14,7 +14,8 @@ use opensrv_mysql::{
 };
 
 use std::collections::HashMap;
-use std::io::{self, Write};
+use std::fs::File;
+use std::io::{self, BufReader, Write};
 use std::net::SocketAddr;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::Arc;
@@ -22,6 +23,7 @@ use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::{Mutex, Semaphore};
 use tokio::task;
+use tokio_rustls::rustls::ServerConfig;
 use uuid::Uuid;
 
 const SERVER_VERSION: &str = "8.0.0-agata-proxima";
@@ -393,7 +395,13 @@ where
 
         // The registry entry selects the only upstream identity this
         // client session is permitted to use.
-        let pool = match MysqlUpstream::from_url(&principal.upstream_url) {
+        let pool = match MysqlUpstream::from_url_with_ca(
+            &principal.upstream_url,
+            principal
+                .upstream_tls_ca_file
+                .as_deref()
+                .map(std::path::Path::new),
+        ) {
             Ok(pool) => pool,
             Err(_) => return false,
         };
@@ -867,14 +875,57 @@ where
 /// Accept only loopback binding in this first gateway release.
 /// A remote listener requires client-facing TLS and hardened deployment
 /// configuration before it can be enabled.
+fn mysql_server_tls_config() -> io::Result<Arc<ServerConfig>> {
+    let cert_path = std::env::var("PROXIMA_MYSQL_TLS_CERT_FILE").map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "PROXIMA_MYSQL_TLS_CERT_FILE is required",
+        )
+    })?;
+    let key_path = std::env::var("PROXIMA_MYSQL_TLS_KEY_FILE").map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "PROXIMA_MYSQL_TLS_KEY_FILE is required",
+        )
+    })?;
+    let _ = tokio_rustls::rustls::crypto::ring::default_provider().install_default();
+    let mut cert_reader = BufReader::new(File::open(cert_path)?);
+    let certs = rustls_pemfile::certs(&mut cert_reader)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    if certs.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "MySQL gateway TLS certificate chain is empty",
+        ));
+    }
+    let mut key_reader = BufReader::new(File::open(key_path)?);
+    let key = rustls_pemfile::private_key(&mut key_reader)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "MySQL gateway TLS private key is missing",
+            )
+        })?;
+    let config = ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(certs, key)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    Ok(Arc::new(config))
+}
+
 pub async fn run_mysql_gateway(
     address: SocketAddr,
     registry: Arc<MysqlIdentityRegistry>,
 ) -> io::Result<()> {
-    if !address.ip().is_loopback() {
+    let tls_config = mysql_server_tls_config()?;
+    let allow_non_loopback =
+        std::env::var("PROXIMA_MYSQL_ALLOW_NON_LOOPBACK").as_deref() == Ok("true");
+    if !address.ip().is_loopback() && !allow_non_loopback {
         return Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
-            "Proxima MySQL gateway currently requires a loopback bind address",
+            "non-loopback MySQL gateway bind requires PROXIMA_MYSQL_ALLOW_NON_LOOPBACK=true",
         ));
     }
 
@@ -915,6 +966,7 @@ pub async fn run_mysql_gateway(
             }
         };
         let registry = Arc::clone(&registry);
+        let tls_config = Arc::clone(&tls_config);
 
         task::spawn(async move {
             let _connection_permit = permit;
@@ -926,14 +978,35 @@ pub async fn run_mysql_gateway(
                 reject_connection_on_dbname_absence: true,
             };
 
-            if let Err(error) =
-                AsyncMysqlIntermediary::run_with_options(session, reader, writer, &options).await
-            {
-                tracing::debug!(
-                    peer = %peer,
-                    error = %error,
-                    "MySQL client session ended"
-                );
+            let mut writer = writer;
+            let result = async {
+                let mut session = session;
+                let tls_config_option = Some(Arc::clone(&tls_config));
+                let (tls_requested, init_params) = AsyncMysqlIntermediary::init_before_ssl(
+                    &mut session,
+                    reader,
+                    &mut writer,
+                    &tls_config_option,
+                )
+                .await?;
+                if !tls_requested {
+                    return Err(io::Error::new(
+                        io::ErrorKind::PermissionDenied,
+                        "MySQL client must negotiate TLS before authentication",
+                    ));
+                }
+                opensrv_mysql::secure_run_with_options(
+                    session,
+                    writer,
+                    options,
+                    tls_config,
+                    init_params,
+                )
+                .await
+            }
+            .await;
+            if let Err(error) = result {
+                tracing::debug!(peer = %peer, error = %error, "MySQL TLS client session ended");
             }
         });
     }

@@ -170,7 +170,7 @@ impl Config {
     }
 }
 pub async fn run_redis_gateway() -> io::Result<()> {
-    let _ = rustls::crypto::ring::default_provider().install_default();
+    let _ = tokio_rustls::rustls::crypto::ring::default_provider().install_default();
     let cfg = Config::load()?;
     let path = std::env::var("PROXIMA_REDIS_IDENTITY_REGISTRY").map_err(invalid)?;
     let registry = Arc::new(RedisIdentityRegistry::load(path)?);
