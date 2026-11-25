@@ -46,6 +46,8 @@ Use this index to go directly to the task you need to complete.
 
 ## Test and verify
 
+- [Provider runtime and acceptance reference](PROVIDER_RUNTIME_REFERENCE.md) — all twelve provider runtimes, Cloud reconciliation and acceptance commands.
+
 - [Provider verification commands](VERIFICATION.md)
 - [Database production verification](DATABASE_PRODUCTION_VERIFICATION.md)
 - [Engineering validation case study](ENGINEERING_CASE_STUDY.md)
