@@ -37,6 +37,9 @@ const TDS_PRELOGIN_RESPONSE: u8 = 0x04;
 const TDS_TLS_PACKET: u8 = 0x12;
 const TDS_LOGIN7: u8 = 0x10;
 const TDS_EOM: u8 = 0x01;
+const DEFAULT_MAX_CONNECTIONS: usize = 128;
+const HANDSHAKE_TIMEOUT_SECS: u64 = 10;
+const UPSTREAM_CONNECT_TIMEOUT_SECS: u64 = 10;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct SqlServerTdsConfig {
@@ -66,6 +69,7 @@ struct Gateway {
     connector: TlsConnector,
     acceptor: TlsAcceptor,
     users: std::sync::Arc<HashMap<String, (String, String)>>,
+    connection_slots: Arc<tokio::sync::Semaphore>,
 }
 
 impl SqlServerTdsConfig {
@@ -129,6 +133,22 @@ impl SqlServerTdsConfig {
     }
 }
 
+fn max_connections_from_env() -> io::Result<usize> {
+    let value = std::env::var("PROXIMA_SQLSERVER_TDS_MAX_CONNECTIONS").ok();
+    parse_max_connections(value.as_deref())
+}
+
+fn parse_max_connections(value: Option<&str>) -> io::Result<usize> {
+    let max_connections = value
+        .unwrap_or("128")
+        .parse::<usize>()
+        .map_err(invalid)?;
+    if max_connections == 0 || max_connections > 65_536 {
+        return Err(invalid("PROXIMA_SQLSERVER_TDS_MAX_CONNECTIONS must be between 1 and 65536"));
+    }
+    Ok(max_connections)
+}
+
 pub async fn run(config: SqlServerTdsConfig) -> io::Result<()> {
     let _ = tokio_rustls::rustls::crypto::ring::default_provider().install_default();
     config.validate()?;
@@ -162,19 +182,30 @@ pub async fn run(config: SqlServerTdsConfig) -> io::Result<()> {
             (t.tenant_id.clone(), t.database.clone()),
         );
     }
+    let max_connections = max_connections_from_env()?;
     let gateway = Gateway {
         upstream,
         upstream_name: config.upstream_server_name.clone(),
         connector,
         acceptor,
         users: std::sync::Arc::new(users),
+        connection_slots: Arc::new(tokio::sync::Semaphore::new(max_connections)),
     };
     let listener = TcpListener::bind(&config.listen_addr).await?;
     tracing::info!(listen=%config.listen_addr, upstream=%config.upstream_host, tenants=config.tenants.len(), "SQL Server TDS gateway listening");
     loop {
         let (stream, peer) = listener.accept().await?;
+        let permit = match gateway.connection_slots.clone().try_acquire_owned() {
+            Ok(permit) => permit,
+            Err(_) => {
+                tracing::warn!(%peer, "TDS connection rejected: connection capacity exhausted");
+                drop(stream);
+                continue;
+            }
+        };
         let gw = gateway.clone();
         tokio::spawn(async move {
+            let _permit = permit;
             if let Err(e) = gw.handle(stream).await {
                 tracing::warn!(%peer, error=%e, "TDS session rejected or terminated");
             }
@@ -184,7 +215,12 @@ pub async fn run(config: SqlServerTdsConfig) -> io::Result<()> {
 
 impl Gateway {
     async fn handle(&self, mut client: TcpStream) -> io::Result<()> {
-        let (kind, prelogin) = read_tds_message(&mut client, MAX_PRELOGIN).await?;
+        let (kind, prelogin) = tokio::time::timeout(
+            std::time::Duration::from_secs(HANDSHAKE_TIMEOUT_SECS),
+            read_tds_message(&mut client, MAX_PRELOGIN),
+        )
+        .await
+        .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "TDS PRELOGIN timed out"))??;
         if kind != TDS_PRELOGIN {
             return Err(invalid("expected TDS PRELOGIN packet"));
         }
@@ -199,13 +235,20 @@ impl Gateway {
         // TLS handshake records that follow are carried in PRELOGIN (0x12) packets.
         write_tds_message(&mut client, TDS_PRELOGIN_RESPONSE, &build_prelogin(0x01)).await?;
         let (client_transport, client_tls_mode) = TdsTlsIo::new(client);
-        let mut client_tls = self
-            .acceptor
-            .accept(client_transport)
-            .await
-            .map_err(invalid)?;
+        let mut client_tls = tokio::time::timeout(
+            std::time::Duration::from_secs(HANDSHAKE_TIMEOUT_SECS),
+            self.acceptor.accept(client_transport),
+        )
+        .await
+        .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "TDS client TLS handshake timed out"))?
+        .map_err(invalid)?;
         client_tls_mode.mark_established();
-        let (kind, login) = read_tds_message(&mut client_tls, MAX_LOGIN).await?;
+        let (kind, login) = tokio::time::timeout(
+            std::time::Duration::from_secs(HANDSHAKE_TIMEOUT_SECS),
+            read_tds_message(&mut client_tls, MAX_LOGIN),
+        )
+        .await
+        .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "TDS LOGIN7 timed out"))??;
         if kind != TDS_LOGIN7 {
             return Err(invalid("expected TDS LOGIN7 packet after TLS negotiation"));
         }
@@ -223,9 +266,19 @@ impl Gateway {
                 "LOGIN7 requested a database outside its tenant assignment",
             ));
         }
-        let mut upstream = TcpStream::connect(self.upstream).await?;
+        let mut upstream = tokio::time::timeout(
+            std::time::Duration::from_secs(UPSTREAM_CONNECT_TIMEOUT_SECS),
+            TcpStream::connect(self.upstream),
+        )
+        .await
+        .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "SQL Server upstream connect timed out"))??;
         write_tds_message(&mut upstream, TDS_PRELOGIN, &build_prelogin(0x03)).await?;
-        let (up_kind, up_prelogin) = read_tds_message(&mut upstream, MAX_PRELOGIN).await?;
+        let (up_kind, up_prelogin) = tokio::time::timeout(
+            std::time::Duration::from_secs(HANDSHAKE_TIMEOUT_SECS),
+            read_tds_message(&mut upstream, MAX_PRELOGIN),
+        )
+        .await
+        .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "SQL Server upstream PRELOGIN timed out"))??;
         if up_kind != TDS_PRELOGIN_RESPONSE
             || !matches!(prelogin_encryption(&up_prelogin)?, 0x01 | 0x03)
         {
@@ -236,11 +289,13 @@ impl Gateway {
         }
         let server_name = ServerName::try_from(self.upstream_name.clone()).map_err(invalid)?;
         let (upstream_transport, upstream_tls_mode) = TdsTlsIo::new(upstream);
-        let mut upstream_tls = self
-            .connector
-            .connect(server_name, upstream_transport)
-            .await
-            .map_err(invalid)?;
+        let mut upstream_tls = tokio::time::timeout(
+            std::time::Duration::from_secs(HANDSHAKE_TIMEOUT_SECS),
+            self.connector.connect(server_name, upstream_transport),
+        )
+        .await
+        .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "SQL Server upstream TLS handshake timed out"))?
+        .map_err(invalid)?;
         upstream_tls_mode.mark_established();
         write_tds_message(&mut upstream_tls, TDS_LOGIN7, &login).await?;
         // LOGIN7 is forwarded only after the tenant principal and requested database
@@ -619,6 +674,15 @@ fn invalid(e: impl std::fmt::Display) -> io::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn sqlserver_connection_limit_defaults_and_rejects_unsafe_values() {
+        assert_eq!(parse_max_connections(None).unwrap(), DEFAULT_MAX_CONNECTIONS);
+        assert!(parse_max_connections(Some("0")).is_err());
+        assert!(parse_max_connections(Some("65537")).is_err());
+        assert!(parse_max_connections(Some("not-a-number")).is_err());
+        assert_eq!(parse_max_connections(Some("64")).unwrap(), 64);
+    }
+
     #[test]
     fn prelogin_advertises_tls() {
         let p = build_prelogin(1);

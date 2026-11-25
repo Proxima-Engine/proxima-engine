@@ -14,8 +14,11 @@ async fn verify_tenant(
         "tenant_b"
     };
 
+    // The CI gateway requires TLS. Its certificate is generated for this
+    // disposable loopback-only test, so the test client opts out of CA and
+    // hostname validation here; production clients must retain verification.
     let url = format!(
-        "mysql://{}:{}@127.0.0.1:3307/{}",
+        "mysql://{}:{}@127.0.0.1:3307/{}?require_ssl=true&verify_ca=false&verify_identity=false&prefer_socket=false",
         username, password, own_database
     );
 
@@ -99,7 +102,7 @@ async fn verify_tenant(
 
 async fn verify_caching_sha2_rejects_wrong_password() -> Result<(), Box<dyn std::error::Error>> {
     let pool = Pool::new(Opts::from_url(
-        "mysql://client_a:DefinitelyWrongPassword@127.0.0.1:3307/tenant_a",
+        "mysql://client_a:DefinitelyWrongPassword@127.0.0.1:3307/tenant_a?require_ssl=true&verify_ca=false&verify_identity=false&prefer_socket=false",
     )?);
     assert!(
         pool.get_conn().await.is_err(),
@@ -113,6 +116,10 @@ async fn verify_caching_sha2_rejects_wrong_password() -> Result<(), Box<dyn std:
 #[ignore = "requires disposable MySQL 8.0 and running Proxima MySQL gateway"]
 async fn mysql_gateway_enforces_two_tenant_isolation_and_prepared_statements(
 ) -> Result<(), Box<dyn std::error::Error>> {
+    // mysql_async and other workspace dependencies enable multiple Rustls crypto providers.
+    // Select ring in this test process before the client builds its TLS configuration.
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     verify_caching_sha2_rejects_wrong_password().await?;
 
     verify_tenant(
