@@ -44,9 +44,10 @@ Engine remains the enforcement authority for the customer data path. Cloud manag
 
 ## Operator and developer references
 
-- [Cloud multi-database architecture](https://github.com/Agata-Proxima/Agata-proxima/blob/main/docs/cloud-multi-database-architecture.md)
-- [Cloud multi-database API](https://github.com/Agata-Proxima/Agata-proxima/blob/main/docs/cloud-multi-database-api.md)
-- [Database integration catalogue](https://github.com/Agata-Proxima/Agata-proxima/blob/main/docs/database-integrations.md)
+- [Agata Proxima public documentation](https://agataproxima.com/docs)
+- [Database integration catalogue](https://agataproxima.com/docs/database-integrations)
+- [Developer API reference](https://agataproxima.com/developers/api-reference)
+- [SDK and CLI downloads](https://agataproxima.com/developers/downloads)
 - [Cloud-to-Engine runtime lifecycle](CLOUD_ENGINE_RUNTIME_LIFECYCLE.md)
 - [Provider runtime reference](PROVIDER_RUNTIME_REFERENCE.md)
 - [Node enrollment](NODE_ENROLLMENT.md)
