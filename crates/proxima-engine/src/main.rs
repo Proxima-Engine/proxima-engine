@@ -639,7 +639,7 @@ fn validate_tenant_bindings(record: &serde_json::Value) -> Result<(), &'static s
             .get("status")
             .and_then(serde_json::Value::as_str)
             .ok_or("tenant binding has no lifecycle status")?;
-        let allowed_status = matches!(status, "pending" | "provisioning" | "active" | "revoked");
+        let allowed_status = matches!(status, "pending" | "provisioning" | "active");
         if !allowed_status {
             return Err("tenant binding lifecycle status is not deployable");
         }
