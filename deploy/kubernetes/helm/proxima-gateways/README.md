@@ -1,128 +1,76 @@
 # Proxima database gateways on Kubernetes
 
-This chart deploys each existing protocol gateway as an independent, non-root
-Deployment behind a ClusterIP Service. It does not expose database protocols
-publicly and does not claim to provision upstream database users.
+This chart packages the Engine's protocol gateways and optional desired-state controller. Gateway workloads run as non-root Deployments behind internal ClusterIP Services. Database protocols are not exposed publicly by this chart.
+
+## Supported gateway runtimes
+
+The assignment controller reconciles these gateway runtimes:
+
+- MySQL
+- MongoDB
+- Redis
+- Microsoft SQL Server (TDS 7.4)
+
+Other supported database providers use their native Engine runtime and are not converted into Kubernetes gateway workloads by this chart.
 
 ## Prerequisites
 
 - Kubernetes 1.27+ with a CNI that enforces NetworkPolicy.
-- The published Proxima Engine image containing all three gateway binaries.
-- A Kubernetes Secret for every enabled gateway. Secrets are mounted read-only;
-  never commit registry JSON, passwords, certificates, or private keys.
-- A client workload labelled `proxima.io/client=true`.
+- A Proxima Engine image containing the gateway and controller binaries.
+- A shared PVC used by the Engine node and controller.
+- Provider-specific TLS material and identity data delivered through the protected Engine secret manifest.
+- A client workload labelled proxima.io/client=true.
 
-## Secret contracts
+## Assignment controller
 
-Create each secret in the release namespace before enabling its gateway:
+The controller reads two Engine-owned files from the shared volume:
 
-- MySQL: key `users.json`, containing the MySQL identity registry schema.
-- MongoDB: keys `users.json`, `tls.crt`, `tls.key`, `ca.crt`.
-- Redis: keys `users.json`, `tls.crt`, `tls.key`, `ca.crt`.
+- database-targets.json — authenticated desired assignments, provider runtime, target, node and delivery revisions.
+- database-target-secrets.json — the matching versioned credential and gateway-file manifest.
 
-The registry files must conform to the respective Engine gateway registry
-schemas. MongoDB and Redis upstream TLS are enabled by default. MySQL upstream
-TLS requirements are validated by its registry loader.
+The controller validates the schema, node identity, delivery ID, assignment IDs and configuration revisions before applying resources. It reconciles a Deployment, ClusterIP Service, Kubernetes Secret and NetworkPolicy for each active supported gateway assignment. It uses server-side apply and ownership labels, and removes only stale resources managed by this controller for the same Engine node.
+
+After reconciliation it writes gateway-runtime-status.json atomically. The Engine uses this observed state in its runtime lifecycle. A failed reconciliation retains the last successfully applied workloads and reports the error; it does not silently remove a working gateway.
+
+The controller reconciles Kubernetes Secret contents when the Engine delivers a new credential manifest. Upstream database-user creation or revocation remains provider-specific and belongs to the credential lifecycle/provisioning workflow; Kubernetes Secret deletion alone does not revoke an account inside a database.
+
+## Shared volume
+
+Mount the same PVC into the Engine node and controller. The Engine writes desired state and credential manifests; the controller reads them and writes runtime status. The controller needs read/write access to the volume. Use a ReadWriteMany-capable claim when the pods can run on different nodes.
+
+The secret manifest contains sensitive material. Keep the PVC private to the Engine and controller service accounts, use restrictive filesystem permissions, encrypt storage where supported, and never commit the manifest or its contents.
+
+The chart refuses to enable the controller without an existing claim. Example values:
+
+    controller:
+      enabled: true
+      configVolume:
+        existingClaim: proxima-engine-state
+        mountPath: /var/lib/proxima
+      reconcileSeconds: 15
+      gatewayImage:
+        repository: ghcr.io/proxima-engine/proxima-engine
+        tag: <release-tag>
+
+Enable the controller only when the Engine node writes both manifests to that same claim. Do not enable static gateways.*.enabled Deployments at the same time; the chart enforces this to prevent duplicate workloads.
 
 ## Install
 
-Create secrets with your secret manager or external-secrets controller, then:
+Create the shared PVC and configure the Engine node to write its desired-state files there. Then install the chart with the controller enabled and the provider-specific network policy values reviewed:
 
-```sh
-helm upgrade --install proxima-gateways ./deploy/kubernetes/helm/proxima-gateways \
-  --namespace proxima-system --create-namespace \
-  --set gateways.mysql.enabled=true \
-  --set gateways.mongodb.enabled=true \
-  --set gateways.redis.enabled=true
-```
+    helm upgrade --install proxima-gateways ./deploy/kubernetes/helm/proxima-gateways \
+      --namespace proxima-system --create-namespace \
+      --set controller.enabled=true \
+      --set controller.configVolume.existingClaim=proxima-engine-state
 
-Set each enabled gateway's upstream addresses, TLS server names, and allowed
-egress CIDRs/ports in a reviewed values file. Keep `networkPolicy.enabled`
-true. NetworkPolicy egress to upstream databases is denied unless explicitly
-listed in `networkPolicy.egressCIDRs`; DNS is allowed.
+Set allowed egress CIDRs and ports for the database targets. Keep networkPolicy.enabled true. The chart keeps gateway Services internal and restricts workload egress to the reviewed policy.
 
-Services are internal ClusterIP endpoints:
-- `proxima-gateways-mysql:3307`
-- `proxima-gateways-mongodb:27018`
-- `proxima-gateways-redis:6380`
+## Security and RBAC
 
-## Engine desired-state reconciliation
+The controller uses a namespace-scoped ServiceAccount and Role. Its permissions are limited to Deployments, Services, Secrets and NetworkPolicies in the release namespace; it does not need cluster-admin or cluster-wide resource access. The controller runs as non-root, with a read-only root filesystem, dropped Linux capabilities and a restricted security context.
 
-The optional controller consumes the Engine node's authenticated
-`database-targets.json` file and reconciles one Deployment and ClusterIP
-Service per supported gateway assignment (MySQL, MongoDB, Redis). It applies
-resources with server-side apply, labels every managed object, and deletes
-only stale Deployments/Services carrying its own ownership label. It never
-reads, creates, or deletes Kubernetes Secrets.
+The static gateway mode and assignment-controller mode are mutually exclusive. Use the controller mode for Cloud/Engine desired-state reconciliation.
 
-To enable it, mount one shared PVC into both workloads. The Engine mounts
-it read-write at `/var/lib/proxima`; set
-`PROXIMA_NODE_DATABASE_CONFIG_PATH=/var/lib/proxima/database-targets.json`.
-The controller mounts the same claim read-only at `/var/lib/proxima` and
-polls that exact file every 15 seconds by default. Use a ReadWriteMany-capable
-claim when the pods may run on different nodes. The Engine writes the file by
-atomic same-directory rename, so the controller sees either the previous
-complete document or the next complete document, never a partially written
-JSON file. The document contains schema version, node/organization identity,
-assignment IDs, target IDs, gateway runtime, endpoint and revisions; decrypted
-upstream credentials are deliberately excluded. The controller validates the
-schema and assignment identities before applying anything. An authenticated
-empty assignment list removes only workloads owned by this controller.
+## Operational acceptance
 
-The chart refuses to enable the controller without an existing PVC. The Engine
-Deployment must independently mount the same claim read-write, for example:
-
-```yaml
-spec:
-  containers:
-    - name: proxima-engine
-      env:
-        - name: PROXIMA_NODE_DATABASE_CONFIG_PATH
-          value: /var/lib/proxima/database-targets.json
-      volumeMounts:
-        - name: node-state
-          mountPath: /var/lib/proxima
-  volumes:
-    - name: node-state
-      persistentVolumeClaim:
-        claimName: proxima-engine-state
-```
-
-The controller chart mounts that same claim read-only. Then configure the
-existing Secret names and enable the controller:
-
-```yaml
-controller:
-  enabled: true
-  configVolume:
-    existingClaim: proxima-engine-state
-  secrets:
-    mysql: proxima-mysql-gateway
-    mongodb: proxima-mongodb-gateway
-    redis: proxima-redis-gateway
-```
-
-The referenced Secrets must already exist and contain the gateway's
-`users.json` registry (plus MongoDB/Redis TLS files). This is deliberately
-separate from tenant identity provisioning. Do not enable the static
-`gateways.*.enabled` Deployments at the same time as the assignment
-controller. The controller's namespace-scoped Role can manage only
-Deployments and Services in its release namespace; it has no Secret permissions.
-The Engine desired-state volume must be a shared PVC accessible to both pods.
-The controller requires Kubernetes service-account token and CA mounts.
-
-The controller currently reconciles the three existing protocol gateway
-binaries only. Native database profiles that do not use a Proxima gateway are
-left to their native provider integration and are not converted into proxy
-workloads.
-
-## Operational boundary
-
-TCP probes verify that the listener is accepting connections; they do not prove
-upstream connectivity or tenant isolation. The Cloud/Engine signed
-configuration acknowledgement must remain staged until provider-specific
-connectivity and isolation evidence is produced. This chart is workload
-packaging, not a Kubernetes operator: it does not yet reconcile Cloud
-assignments, rotate registry Secrets, or automatically revoke provider users.
-Use a secret controller to roll pods on secret rotation. Do not treat a Ready
-Pod as a Cloud-level applied assignment.
+A Ready Pod or open TCP port proves only that the workload is running and listening. It does not prove upstream connectivity or tenant isolation. Run the provider-specific connectivity and negative isolation checks, then confirm the Engine's observed runtime status and signed verification evidence before treating an assignment as applied.
