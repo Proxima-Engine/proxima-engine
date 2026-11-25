@@ -134,9 +134,15 @@ impl SqlServerTdsConfig {
 }
 
 fn max_connections_from_env() -> io::Result<usize> {
-    let value = std::env::var("PROXIMA_SQLSERVER_TDS_MAX_CONNECTIONS")
-        .unwrap_or_else(|_| DEFAULT_MAX_CONNECTIONS.to_string());
-    let max_connections = value.parse::<usize>().map_err(invalid)?;
+    let value = std::env::var("PROXIMA_SQLSERVER_TDS_MAX_CONNECTIONS").ok();
+    parse_max_connections(value.as_deref())
+}
+
+fn parse_max_connections(value: Option<&str>) -> io::Result<usize> {
+    let max_connections = value
+        .unwrap_or("128")
+        .parse::<usize>()
+        .map_err(invalid)?;
     if max_connections == 0 || max_connections > 65_536 {
         return Err(invalid("PROXIMA_SQLSERVER_TDS_MAX_CONNECTIONS must be between 1 and 65536"));
     }
@@ -670,18 +676,11 @@ mod tests {
     use super::*;
     #[test]
     fn sqlserver_connection_limit_defaults_and_rejects_unsafe_values() {
-        std::env::remove_var("PROXIMA_SQLSERVER_TDS_MAX_CONNECTIONS");
-        assert_eq!(max_connections_from_env().unwrap(), DEFAULT_MAX_CONNECTIONS);
-
-        std::env::set_var("PROXIMA_SQLSERVER_TDS_MAX_CONNECTIONS", "0");
-        assert!(max_connections_from_env().is_err());
-
-        std::env::set_var("PROXIMA_SQLSERVER_TDS_MAX_CONNECTIONS", "65537");
-        assert!(max_connections_from_env().is_err());
-
-        std::env::set_var("PROXIMA_SQLSERVER_TDS_MAX_CONNECTIONS", "64");
-        assert_eq!(max_connections_from_env().unwrap(), 64);
-        std::env::remove_var("PROXIMA_SQLSERVER_TDS_MAX_CONNECTIONS");
+        assert_eq!(parse_max_connections(None).unwrap(), DEFAULT_MAX_CONNECTIONS);
+        assert!(parse_max_connections(Some("0")).is_err());
+        assert!(parse_max_connections(Some("65537")).is_err());
+        assert!(parse_max_connections(Some("not-a-number")).is_err());
+        assert_eq!(parse_max_connections(Some("64")).unwrap(), 64);
     }
 
     #[test]
