@@ -116,6 +116,10 @@ async fn verify_caching_sha2_rejects_wrong_password() -> Result<(), Box<dyn std:
 #[ignore = "requires disposable MySQL 8.0 and running Proxima MySQL gateway"]
 async fn mysql_gateway_enforces_two_tenant_isolation_and_prepared_statements(
 ) -> Result<(), Box<dyn std::error::Error>> {
+    // mysql_async and other workspace dependencies enable multiple Rustls crypto providers.
+    // Select ring in this test process before the client builds its TLS configuration.
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     verify_caching_sha2_rejects_wrong_password().await?;
 
     verify_tenant(
