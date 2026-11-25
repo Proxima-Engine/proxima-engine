@@ -91,3 +91,18 @@ bash scripts/test-redis-tenant-gateway-ci.sh
 ```
 
 The fixture verifies separate tenant key namespaces, multi-key rewriting, invalid client credentials and rejection of administrative commands.
+
+## Clone, build and verify
+
+Clone the Engine repository and enter its root:
+
+```bash
+git clone https://github.com/Proxima-Engine/proxima-engine.git
+cd proxima-engine
+cargo build --release -p proxima-engine --bin proxima-redis-gateway
+bash scripts/test-redis-tenant-gateway-ci.sh
+```
+
+## Cloud assignment
+
+In **Agata Proxima Cloud → Dashboard → Databases**, register the existing Redis service, enroll an Engine node, assign the target to that node, create the tenant binding and deploy the configuration. The Engine activates the Redis runtime and reports the applied revision and tenant evidence to the workspace.
