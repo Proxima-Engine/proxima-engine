@@ -51,3 +51,25 @@ docker rm -f proxima-mariadb
 ```
 
 **Next:** [Complete MariaDB guide](MARIADB.md) · [Configuration](CONFIGURATION.md) · [Security](SECURITY.md)
+
+
+## 3A. Understand the identity registry
+
+The MySQL-compatible gateway maps each client username to one immutable tenant ID and MariaDB database. The registry contains the upstream connection URL and a one-way client password verifier; it must not contain client plaintext passwords. Keep the file private, set restrictive filesystem permissions and exclude it from Git.
+
+Use separate upstream MariaDB accounts for each tenant. Grant only required data operations on that tenant's database. Do not grant global privileges, system-schema access, account administration or server administration. The selected database must match the registry mapping.
+
+## 3B. Validate the connection path
+
+The gateway is a separate process from the PostgreSQL Engine listener. Keep the local listener on loopback during development. For remote MariaDB services, configure verified TLS and private networking. Applications continue using their existing MySQL-compatible driver and connect to the gateway address.
+
+## 3C. Acceptance checklist
+
+- Each tenant's valid client identity maps to its assigned MariaDB database.
+- Invalid credentials and unknown users are rejected.
+- Cross-tenant reads and writes are denied.
+- Database-switch attempts are rejected.
+- Upstream accounts cannot access the other tenant's database.
+- TLS and registry permissions are checked before production.
+
+See [MariaDB gateway guide](MARIADB.md) for the full registry format, password verifier generation, SQL provisioning, Windows commands and integration verification.
