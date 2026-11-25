@@ -36,6 +36,14 @@ jobs:
         run: |
           set -o pipefail
           cargo test -p proxima-engine -- --nocapture 2>&1 | tee tenant-evidence.log
+      - name: Install PostgreSQL client for PgBouncer integration test
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+      - name: Run PgBouncer transaction-pooling cleanup test
+        run: |
+          set -o pipefail
+          bash scripts/test-pgbouncer-pooling.sh 2>&1 | tee -a tenant-evidence.log
       - name: Publish test evidence
         if: always()
         uses: actions/upload-artifact@v4
