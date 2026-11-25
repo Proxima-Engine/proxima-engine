@@ -32,7 +32,7 @@ cargo build --release -p proxima-engine --bin proxima-mysql-gateway
 
 ## 3. Start a disposable MySQL server
 
-For a disposable local server matching the repository's current CI target, start MySQL 8.0 in Docker:
+Start a disposable MySQL service in Docker:
 
 ~~~bash
 docker run -d --name proxima-mysql \
@@ -209,13 +209,13 @@ Use a MySQL client that supports the configured authentication plugin. The upstr
 - Concurrent connections are bounded; upstream connection and query operations have deadlines.
 - Non-loopback upstream URLs must require verified TLS with require_ssl=true.
 
-SQL admission supplements database grants; it does not replace them. Keep upstream accounts least-privileged and isolated by tenant. Remote upstream TLS must validate the server certificate.
+Enforce least privilege in both gateway admission and upstream database grants. Keep upstream accounts isolated by tenant and validate the server certificate for remote TLS.
 
 ## 10. Integration verification
 
-The MySQL-specific ignored integration test is crates/proxima-engine/tests/mysql_gateway_integration.rs. CI provisions mysql:8.0 on port 3306.
+The MySQL-specific ignored integration test is crates/proxima-engine/tests/mysql_gateway_integration.rs. CI provisions mysql:8 on port 3306.
 
-The CI runner provisions a disposable MySQL 8.0 service, creates two tenant databases and restricted upstream accounts, generates client verifiers, starts the gateway and runs the MySQL integration suite.
+The CI runner provisions a disposable MySQL service, creates two tenant databases and restricted upstream accounts, generates client verifiers, starts the gateway and runs the MySQL integration suite.
 
 The tests verify correct authentication, rejection of incorrect caching SHA-2 credentials, tenant-local reads, denial of cross-tenant reads and writes, denial of database switching, persistent session binding after denied operations, and prepared SELECT/INSERT statements.
 
@@ -286,4 +286,4 @@ Inspect its logs:
 docker compose -f compose.customer.yaml logs --tail 100 mysql-gateway
 ~~~
 
-The MySQL gateway is a separate runtime from the PostgreSQL Engine service. It does not share the PostgreSQL listener or automatically inherit PostgreSQL tenant configuration. The identity registry and upstream account grants must be configured for the MySQL or MariaDB target. Cloud onboarding uses the shared database lifecycle: register the MySQL target, assign an enrolled Engine node, create a tenant binding with its matching gateway identity, then deploy and verify the assigned runtime configuration.
+The MySQL gateway runs as its own provider runtime with a MySQL identity registry and upstream account grants. Cloud onboarding uses the shared database lifecycle: register the target, assign an enrolled Engine node, create a tenant binding, then verify the applied runtime configuration.
