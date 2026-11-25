@@ -43,3 +43,18 @@ The script verifies distinct IAM principals, own-partition writes/reads, cross-t
 Rust tests validate exact resource scoping, tenant-key binding, malformed and wildcard ARN rejection, and omission of broad actions. DynamoDB Local does not enforce AWS IAM identity policies; local CRUD is not proof of tenant isolation. Security acceptance must run in a dedicated AWS test account with two real tenant roles and verify own-partition success plus cross-tenant GetItem, Query, PutItem and Scan denial. CI must not report this AWS authorization test as passed unless it actually ran with isolated AWS credentials.
 
 References: AWS documentation on [DynamoDB IAM condition keys](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/specifying-conditions.html) and [DynamoDB access control](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/access-control-iam.html).
+
+## Clone, build and verify
+
+Clone the Engine repository and enter its root:
+
+```bash
+git clone https://github.com/Proxima-Engine/proxima-engine.git
+cd proxima-engine
+cargo build --release -p proxima-engine
+bash scripts/test-dynamodb-leading-keys-aws.sh
+```
+
+## Cloud assignment
+
+In **Agata Proxima Cloud → Dashboard → Databases**, register the existing Amazon DynamoDB service, enroll an Engine node, assign the target to that node, create the tenant binding and deploy the configuration. The Engine activates the Amazon DynamoDB runtime and reports the applied revision and tenant evidence to the workspace.
