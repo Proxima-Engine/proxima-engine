@@ -47,11 +47,22 @@ PY
 }
 run_suite() {
  registry "$2"
- PROXIMA_MYSQL_IDENTITY_REGISTRY=/tmp/proxima-mysql-registry.json PROXIMA_MYSQL_LISTEN_ADDR=127.0.0.1:3307 target/debug/proxima-mysql-gateway >/tmp/proxima-mysql-gateway.log 2>&1 &
+ RUST_LOG=debug PROXIMA_MYSQL_IDENTITY_REGISTRY=/tmp/proxima-mysql-registry.json PROXIMA_MYSQL_LISTEN_ADDR=127.0.0.1:3307 target/debug/proxima-mysql-gateway >/tmp/proxima-mysql-gateway.log 2>&1 &
  GATEWAY_PID=$!
- for _ in $(seq 1 30); do nc -z 127.0.0.1 3307 && break; kill -0 "$GATEWAY_PID" 2>/dev/null || { cat /tmp/proxima-mysql-gateway.log; return 1; }; sleep 1; done
- nc -z 127.0.0.1 3307 || { cat /tmp/proxima-mysql-gateway.log; return 1; }
- cargo test -p proxima-engine --test "$1" -- --ignored --test-threads=1
+ # Wait for the application-level ready message instead of opening a probe TCP
+ # connection. A TCP probe is treated as a real MySQL client and creates a
+ # deliberate early-EOF session immediately before the integration test.
+ for _ in $(seq 1 30); do
+   grep -q "Proxima MySQL gateway listening" /tmp/proxima-mysql-gateway.log && break
+   kill -0 "$GATEWAY_PID" 2>/dev/null || { cat /tmp/proxima-mysql-gateway.log; return 1; }
+   sleep 1
+ done
+ grep -q "Proxima MySQL gateway listening" /tmp/proxima-mysql-gateway.log || { cat /tmp/proxima-mysql-gateway.log; return 1; }
+ if ! cargo test -p proxima-engine --test "$1" -- --ignored --test-threads=1; then
+   echo "MySQL gateway log for failed $1 integration suite:" >&2
+   cat /tmp/proxima-mysql-gateway.log >&2
+   return 1
+ fi
  cleanup
 }
 wait_db 3306 "$MYSQL_ROOT_PASSWORD"
