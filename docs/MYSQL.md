@@ -1,6 +1,6 @@
 # MySQL gateway
 
-This guide configures Proxima's MySQL-compatible protocol gateway against a MySQL upstream server. The gateway uses the MySQL client wire protocol and the dedicated proxima-mysql-gateway executable. The product guide is named MySQL. The repository's current CI compatibility target is MySQL Server 8.0; the version is recorded as a test target, not as the product name.
+This guide configures Proxima's MySQL-compatible protocol gateway against a MySQL upstream. The dedicated proxima-mysql-gateway executable speaks the MySQL client wire protocol, authenticates each client, binds the session to an immutable tenant principal and opens a dedicated upstream connection using that tenant's least-privilege account.
 
 The gateway is a separate executable from the PostgreSQL Engine listener. It authenticates each client, binds the session to one immutable tenant principal, opens a dedicated upstream connection and validates the selected database before accepting the client session.
 
@@ -255,7 +255,7 @@ These tests are ignored by default because they require live database services a
 
 
 
-## CI compatibility target
+
 
 The repository CI workflow currently provisions mysql:8.0. The integration suite validates tenant-local reads, cross-tenant read/write denial, database-switch denial, prepared statements and invalid-password rejection against that service. This is the tested CI target; rerun the suite before claiming compatibility with additional server versions.
 
