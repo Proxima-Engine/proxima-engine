@@ -84,7 +84,7 @@ Keep the database driver your application already uses. Point it at the matching
 2. Open **Dashboard → Databases** and register the existing database target.
 3. Enroll the customer-hosted Engine node and wait for its healthy signed heartbeat.
 4. Assign the target to the node that advertises the matching provider runtime.
-5. Create the tenant/database binding with the provider namespace and identity reference.
+5. Create the tenant/database binding. Cloud generates the provider namespace, identity and tenant credentials, then adds the runtime entry to the encrypted target configuration.
 6. Deploy the desired configuration and inspect the applied revision, gateway health and tenant evidence.
 7. Point the application's existing database driver at the assigned Engine endpoint or provider-native connection path.
 
@@ -123,7 +123,7 @@ The Engine repository includes a local operator CLI for node bootstrap and diagn
 - [Cloud API client and CLI](https://agataproxima.com/developers/downloads)
 - [Integration examples](docs/INTEGRATIONS.md)
 - [Database reference](docs/README.md)
-- [Provider runtime and acceptance reference](docs/PROVIDER_IMPLEMENTATION_STATUS.md)
+- [Provider runtime and acceptance reference](docs/PROVIDER_RUNTIME_REFERENCE.md)
 
 ## License
 
