@@ -38,7 +38,7 @@ Create one upstream ACL user per tenant. Restrict its key pattern to that tenant
 ACL SETUSER proxima_tenant_a on >UPSTREAM_SECRET ~proxima:{TENANT_HASH}:* +get +set +del +exists +mget +mset +incr +expire +ttl +type
 ```
 
-Use the exact namespace prefix generated for the tenant by the gateway. Do not grant administrative commands, `+@all`, keyspace-wide access, scripting or Pub/Sub. Logical database numbers are not an isolation boundary.
+Use the exact namespace prefix generated for the tenant by the gateway. Keep administrative commands, `+@all`, keyspace-wide access, scripting and Pub/Sub outside tenant ACLs. Logical database numbers are not an isolation boundary.
 
 ## 3. Set TLS and gateway configuration
 
