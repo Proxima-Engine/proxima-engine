@@ -29,7 +29,20 @@ export PROXIMA_MYSQL_LISTEN_ADDR=127.0.0.1:3307
 RUST_LOG=info ./target/release/proxima-mysql-gateway
 ```
 
-Connect Tenant A using `mysql --protocol=TCP -h 127.0.0.1 -P 3307 -u tenant_a_app -p tenant_a`, then repeat with Tenant B. Verify tenant-local CRUD, cross-tenant denial and database-switch denial using the acceptance procedure in the full guide.
+In another terminal, confirm the gateway is listening and connect Tenant A:
+
+```bash
+nc -z 127.0.0.1 3307
+mysql --protocol=TCP -h 127.0.0.1 -P 3307 -u tenant_a_app -p tenant_a
+```
+
+Repeat with Tenant B. Run the MariaDB integration suite against the disposable service:
+
+```bash
+cargo test -p proxima-engine --test mariadb_gateway_integration -- --ignored
+```
+
+Verify tenant-local CRUD, cross-tenant denial and database-switch denial.
 
 ## 5. Stop
 

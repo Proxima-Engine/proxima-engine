@@ -29,9 +29,10 @@ export PROXIMA_MYSQL_LISTEN_ADDR=127.0.0.1:3307
 RUST_LOG=info ./target/release/proxima-mysql-gateway
 ```
 
-In another terminal:
+In another terminal, confirm the gateway is listening:
 
 ```bash
+nc -z 127.0.0.1 3307
 mysql --protocol=TCP -h 127.0.0.1 -P 3307 -u tenant_a_app -p tenant_a
 ```
 
@@ -39,6 +40,12 @@ Repeat with Tenant B. Confirm each identity cannot access the other database. Us
 
 ## 5. Verify and stop
 
-Run the MySQL integration suite using the disposable fixtures described in [MySQL gateway guide](MYSQL.md). Remove the local server with `docker rm -f proxima-mysql`.
+Run the two-tenant MySQL gateway acceptance suite:
+
+```bash
+bash scripts/test-mysql-gateways-ci.sh
+```
+
+Remove the local server with `docker rm -f proxima-mysql`.
 
 **Next:** [Complete MySQL guide](MYSQL.md) · [Configuration](CONFIGURATION.md) · [Security](SECURITY.md)
