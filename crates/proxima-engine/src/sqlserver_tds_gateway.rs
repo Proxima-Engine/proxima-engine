@@ -319,7 +319,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncRead for TdsTlsIo<S> {
         }
 
         loop {
-            if this.payload_remaining > 0 { eprintln!("ADAPTER: reading payload, remaining={}", this.payload_remaining);
+            if this.payload_remaining > 0 {
                 let capacity = this.payload_remaining.min(output.remaining()).min(8192);
                 let mut temporary = vec![0u8; capacity];
                 let mut payload = ReadBuf::new(&mut temporary);
@@ -371,7 +371,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncRead for TdsTlsIo<S> {
                     "TLS handshake data must be carried in valid TDS PRELOGIN packets",
                 )));
             }
-            this.payload_remaining = packet_length - 8; eprintln!("ADAPTER: packet length={}, payload remaining={}", packet_length, this.payload_remaining);
+            this.payload_remaining = packet_length - 8;
             if this.payload_remaining == 0 {
                 continue;
             }
@@ -722,10 +722,10 @@ mod tests {
 
         let (writer, mut peer) = duplex(1024);
         let (mut adapter, _mode) = TdsTlsIo::new(writer);
-        adapter.write_all(b"client-tls-record").await.unwrap(); 
-        adapter.flush().await.unwrap(); 
+        adapter.write_all(b"client-tls-record").await.unwrap();
+        adapter.flush().await.unwrap();
         let mut header = [0u8; 8];
-        peer.read_exact(&mut header).await.unwrap(); 
+        peer.read_exact(&mut header).await.unwrap();
         assert_eq!(header[0], TDS_TLS_PACKET);
         assert_eq!(header[1], TDS_EOM);
         assert_eq!(
@@ -733,7 +733,7 @@ mod tests {
             8 + b"client-tls-record".len()
         );
         let mut payload = vec![0u8; b"client-tls-record".len()];
-        peer.read_exact(&mut payload).await.unwrap(); 
+        peer.read_exact(&mut payload).await.unwrap();
         assert_eq!(payload.as_slice(), b"client-tls-record");
 
         let (mut peer, reader) = duplex(1024);
@@ -745,9 +745,9 @@ mod tests {
         packet.extend_from_slice(&((8 + payload.len()) as u16).to_be_bytes());
         packet.extend_from_slice(&[0, 0, 1, 0]);
         packet.extend_from_slice(payload);
-        peer.write_all(&packet).await.unwrap(); 
+        peer.write_all(&packet).await.unwrap();
         let mut received = vec![0u8; payload.len()];
-        adapter.read_exact(&mut received).await.unwrap(); 
+        adapter.read_exact(&mut received).await.unwrap();
         assert_eq!(received.as_slice(), payload);
     }
 
@@ -759,7 +759,7 @@ mod tests {
             .await
             .unwrap();
         let mut header = [0u8; 8];
-        peer.read_exact(&mut header).await.unwrap(); 
+        peer.read_exact(&mut header).await.unwrap();
         assert_eq!(header[0], 0x04);
         assert_eq!(header[1], TDS_EOM);
     }
