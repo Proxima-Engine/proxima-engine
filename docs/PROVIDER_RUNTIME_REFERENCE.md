@@ -5,19 +5,19 @@ Proxima Engine includes a supervised runtime path for every database in the Agat
 ## Provider runtime matrix
 
 | Database | Engine runtime | Tenant security boundary | Quickstart | Run provider acceptance |
-|---|---|---|---|
-| PostgreSQL | Native PostgreSQL wire listener | Signed tenant context, tenant roles and row-level security | `cargo test -p proxima-engine --test postgres_integration -- --ignored` and [PostgreSQL quickstart](QUICKSTART.md) |
-| MySQL | `proxima-mysql-gateway` | Authenticated tenant identity and dedicated upstream account/database | `bash scripts/test-mysql-gateways-ci.sh` [Open quickstart](QUICKSTART-MYSQL.md) |
-| MariaDB | `proxima-mysql-gateway` | Authenticated tenant identity and MariaDB database grants | `cargo test -p proxima-engine --test mariadb_gateway_integration -- --ignored` [Open quickstart](QUICKSTART-MARIADB.md) |
-| CockroachDB | PostgreSQL wire runtime | Signed tenant context, tenant roles and row-level security | `bash scripts/test-cockroachdb-tenant-isolation-ci.sh` [Open quickstart](QUICKSTART-COCKROACHDB.md) |
-| MongoDB | `proxima-mongodb-gateway` | SCRAM principal mapped to one tenant database | `bash scripts/test-mongodb-tenant-isolation-ci.sh` [Open quickstart](QUICKSTART-MONGODB.md) |
-| Redis | `proxima-redis-gateway` | Tenant key namespace and tenant-specific Redis ACL identity | `bash scripts/test-redis-tenant-gateway-ci.sh` [Open quickstart](QUICKSTART-REDIS.md) |
-| Microsoft SQL Server | `proxima-sqlserver-tds-gateway` | TDS 7.4 LOGIN7 principal, assigned database and least-privilege SQL Server login | `bash scripts/test-sqlserver-tenant-isolation-ci.sh` and `powershell -File scripts/test-sqlserver-tds-gateway.ps1` [Open quickstart](QUICKSTART-SQLSERVER.md) |
-| SQLite | Native embedded runtime | Private database file per tenant, canonical path checks and filesystem permissions | `cargo test -p proxima-engine sqlite_tenant` [Open quickstart](QUICKSTART-SQLITE.md) |
-| Oracle Database | Native Oracle runtime | Dedicated schema owner, account lifecycle and least-privilege grants | `bash scripts/test-oracle-tenant-isolation-ci.sh` [Open quickstart](QUICKSTART-ORACLE.md) |
-| Amazon DynamoDB | AWS SDK IAM runtime | Exact table ARN and tenant partition-key condition using `dynamodb:LeadingKeys` | `bash scripts/test-dynamodb-leading-keys-aws.sh` [Open quickstart](QUICKSTART-DYNAMODB.md) |
-| Apache Cassandra | Native Cassandra runtime | Keyspace-per-tenant roles and restricted grants | `bash scripts/test-cassandra-tenant-isolation-ci.sh` [Open quickstart](QUICKSTART-CASSANDRA.md) |
-| Elasticsearch / OpenSearch | Native search runtime | Tenant index namespace, provider roles and tenant credentials | `bash scripts/test-elasticsearch-tenant-isolation.sh` and `bash scripts/test-opensearch-tenant-isolation.sh` [Open quickstart](QUICKSTART-ELASTICSEARCH.md) |
+|---|---|---|---|---|
+| PostgreSQL | Native PostgreSQL wire listener | Signed tenant context, tenant roles and row-level security | [Quickstart](QUICKSTART.md) | `cargo test -p proxima-engine --test postgres_integration -- --ignored` |
+| MySQL | `proxima-mysql-gateway` | Authenticated tenant identity and dedicated upstream account/database | [Quickstart](QUICKSTART-MYSQL.md) | `bash scripts/test-mysql-gateways-ci.sh` |
+| MariaDB | `proxima-mysql-gateway` | Authenticated tenant identity and MariaDB database grants | [Quickstart](QUICKSTART-MARIADB.md) | `cargo test -p proxima-engine --test mariadb_gateway_integration -- --ignored` |
+| CockroachDB | PostgreSQL wire runtime | Signed tenant context, tenant roles and row-level security | [Quickstart](QUICKSTART-COCKROACHDB.md) | `bash scripts/test-cockroachdb-tenant-isolation-ci.sh` |
+| MongoDB | `proxima-mongodb-gateway` | SCRAM principal mapped to one tenant database | [Quickstart](QUICKSTART-MONGODB.md) | `bash scripts/test-mongodb-tenant-isolation-ci.sh` |
+| Redis | `proxima-redis-gateway` | Tenant key namespace and tenant-specific Redis ACL identity | [Quickstart](QUICKSTART-REDIS.md) | `bash scripts/test-redis-tenant-gateway-ci.sh` |
+| Microsoft SQL Server | `proxima-sqlserver-tds-gateway` | TDS 7.4 LOGIN7 principal, assigned database and least-privilege SQL Server login | [Quickstart](QUICKSTART-SQLSERVER.md) | `bash scripts/test-sqlserver-tenant-isolation-ci.sh` and `powershell -File scripts/test-sqlserver-tds-gateway.ps1` |
+| SQLite | Native embedded runtime | Private database file per tenant, canonical path checks and filesystem permissions | [Quickstart](QUICKSTART-SQLITE.md) | `cargo test -p proxima-engine sqlite_tenant` |
+| Oracle Database | Native Oracle runtime | Dedicated schema owner, account lifecycle and least-privilege grants | [Quickstart](QUICKSTART-ORACLE.md) | `bash scripts/test-oracle-tenant-isolation-ci.sh` |
+| Amazon DynamoDB | AWS SDK IAM runtime | Exact table ARN and tenant partition-key condition using `dynamodb:LeadingKeys` | [Quickstart](QUICKSTART-DYNAMODB.md) | `bash scripts/test-dynamodb-leading-keys-aws.sh` |
+| Apache Cassandra | Native Cassandra runtime | Keyspace-per-tenant roles and restricted grants | [Quickstart](QUICKSTART-CASSANDRA.md) | `bash scripts/test-cassandra-tenant-isolation-ci.sh` |
+| Elasticsearch / OpenSearch | Native search runtime | Tenant index namespace, provider roles and tenant credentials | [Quickstart](QUICKSTART-ELASTICSEARCH.md) | `bash scripts/test-elasticsearch-tenant-isolation.sh` and `bash scripts/test-opensearch-tenant-isolation.sh` |
 
 ## Cloud-to-Engine lifecycle
 
