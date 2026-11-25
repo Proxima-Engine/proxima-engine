@@ -63,3 +63,18 @@ The PostgreSQL-wire compatibility path does not imply full PostgreSQL feature pa
 `scripts/test-cockroachdb-tenant-isolation-ci.sh` starts a disposable CockroachDB 25.2 node, creates two least-privilege tenant roles and forced RLS policies, starts Proxima against the CockroachDB SQL endpoint, and verifies tenant A/B reads, cross-tenant read filtering, cross-tenant insert/update rejection, and invalid-token rejection.
 
 This test proves the shared PostgreSQL-wire path against a real CockroachDB service. It is not a substitute for testing production multi-node, multi-region, failover, backup, or contention workloads.
+
+## Clone, build and verify
+
+Clone the Engine repository and enter its root:
+
+```bash
+git clone https://github.com/Proxima-Engine/proxima-engine.git
+cd proxima-engine
+cargo build --release -p proxima-engine --bin proxima-engine
+bash scripts/test-cockroachdb-tenant-isolation-ci.sh
+```
+
+## Cloud assignment
+
+In **Agata Proxima Cloud → Dashboard → Databases**, register the existing CockroachDB service, enroll an Engine node, assign the target to that node, create the tenant binding and deploy the configuration. The Engine activates the CockroachDB runtime and reports the applied revision and tenant evidence to the workspace.
