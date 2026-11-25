@@ -199,7 +199,7 @@ The SQL Server profile is a native SQL Server security pattern, not a Proxima TD
 
 Set MSSQL_SA_PASSWORD to the disposable instance's administrator password. The test creates two dedicated databases and SQL logins, checks tenant-specific CRUD, and verifies that cross-database reads, database switching, schema creation, login impersonation, and invalid credentials are denied. It drops and recreates its named test databases and logins; never run it against production.
 
-The SQL Server profile does not provide Proxima gateway-side authentication, identity routing, shared-database RLS, or policy telemetry. Its tenant boundary is the unique SQL Server login and database assigned by a trusted provisioning process.
+The SQL Server TDS gateway validates the LOGIN7 username and requested database against its tenant assignment registry, then forwards the login over verified upstream TLS. SQL Server authenticates the password and enforces the tenant login's database permissions. This profile uses database-per-tenant isolation; it does not provide shared-database row-level security. The gateway now applies a configurable concurrent-session limit and bounded connection/handshake deadlines. Provider-side authorization and least-privilege provisioning remain mandatory.
 
 
 ## 10. Verify SQLite tenant-file isolation
