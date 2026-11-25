@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/Agata-Proxima/Agata-proxima/main/frontend/src/assets/agata-proxima-orbit.svg" alt="Agata Proxima" width="112" />
+  <img src="https://raw.githubusercontent.com/Proxima-Engine/proxima-engine/main/assets/agata-proxima-orbit.svg" alt="Agata Proxima" width="112" />
 </p>
 
 <h1 align="center">Proxima Engine</h1>
