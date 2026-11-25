@@ -16,6 +16,10 @@
 
 Proxima Engine connects applications to existing database services and enforces provider-aware tenant identity and isolation. It does not replace your database or require you to rewrite your existing application driver. The public Engine repository contains the customer-side data plane; the Agata Proxima management workspace is accessed separately through the platform website.
 
+## Why Agata Proxima?
+
+Applications serving multiple customers need a reliable way to keep each customer's data within its authorized boundary. Agata Proxima provides a dedicated tenant-isolation layer across existing database systems, combining trusted tenant identity, provider-specific access controls, and verification evidence. Teams can strengthen how tenant access is enforced while continuing to use the databases and application drivers they already operate.
+
 ## Supported database systems
 
 | Database | Runtime integration | Tenant boundary |
