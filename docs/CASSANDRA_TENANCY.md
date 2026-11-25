@@ -2,7 +2,7 @@
 
 ## Support model
 
-Proxima uses keyspace-per-tenant isolation with a dedicated Cassandra login role for each tenant. This profile relies on Cassandra's native authentication and authorization; it is not a CQL wire-protocol proxy.
+Proxima uses keyspace-per-tenant isolation with a dedicated Cassandra login role for each tenant. Applications connect through the Cassandra driver using tenant-specific credentials; Cassandra enforces the role and keyspace permissions.
 
 A trusted provisioning identity creates one keyspace and one login role per tenant. The role receives SELECT and MODIFY only on its own keyspace. It receives no AUTHORIZE permission or schema-administration grants. Applications connect with tenant-specific credentials and never receive the provisioning identity.
 
@@ -17,7 +17,7 @@ Example:
     let statements = tenant.provisioning_cql("datacenter1", 3)?;
     // Execute only through a trusted Cassandra provisioning session.
 
-Set the replication factor to the actual replica count in each configured datacenter. RF=1 is appropriate only for disposable single-node development, not a production availability recommendation.
+Set the replication factor to the actual replica count in each configured datacenter. Use RF=1 for a single-node development cluster. Set the production replication factor to the actual replica count in each datacenter.
 
 ## Operational boundary
 
@@ -27,7 +27,7 @@ A keyspace is a logical isolation boundary inside a cluster, not a separate clus
 
 ## Verification
 
-Unit tests cover tenant-specific keyspace and role generation, password escaping, identifier injection rejection and least-privilege grants. The real Cassandra acceptance test provisions two tenant roles, verifies tenant-local CRUD and verifies cross-keyspace reads are denied. It does not certify multi-node replication, production TLS, backup/restore or operational readiness.
+Unit tests cover tenant-specific keyspace and role generation, password escaping, identifier injection rejection and least-privilege grants. The real Cassandra acceptance test provisions two tenant roles, verifies tenant-local CRUD and verifies cross-keyspace reads are denied. For production, run the same acceptance flow against the deployment's multi-node topology and verify TLS, backup/restore and operational procedures.
 
 ## Clone, build and verify
 
