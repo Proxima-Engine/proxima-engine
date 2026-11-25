@@ -106,7 +106,7 @@ The initial admitted data command set is deliberately narrow:
 
 Aggregation pipelines are inspected recursively. Cross-database lookup/union/graph traversal, output stages, JavaScript execution, change streams, server administration, user management, and unknown commands fail closed. Logical session IDs are tenant-bound, bounded, and expire after 30 minutes of inactivity. Transaction start/commit/abort commands are denied because transaction pinning and failover behavior have not passed replica-set acceptance testing. MongoDB's own user/cursor authorization remains required for cursor continuation.
 
-## Current protocol limitations
+## Supported command behavior
 
 This is a restricted wire gateway, not full MongoDB server feature parity. The initial implementation supports OP_MSG only, SCRAM-SHA-256 only, and `admin` as the SCRAM authentication source. OP_QUERY, OP_COMPRESSED, OP_MSG checksums, exhaust streams, speculative authentication, SCRAM-SHA-1, PLAIN, X.509, LDAP, and unsupported commands are not admitted. Compression is intentionally not negotiated.
 
