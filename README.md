@@ -78,6 +78,18 @@ Follow [PostgreSQL quickstart](docs/QUICKSTART.md) for the required services, en
 
 Keep the database driver your application already uses. Point it at the matching Proxima listener or provider endpoint, configure TLS as documented, and provide tenant identity through the trusted server-side integration for that provider.
 
+## Cloud-managed database onboarding
+
+1. Sign in to Agata Proxima Cloud and select the organization and environment.
+2. Open **Dashboard → Databases** and register the existing database target.
+3. Enroll the customer-hosted Engine node and wait for its healthy signed heartbeat.
+4. Assign the target to the node that advertises the matching provider runtime.
+5. Create the tenant/database binding with the provider namespace and identity reference.
+6. Deploy the desired configuration and inspect the applied revision, gateway health and tenant evidence.
+7. Point the application's existing database driver at the assigned Engine endpoint or provider-native connection path.
+
+The Cloud workspace manages provider discovery, target inventory, encrypted credential delivery, assignment, tenant binding and runtime state. The Engine enforces the selected provider's database path in the customer environment.
+
 ## Provider guides
 
 - [PostgreSQL](docs/POSTGRESQL.md) · [Quickstart](docs/QUICKSTART.md)
@@ -111,6 +123,7 @@ The Engine repository includes a local operator CLI for node bootstrap and diagn
 - [Cloud API client and CLI](https://agataproxima.com/developers/downloads)
 - [Integration examples](docs/INTEGRATIONS.md)
 - [Database reference](docs/README.md)
+- [Provider runtime and acceptance reference](docs/PROVIDER_IMPLEMENTATION_STATUS.md)
 
 ## License
 
