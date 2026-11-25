@@ -41,14 +41,14 @@ Use HTTPS for remote control-plane hosts. Loopback HTTP is reserved for local de
 
 ## 2. One-command Docker installation (hosted Cloud)
 
-This is the supported customer path. Docker Engine and Docker Compose v2 are required on Linux. Windows 10/11 hosts use Docker Desktop with its WSL 2 backend and Linux containers. Agata Proxima does not provision, own, or receive the customer's PostgreSQL credentials.
+This is the supported customer path. Docker Engine and Docker Compose v2 are required on Linux. Windows 10/11 hosts use Docker Desktop with its WSL 2 backend and Linux containers. Agata Proxima does not provision, own, or receive the customer's database credentials.
 
 1. Register a node in Agata Proxima Cloud → Nodes. Copy the Windows PowerShell setup or Linux shell setup shown with the one-time enrollment token.
 2. Download the public Proxima Engine source ZIP and extract it on the customer host.
 3. Open a terminal in the extracted repository folder, paste the matching setup commands into that same terminal session, and run the installer:
    - Windows: `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` followed by `./install-customer.ps1`
    - Linux: `chmod +x ./install-customer.sh` followed by `./install-customer.sh`
-4. When prompted, enter the PostgreSQL upstream host and port reachable from inside the Engine container. The installer writes the node's `.env` file and the one-time enrollment token file automatically.
+4. For the PostgreSQL reference profile, enter the upstream host and port when prompted. For other providers, supply the provider-specific runtime configuration and secret values described in that provider's quickstart. The installer writes the node's `.env` file and the one-time enrollment token file automatically.
 5. Confirm the installer reports a healthy Engine container, then confirm the node reports healthy in Agata Proxima Fleet after its signed heartbeat.
 
 The customer Compose file mounts only the one-time enrollment token as a read-only secret. During the HTTPS enrollment exchange, the Control Plane returns the generated node heartbeat key and a separate organization-scoped tenant-token verification key. The Engine validates both and stores them in the protected node identity file. The Control Plane master signing secret is never sent to customer nodes. The identity file is persisted in a named Docker volume; on Unix, it is created with owner-only permissions. No customer has to download or manually copy a tenant signing key.

@@ -179,7 +179,7 @@ The installer creates `.env` and `secrets/node_enrollment_token` from the copied
 **Prerequisites**
 
 - Docker Engine and Docker Compose v2.
-- Network access from the Engine container to the PostgreSQL upstream and Agata Proxima HTTPS enrollment/heartbeat endpoints.
+- Network access from the Engine container to the selected database provider and Agata Proxima HTTPS enrollment/heartbeat endpoints.
 
 **Install**
 
@@ -190,7 +190,7 @@ chmod +x ./install-customer.sh
 ./install-customer.sh
 ```
 
-The Bash installer creates `.env` and the one-time enrollment token file, prompts for the PostgreSQL upstream when needed, validates Compose, builds and starts the Engine, and waits for the Docker health check.
+The Bash installer creates `.env` and the one-time enrollment token file, applies the selected provider profile (prompting for PostgreSQL host and port only for the PostgreSQL reference profile), validates Compose, builds and starts the Engine, and waits for the Docker health check.
 
 ### After installation
 
