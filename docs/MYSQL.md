@@ -260,7 +260,7 @@ These tests are ignored by default because they require live database services a
 The repository CI workflow currently provisions mysql:8.0. The integration suite validates tenant-local reads, cross-tenant read/write denial, database-switch denial, prepared statements and invalid-password rejection against that service. This is the tested CI target; rerun the suite before claiming compatibility with additional server versions.
 
 
-## 10. Run the gateway from the customer container image
+## Customer container deployment
 
 The customer image includes the PostgreSQL Engine, MySQL-compatible gateway, and MongoDB gateway executables. The default Compose profile starts only the PostgreSQL Engine. Enable the optional `mysql` profile when deploying a MySQL or MariaDB target.
 
@@ -286,4 +286,4 @@ Inspect its logs:
 docker compose -f compose.customer.yaml logs --tail 100 mysql-gateway
 ~~~
 
-The MySQL gateway is a separate runtime from the PostgreSQL Engine service. It does not share the PostgreSQL listener or automatically inherit PostgreSQL tenant configuration. The identity registry and upstream account grants must be configured for the MySQL or MariaDB target. Cloud enrollment and remote configuration delivery for this gateway are separate Control Plane integration work.
+The MySQL gateway is a separate runtime from the PostgreSQL Engine service. It does not share the PostgreSQL listener or automatically inherit PostgreSQL tenant configuration. The identity registry and upstream account grants must be configured for the MySQL or MariaDB target. Cloud onboarding uses the shared database lifecycle: register the MySQL target, assign an enrolled Engine node, create a tenant binding with its matching gateway identity, then deploy and verify the assigned runtime configuration.

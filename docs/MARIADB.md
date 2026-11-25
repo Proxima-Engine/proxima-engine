@@ -258,3 +258,13 @@ This integration test is ignored by default because it requires a live MariaDB s
 
 
 The repository CI workflow currently provisions mariadb:11.4. The dedicated integration suite validates tenant-local reads, cross-tenant read/write denial, database-switch denial, prepared statements and invalid-password rejection against that service. This is the tested CI target; rerun the suite before claiming compatibility with additional server versions.
+
+
+## Cloud assignment
+
+1. Register the MariaDB endpoint in **Cloud → Databases**.
+2. Assign an enrolled Engine node with the MariaDB gateway runtime.
+3. Create the tenant binding with the same namespace and identity reference used in the gateway runtime configuration.
+4. Deploy the desired configuration and review the runtime acknowledgement and verification evidence.
+
+The Cloud workspace tracks the target, assignment, tenant binding, configuration revision and runtime state together.
