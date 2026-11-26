@@ -8,12 +8,12 @@ This reference executor connects Agata Proxima's signed deployment event to a cu
 2. Verifies the exact raw-body HMAC-SHA256 signature and five-minute timestamp window.
 3. Rejects events for a different node or a release version outside the customer's explicit allowlist.
 4. Sends the applying callback with a stable executor and execution ID.
-5. Pulls the requested versioned Engine image and applies the requested state using fixed Docker Compose arguments. For `running`, it starts the Engine; for `stopped`, it stops and recreates the container without starting it, so the applied version matches the image configured for the next start. It never executes command text from a webhook.
-6. Checks the real container state. A running Engine must pass its local /healthz endpoint, and a stopped Engine must not appear among running services.
+5. Pulls the requested versioned Engine image and applies the requested state using fixed Docker Compose arguments. For `running`, it starts the Engine and returns its HAProxy server to `ready` after health checks; for `draining`, it moves the exact HAProxy server to `drain` and waits for active sessions to reach zero; for `stopped`, it drains first and then stops/recreates the container without starting it. It never executes command text from a webhook.
+6. Checks the real container state and reports healthy only after the requested state is verified. A drain timeout leaves the Engine running and excluded from new traffic; it does not force-terminate active sessions.
 7. Sends healthy only after the check passes. If a running rollout fails and a prior known-good release is recorded, it restores that release and reports rolled_back.
 8. Persists completed deployment IDs locally. It can recover from a lost local completion marker by inspecting the authoritative Control Plane deployment result before retrying side effects.
 
-The draining state is intentionally rejected because a safe drain operation requires an application-specific connection-drain controller. Do not select that state unless you have configured and tested such a controller.
+Graceful draining and stopping require a stable HAProxy backend/server mapping and access to the HAProxy admin Unix socket. If that configuration is missing or the drain deadline expires, the executor fails safely and does not stop the Engine.
 
 ## Prerequisites
 
@@ -26,7 +26,7 @@ The draining state is intentionally rejected because a safe drain operation requ
 
 The Engine image is published by the tagged-release workflow. For a tag such as v0.1.0, the workflow publishes both 0.1.0 and v0.1.0 plus latest. Make the ghcr.io/proxima-engine/proxima-engine package public before asking unauthenticated customer hosts to pull it; otherwise configure Docker registry authentication on the customer host.
 
-One executor webhook is configured per organization. The reference executor can manage multiple registered Engine nodes when their Compose projects are on the same Docker host: configure a target map file and give each node its own project directory, Compose file, state directory and approved version list. For nodes on separate Docker hosts or clusters, use a customer-owned orchestrator/custom executor; this reference implementation does not manage remote Docker contexts.
+One executor webhook is configured per organization. The reference executor can manage multiple registered Engine nodes when their Compose projects are on the same Docker host: configure a target map file and give each node its own project directory, Compose file, state directory, approved version list and stable HAProxy server mapping. For nodes on separate Docker hosts or clusters, use a customer-owned orchestrator/custom executor; this reference implementation does not manage remote Docker contexts.
 
 Copy [the multi-node target map template](../deployment-executor/targets.example.json) and replace its example UUIDs, paths and release allowlists with the customer's actual values. Each node must use a separate project directory so its Compose project name and persistent node identity volume remain isolated. Example target map (save as targets.json):
 
@@ -36,18 +36,24 @@ Copy [the multi-node target map template](../deployment-executor/targets.example
     "project_dir": "/opt/proxima/node-a",
     "compose_file": "compose.customer.yaml",
     "state_dir": "/var/lib/agata-deployment-executor/node-a",
-    "allowed_versions": ["0.1.0", "0.1.1"]
+    "allowed_versions": ["0.1.0", "0.1.1"],
+    "haproxy_admin_socket": "/run/haproxy/admin.sock",
+    "haproxy_backend": "proxima_engine_nodes",
+    "haproxy_server_name": "engine-node-01"
   },
   "00000000-0000-4000-8000-000000000002": {
     "project_dir": "/opt/proxima/node-b",
     "compose_file": "compose.customer.yaml",
     "state_dir": "/var/lib/agata-deployment-executor/node-b",
-    "allowed_versions": ["0.1.0"]
+    "allowed_versions": ["0.1.0"],
+    "haproxy_admin_socket": "/run/haproxy/admin.sock",
+    "haproxy_backend": "proxima_engine_nodes",
+    "haproxy_server_name": "engine-node-02"
   }
 }
 ```
 
-Set PROXIMA_DEPLOYMENT_TARGETS_FILE to this file in the executor environment. Each project directory must contain its own Compose file and .env configuration. If this variable is not set, the executor supports the simpler single-node PROXIMA_NODE_ID and PROXIMA_ENGINE_ALLOWLIST settings.
+Set PROXIMA_DEPLOYMENT_TARGETS_FILE to this file in the executor environment. Each project directory must contain its own Compose file and .env configuration. Mount the HAProxy admin socket into the executor with restrictive permissions; it can change ingress routing. The HAProxy backend must use stable server names that match each target's `haproxy_server_name`. If this variable is not set, the executor supports the simpler single-node PROXIMA_NODE_ID and PROXIMA_ENGINE_ALLOWLIST settings.
 
 
 ## Install the Engine (customer node)
@@ -86,6 +92,11 @@ AGATA_WEBHOOK_SIGNING_SECRET=<one-time-webhook-signing-secret>
 PROXIMA_NODE_ID=<registered-node-uuid>
 PROXIMA_DEPLOYMENT_EXECUTOR_ID=customer-prod-engine-01
 PROXIMA_ENGINE_ALLOWLIST=0.1.0,0.1.1
+PROXIMA_HAPROXY_ADMIN_SOCKET=/run/haproxy/admin.sock
+PROXIMA_HAPROXY_BACKEND=proxima_engine_nodes
+PROXIMA_HAPROXY_SERVER_NAME=engine-node-01
+PROXIMA_DRAIN_TIMEOUT_MS=300000
+PROXIMA_DRAIN_POLL_MS=1000
 # For a same-host multi-node fleet, replace the two single-node settings above with:
 # PROXIMA_DEPLOYMENT_TARGETS_FILE=/etc/agata/targets.json
 PROXIMA_DEPLOYMENT_PROJECT_DIR=/opt/proxima
