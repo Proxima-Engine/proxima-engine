@@ -17,4 +17,4 @@ services:
 networks:
   proxima-engine:
     external: true
-    name: ${PROXIMA_ENGINE_NETWORK:-proxima-engine}
+    name: ${PROXIMA_ENGINE_NETWORK:-proxima-engine-network}
