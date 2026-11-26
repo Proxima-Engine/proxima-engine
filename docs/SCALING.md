@@ -38,6 +38,14 @@ Do not raise `default_pool_size` in proportion to tenant count. With tenant-spec
 
 PgBouncer's `max_client_conn` is per process. Its file-descriptor demand can exceed that value because server sockets are additional. Raise container/OS file-descriptor limits deliberately and verify them from inside the running container. A 50,000-client setting is not evidence that the host can sustain 50,000 live sockets. The optional `.env.scale.example` selects `pgbouncer.scale.ini`; copy it to `.env` only when intentionally running the high-concurrency profile. The Compose profile raises the container nofile limit to 200,000, but Docker Desktop host limits and available memory/CPU still apply. The high-concurrency profile is not the default laptop profile.
 
+To run that profile with Docker Compose, pass the example file explicitly so Compose selects both the 50,000-session Engine setting and `pgbouncer.scale.ini`:
+
+```bash
+docker compose --env-file .env.scale.example -f compose.dev.yaml up --build -d
+```
+
+This starts the existing single-node development topology. It does not create 50,000 tenant records, create multiple Engine nodes, or prove the host can hold 50,000 sockets. Use a separate tenant generator and the HAProxy/fleet topology for those tests.
+
 ## Fleet topology and node identity
 
 Each Engine process must have its own enrolled node identity, persistent identity file, state volume, signing credential and health lifecycle. Never clone a running node's identity file or share one enrollment token between nodes. Enroll each node independently.
