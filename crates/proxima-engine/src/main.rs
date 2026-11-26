@@ -2810,6 +2810,19 @@ mod tenant_database_binding_validation_tests {
     use super::validate_tenant_bindings;
 
     #[test]
+    fn accepts_more_than_ten_thousand_tenant_bindings() {
+        let bindings = (0..10_001)
+            .map(|index| serde_json::json!({
+                "tenant_id": format!("tenant-{index}"),
+                "namespace": format!("tenant_{index}"),
+                "status": "active"
+            }))
+            .collect::<Vec<_>>();
+        let record = serde_json::json!({"tenant_bindings": bindings});
+        assert!(validate_tenant_bindings(&record).is_ok());
+    }
+
+    #[test]
     fn accepts_distinct_tenant_namespaces() {
         let record = serde_json::json!({"tenant_bindings":[
             {"tenant_id":"tenant-a","namespace":"tenant_a","status":"active"},
