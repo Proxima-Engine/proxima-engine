@@ -52,9 +52,23 @@ For multiple nodes:
 
 Cloud node enrollment, signed heartbeats, capability reporting and desired/applied configuration reconciliation manage fleet state. They do not themselves constitute a TCP data-plane load balancer. The customer's L4 ingress or orchestrator must perform connection routing and draining. Do not infer traffic distribution from a node showing healthy in Cloud.
 
+## Provider-specific listener budgets
+
+The Engine exposes separate per-process session caps for its native protocol gateways:
+
+| Provider listener | Environment variable | Current default |
+|---|---|---:|
+| PostgreSQL wire | `PROXIMA_MAX_CONNECTIONS` | 4,096 |
+| MySQL | `PROXIMA_MYSQL_MAX_CONNECTIONS` | 128 |
+| MongoDB | `PROXIMA_MONGODB_MAX_CONNECTIONS` | 256 |
+| Redis RESP2 | `PROXIMA_REDIS_MAX_CONNECTIONS` | 128 |
+| SQL Server TDS | `PROXIMA_SQLSERVER_TDS_MAX_CONNECTIONS` | 128 |
+
+These are per-process session admission limits, not tenant caps or a shared fleet budget. The MySQL, MongoDB, Redis and SQL Server gateway paths are protocol proxies; do not assume they multiplex many client sessions onto a smaller upstream pool. For those paths, each accepted session may consume an upstream connection. Configure the cap against the real provider's connection budget and verify observed upstream session counts. The 50,000-client environment example sets these provider caps to 50,000 for deliberate stress work; it is not a recommended production setting for a database that cannot sustain that many server sessions.
+
 ## Other database providers
 
-PgBouncer applies only to PostgreSQL. MySQL/MariaDB, MongoDB, Redis, SQL Server, Oracle, Cassandra, CockroachDB, DynamoDB, SQLite and Elasticsearch/OpenSearch require their own provider-aware pool, session, identity and quota controls. Apply the same fleet principles, but size and validate each provider runtime separately. Do not claim one PostgreSQL pool setting governs the universal database platform.
+PgBouncer applies only to PostgreSQL. MySQL/MariaDB, MongoDB, Redis, SQL Server, Oracle, Cassandra, CockroachDB, DynamoDB, SQLite and Elasticsearch/OpenSearch require their own provider-aware pool, session, identity and quota controls. The PostgreSQL HAProxy template is at `deploy/haproxy/engine-tcp.cfg`; its deployment contract is documented in `deploy/haproxy/README.md`. Apply the same fleet principles, but size and validate each provider runtime separately. Do not claim one PostgreSQL pool setting governs the universal database platform.
 
 ## Capacity measurement checklist
 
