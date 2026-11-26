@@ -319,11 +319,14 @@ async function executeDeployment(event, deliveryId) {
       evidence: baseEvidence,
     });
 
+    const currentAppliedVersion = state.last_known_good_version || remote.applied_version || "";
     const rejection = !target.allowedVersions.has(version)
       ? "Requested Engine version is not in this node target allowlist."
       : !["running", "stopped", "draining"].includes(desiredState)
         ? "The requested Engine state is not supported by this executor."
-        : null;
+        : desiredState === "draining" && currentAppliedVersion !== version
+          ? "A drain request must use the currently applied Engine version; draining does not roll out a new release."
+          : null;
     if (rejection) {
       await reportResult(deploymentId, {
         status: "failed",
