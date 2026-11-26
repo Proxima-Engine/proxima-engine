@@ -128,6 +128,7 @@ The Cloud workspace manages provider discovery, target inventory, encrypted cred
 ## Configuration and deployment
 
 - [Configuration reference](docs/CONFIGURATION.md)
+- [Capacity and horizontal scaling](docs/SCALING.md)
 - [Customer deployment](docs/DEPLOYMENT.md)
 - [Windows and Linux node installers](docs/NODE_ENROLLMENT.md)
 - [Kubernetes gateway deployment](deploy/kubernetes/helm/proxima-gateways/README.md)
