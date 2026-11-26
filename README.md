@@ -48,13 +48,9 @@ The integrations retain each provider's protocol and authorization model. Use th
 - **Provider security** — protocol-aware gateways for networked database protocols and native authorization integrations for embedded, cloud-native and service-native providers.
 - **Verification and operations** — provider-specific test suites, runtime health, Prometheus metrics and signed acknowledgement/evidence workflows.
 
-## Engineering demonstration
+## PostgreSQL demonstration
 
-The current recorded demonstration covers the PostgreSQL reference implementation, including tenant-bound sessions, PgBouncer transaction pooling, isolation checks and Engine recovery. It is the PostgreSQL demonstration; provider-specific videos for the other supported databases can be added as they are produced.
-
-[Watch the PostgreSQL and PgBouncer demonstration](https://github.com/user-attachments/assets/bca488eb-829c-4672-bbe9-b25878e5401c)
-
-See the [engineering case study](docs/ENGINEERING_CASE_STUDY.md) for the recorded test scenarios and results.
+[Watch the PostgreSQL demonstration](https://github.com/user-attachments/assets/bca488eb-829c-4672-bbe9-b25878e5401c)
 
 ## Quickstart
 
