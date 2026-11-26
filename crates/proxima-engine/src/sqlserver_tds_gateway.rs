@@ -141,8 +141,8 @@ fn parse_max_connections(value: Option<&str>) -> io::Result<usize> {
         .unwrap_or("128")
         .parse::<usize>()
         .map_err(invalid)?;
-    if max_connections == 0 || max_connections > 65_536 {
-        return Err(invalid("PROXIMA_SQLSERVER_TDS_MAX_CONNECTIONS must be between 1 and 65536"));
+    if max_connections == 0 {
+        return Err(invalid("PROXIMA_SQLSERVER_TDS_MAX_CONNECTIONS must be greater than zero"));
     }
     Ok(max_connections)
 }
@@ -676,7 +676,7 @@ mod tests {
     fn sqlserver_connection_limit_defaults_and_rejects_unsafe_values() {
         assert_eq!(parse_max_connections(None).unwrap(), DEFAULT_MAX_CONNECTIONS);
         assert!(parse_max_connections(Some("0")).is_err());
-        assert!(parse_max_connections(Some("65537")).is_err());
+        assert_eq!(parse_max_connections(Some("100000")).unwrap(), 100000);
         assert!(parse_max_connections(Some("not-a-number")).is_err());
         assert_eq!(parse_max_connections(Some("64")).unwrap(), 64);
     }
