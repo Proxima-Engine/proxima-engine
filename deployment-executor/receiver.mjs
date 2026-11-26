@@ -142,7 +142,7 @@ function haproxyCommand(target, command) {
       reject(new Error("Timed out communicating with the HAProxy admin socket."));
     }, 5000);
     socket.on("connect", () => {
-      socket.write(`${command}\\n`);
+      socket.write(`${command}\n`);
       socket.end();
     });
     socket.on("data", (chunk) => { output += chunk.toString("utf8"); });
@@ -185,17 +185,17 @@ async function setHaproxyServerState(target, state) {
     target,
     `set server ${target.haproxyBackend}/${target.haproxyServerName} state ${state}`,
   );
-  if (!/\\bDone\\.\\b/i.test(response)) {
+  if (!/\bDone\./i.test(response)) {
     throw new Error(`HAProxy did not confirm the ${state} transition: ${response.slice(0, 500)}`);
   }
 }
 
 async function readHaproxyCurrentSessions(target) {
   const output = await haproxyCommand(target, "show stat");
-  const lines = output.split(/\\r?\\n/).filter(Boolean);
+  const lines = output.split(/\r?\n/).filter(Boolean);
   const headerLine = lines.find((line) => line.startsWith("# pxname,"));
   if (!headerLine) throw new Error("HAProxy stats output did not contain a CSV header.");
-  const headers = parseCsvLine(headerLine.replace(/^#\\s*/, ""));
+  const headers = parseCsvLine(headerLine.replace(/^#\s*/, ""));
   const backendIndex = headers.indexOf("pxname");
   const serverIndex = headers.indexOf("svname");
   const sessionsIndex = headers.indexOf("scur");
