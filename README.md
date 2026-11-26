@@ -48,8 +48,6 @@ The integrations retain each provider's protocol and authorization model. Use th
 - **Provider security** — protocol-aware gateways for networked database protocols and native authorization integrations for embedded, cloud-native and service-native providers.
 - **Verification and operations** — provider-specific test suites, runtime health, Prometheus metrics and signed acknowledgement/evidence workflows.
 
-For production capacity planning, per-process connection budgets, PgBouncer sizing and multi-node TCP ingress, see [Scaling and capacity](docs/SCALING.md), [HAProxy fleet ingress](deploy/haproxy/README.md) and the [customer deployment executor](docs/CUSTOMER_DEPLOYMENT_EXECUTOR.md).
-
 ## PostgreSQL demonstration
 
 [Watch the PostgreSQL demonstration](https://github.com/user-attachments/assets/bca488eb-829c-4672-bbe9-b25878e5401c)
@@ -128,7 +126,6 @@ The Cloud workspace manages provider discovery, target inventory, encrypted cred
 ## Configuration and deployment
 
 - [Configuration reference](docs/CONFIGURATION.md)
-- [Capacity and horizontal scaling](docs/SCALING.md)
 - [Customer deployment](docs/DEPLOYMENT.md)
 - [Windows and Linux node installers](docs/NODE_ENROLLMENT.md)
 - [Kubernetes gateway deployment](deploy/kubernetes/helm/proxima-gateways/README.md)
