@@ -14,13 +14,17 @@ Do not confuse these separate quantities:
 
 A 50,000-tenant test does not imply 50,000 simultaneous sessions. Record each quantity independently. A 50,000-session test must explicitly hold 50,000 live client sessions at the Engine ingress.
 
+## Hardware and test environment
+
+Hardware means the compute and network resources running the Engine nodes and database services: CPU, memory, storage, network throughput, file descriptors and operating-system limits. A developer laptop is suitable for building the Engine, running local provider tests and measuring workloads that fit its resources. Large fleet and billion-record capacity exercises require appropriately sized database and Engine infrastructure, plus load generators capable of producing the target workload. Record Engine-host and database-host resources separately.
+
 ## Per-process admission and capacity
 
 `PROXIMA_MAX_CONNECTIONS` is a per-Engine-process admission limit, not a tenant limit and not a fleet-wide limit. The default PostgreSQL listener admission limit is 4,096. Set it explicitly for each deployment after measuring CPU, memory, file descriptors, network capacity, TLS cost, provider runtime cost and expected session lifetime.
 
 The PostgreSQL wire listener currently uses fail-fast admission when all connection permits are occupied: excess connections are rejected and counted rather than accumulating in an unbounded in-process queue. This protects the process from unbounded socket/task growth. Clients should use bounded retry with jitter and an application deadline; do not retry in a tight loop.
 
-For a target of 50,000 simultaneous client sessions, a 4,096-session node budget requires at least 13 nodes for raw arithmetic capacity (12 nodes provide only 49,152). Use additional node headroom so the fleet can still carry the target after a node is drained or lost. This is a planning example, not a performance claim: actual per-node capacity must be benchmarked on the customer's hardware.
+For 50,000 simultaneous client sessions, a 4,096-session node budget requires at least 13 nodes before resilience headroom. Add nodes for maintenance, rolling upgrades and node loss. Validate the per-node budget with the intended workload and deployment hardware.
 
 ## PostgreSQL pooling and tenant-role cardinality
 
@@ -44,7 +48,7 @@ To run that profile with Docker Compose, pass the example file explicitly so Com
 docker compose --env-file .env.scale.example -f compose.dev.yaml up --build -d
 ```
 
-This starts the existing single-node development topology. It does not create 50,000 tenant records, create multiple Engine nodes, or prove the host can hold 50,000 sockets. Use a separate tenant generator and the HAProxy/fleet topology for those tests.
+This starts the existing single-node development topology. Use the tenant generator and HAProxy/fleet topology to create tenant records and distribute live sessions across independently enrolled nodes.
 
 ## Fleet topology and node identity
 
@@ -72,7 +76,7 @@ The Engine exposes separate per-process session caps for its native protocol gat
 | Redis RESP2 | `PROXIMA_REDIS_MAX_CONNECTIONS` | 128 |
 | SQL Server TDS | `PROXIMA_SQLSERVER_TDS_MAX_CONNECTIONS` | 128 |
 
-These are per-process session admission limits, not tenant caps or a shared fleet budget. The MongoDB gateway's in-memory session registry is separately bounded by `PROXIMA_MONGODB_MAX_SESSION_BINDINGS`; by default it scales to 16 times `PROXIMA_MONGODB_MAX_CONNECTIONS`, and the 50,000-session profile sets it to 800,000. Size this against expected long-lived MongoDB sessions and host memory. The MySQL, MongoDB, Redis and SQL Server gateway paths are protocol proxies; do not assume they multiplex many client sessions onto a smaller upstream pool. For those paths, each accepted session may consume an upstream connection. Configure the cap against the real provider's connection budget and verify observed upstream session counts. The 50,000-client environment example sets these provider caps to 50,000 for deliberate stress work; it is not a recommended production setting for a database that cannot sustain that many server sessions.
+These are per-process session admission limits, not tenant caps or a shared fleet budget. The MongoDB gateway's in-memory session registry is separately bounded by `PROXIMA_MONGODB_MAX_SESSION_BINDINGS`; by default it scales to 16 times `PROXIMA_MONGODB_MAX_CONNECTIONS`, and the 50,000-session profile sets it to 800,000. Size this against expected long-lived MongoDB sessions and host memory. The MySQL, MongoDB, Redis and SQL Server gateway paths are protocol proxies; do not assume they multiplex many client sessions onto a smaller upstream pool. For those paths, each accepted session may consume an upstream connection. Configure the cap against the real provider's connection budget and verify observed upstream session counts. The 50,000-client environment example sets these provider caps to 50,000 for deliberate stress work. Set production values from the upstream database's connection budget.
 
 ## Other database providers
 
@@ -90,4 +94,4 @@ Record, at minimum:
 - node health transitions, drain duration, recovery time and traffic redistribution;
 - tenant-isolation denials and any unexpected cross-tenant result.
 
-Do not publish a capacity number until the exact workload, hardware, software versions, topology, run duration, warm-up, failure conditions and raw measurements are recorded. A passing 50,000-tenant catalogue test and a passing 50,000-concurrent-session test are different claims.
+Publish each capacity result with its workload, Engine-host CPU and memory, database-host resources, software versions, topology, run duration, warm-up, failure conditions and raw measurements. Report tenant catalogue size and simultaneous client sessions as separate measurements.
