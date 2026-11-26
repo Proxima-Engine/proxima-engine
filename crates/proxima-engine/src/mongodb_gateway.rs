@@ -154,6 +154,7 @@ struct MongoGatewayConfig {
     upstream_tls_server_name: Option<String>,
     upstream_tls_ca_file: Option<String>,
     max_connections: usize,
+    max_session_bindings: usize,
 }
 
 impl MongoGatewayConfig {
@@ -181,6 +182,19 @@ impl MongoGatewayConfig {
                 "PROXIMA_MONGODB_MAX_CONNECTIONS must be greater than zero",
             ));
         }
+        let max_session_bindings = env_optional("PROXIMA_MONGODB_MAX_SESSION_BINDINGS")
+            .unwrap_or_else(|| max_connections.saturating_mul(16).to_string())
+            .parse::<usize>()
+            .map_err(|error| io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("invalid PROXIMA_MONGODB_MAX_SESSION_BINDINGS: {error}"),
+            ))?;
+        if max_session_bindings == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "PROXIMA_MONGODB_MAX_SESSION_BINDINGS must be greater than zero",
+            ));
+        }
         Ok(Self {
             listen_addr,
             upstream_addr,
@@ -188,6 +202,7 @@ impl MongoGatewayConfig {
             upstream_tls_server_name,
             upstream_tls_ca_file,
             max_connections,
+            max_session_bindings,
         })
     }
 }
@@ -209,10 +224,11 @@ pub async fn run_mongodb_gateway() -> io::Result<()> {
     };
     let listener = TcpListener::bind(&config.listen_addr).await?;
     let permits = Arc::new(Semaphore::new(config.max_connections));
-    let sessions = Arc::new(MongoSessionRegistry::default());
+    let sessions = Arc::new(MongoSessionRegistry::with_max_sessions(config.max_session_bindings));
 
     info!(listen = %config.listen_addr, upstream = %config.upstream_addr,
         principals = registry.principal_count(), max_connections = config.max_connections,
+        max_session_bindings = config.max_session_bindings,
         upstream_tls = config.upstream_tls, "Proxima MongoDB wire gateway listening");
 
     loop {
