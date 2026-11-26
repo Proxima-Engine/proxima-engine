@@ -220,6 +220,8 @@ async function drainHaproxyServer(target) {
   let activeSessions = await readHaproxyCurrentSessions(target);
   while (activeSessions > 0 && Date.now() - startedAt < drainTimeoutMs) {
     await sleep(drainPollMs);
+    // Reassert drain in case the HAProxy process was reloaded while waiting.
+    await setHaproxyServerState(target, "drain");
     activeSessions = await readHaproxyCurrentSessions(target);
   }
   if (activeSessions > 0) {
@@ -352,11 +354,15 @@ async function executeDeployment(event, deliveryId) {
     try {
       if (desiredState === "draining") {
         const drainEvidence = await drainHaproxyServer(target);
+        docker(target, ["stop", "engine"], version);
+        const runningServices = docker(target, ["ps", "--status", "running", "--services"], version)
+          .split(/\r?\n/).filter(Boolean);
+        if (runningServices.includes("engine")) throw new Error("Engine container is still running after the graceful drain.");
         await reportResult(deploymentId, {
           status: "healthy",
-          observed_state: "draining",
+          observed_state: "stopped",
           version,
-          evidence: { ...baseEvidence, health_check: true, check: "haproxy-drain", drain: drainEvidence },
+          evidence: { ...baseEvidence, health_check: true, check: "haproxy-drain-and-container-stopped", drain: drainEvidence },
         });
         await saveState(stateFile, {
           ...state,
@@ -365,7 +371,7 @@ async function executeDeployment(event, deliveryId) {
             [deploymentId]: { version, desired_state: "draining", status: "healthy", completed_at: new Date().toISOString() },
           },
         });
-        return { accepted: true, draining: true, active_sessions: 0 };
+        return { accepted: true, draining: true, stopped: true, active_sessions: 0 };
       }
 
       docker(target, ["pull", "engine"], version);
