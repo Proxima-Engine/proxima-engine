@@ -619,9 +619,6 @@ fn validate_tenant_bindings(record: &serde_json::Value) -> Result<(), &'static s
         .get("tenant_bindings")
         .and_then(serde_json::Value::as_array)
         .ok_or("tenant database bindings are missing or invalid")?;
-    if bindings.len() > 10_000 {
-        return Err("tenant database binding count exceeds the supported limit");
-    }
     let mut tenant_ids = std::collections::HashSet::new();
     let mut namespaces = std::collections::HashSet::new();
     for binding in bindings {
