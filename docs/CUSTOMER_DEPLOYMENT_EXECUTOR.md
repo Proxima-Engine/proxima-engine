@@ -39,7 +39,8 @@ Copy [the multi-node target map template](../deployment-executor/targets.example
     "allowed_versions": ["0.1.0", "0.1.1"],
     "haproxy_admin_socket": "/run/haproxy/admin.sock",
     "haproxy_backend": "proxima_engine_nodes",
-    "haproxy_server_name": "engine-node-01"
+    "haproxy_server_name": "engine-node-01",
+    "haproxy_server_state_file": "/var/lib/haproxy/server-state"
   },
   "00000000-0000-4000-8000-000000000002": {
     "project_dir": "/opt/proxima/node-b",
@@ -48,7 +49,8 @@ Copy [the multi-node target map template](../deployment-executor/targets.example
     "allowed_versions": ["0.1.0"],
     "haproxy_admin_socket": "/run/haproxy/admin.sock",
     "haproxy_backend": "proxima_engine_nodes",
-    "haproxy_server_name": "engine-node-02"
+    "haproxy_server_name": "engine-node-02",
+    "haproxy_server_state_file": "/var/lib/haproxy/server-state"
   }
 }
 ```
@@ -95,6 +97,7 @@ PROXIMA_ENGINE_ALLOWLIST=0.1.0,0.1.1
 PROXIMA_HAPROXY_ADMIN_SOCKET=/run/haproxy/admin.sock
 PROXIMA_HAPROXY_BACKEND=proxima_engine_nodes
 PROXIMA_HAPROXY_SERVER_NAME=engine-node-01
+PROXIMA_HAPROXY_SERVER_STATE_FILE=/var/lib/haproxy/server-state
 PROXIMA_DRAIN_TIMEOUT_MS=300000
 PROXIMA_DRAIN_POLL_MS=1000
 # For a same-host multi-node fleet, replace the two single-node settings above with:
