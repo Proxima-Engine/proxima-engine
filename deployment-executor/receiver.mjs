@@ -191,12 +191,12 @@ function parseCsvLine(line) {
 async function persistHaproxyServerState(target) {
   const persist = async () => {
     const state = await haproxyCommand(target, "show servers state");
-    if (!state.startsWith("1\\n") || !state.includes(target.haproxyServerName)) {
+    if (!state.startsWith("1\n") || !state.includes(target.haproxyServerName)) {
       throw new Error("HAProxy server-state snapshot is missing its version header or target server.");
     }
     await mkdir(path.dirname(target.haproxyServerStateFile), { recursive: true, mode: 0o700 });
     const temporary = `${target.haproxyServerStateFile}.tmp`;
-    await writeFile(temporary, `${state}\\n`, { mode: 0o600 });
+    await writeFile(temporary, `${state}\n`, { mode: 0o600 });
     await rename(temporary, target.haproxyServerStateFile);
   };
   haproxyStateWriteQueue = haproxyStateWriteQueue.then(persist, persist);
