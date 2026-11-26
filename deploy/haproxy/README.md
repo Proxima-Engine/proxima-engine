@@ -10,7 +10,7 @@ This is a Layer-4 TCP ingress template for PostgreSQL-wire Engine nodes. It dist
 - Configure the Engine's upstream target and tenant-signing material consistently through the customer's secret-management and deployment system.
 - Keep backend server names stable and unique. Map each Cloud node ID to its corresponding HAProxy server name in the customer deployment executor's `targets.json`.
 - The `/healthz` check verifies Engine health, but it is not a complete provider-readiness check. The orchestrator must separately evaluate provider connectivity and capability before adding a node to service.
-- The reference deployment executor can drain a node when its target has `haproxy_admin_socket`, `haproxy_backend` and `haproxy_server_name` configured. It moves that exact server to `drain`, waits for its current-session count to reach zero, and leaves the Engine running in the drained state. A timeout keeps the node drained and does not stop the Engine.
+- The reference deployment executor can drain a node when its target has `haproxy_admin_socket`, `haproxy_backend` and `haproxy_server_name` configured. It moves that exact server to `drain`, waits for its current-session count to reach zero, then stops the Engine. A timeout keeps the node drained and leaves the Engine running.
 - To return a healthy node to service, the executor's `running` action passes the Engine health check and changes its HAProxy server state back to `ready`.
 - Set host/container file-descriptor and HAProxy `maxconn` limits from measured capacity. The sample `maxconn 100000` is a configurable ingress ceiling, not a performance claim.
 
