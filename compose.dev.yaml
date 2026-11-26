@@ -24,11 +24,11 @@ services:
       - "127.0.0.1:16432:6432"
     volumes:
       - ./${PROXIMA_PGBOUNCER_CONFIG:-pgbouncer.ini}:/etc/pgbouncer/pgbouncer.ini:ro
+      - ./pgbouncer-userlist.txt:/etc/pgbouncer/userlist.txt:ro
     ulimits:
       nofile:
         soft: 200000
         hard: 200000
-      - ./pgbouncer-userlist.txt:/etc/pgbouncer/userlist.txt:ro
     depends_on:
       postgres:
         condition: service_healthy
