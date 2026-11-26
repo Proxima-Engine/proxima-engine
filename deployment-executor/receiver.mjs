@@ -23,6 +23,7 @@ const executorId = process.env.PROXIMA_DEPLOYMENT_EXECUTOR_ID;
 const port = Number(process.env.PORT || 8789);
 const maxBody = 1024 * 1024;
 const inFlight = new Set();
+let haproxyStateWriteQueue = Promise.resolve();
 const defaultStateDir = path.resolve(process.env.PROXIMA_DEPLOYMENT_STATE_DIR || path.join(process.cwd(), ".agata-deployments"));
 const targets = new Map();
 
@@ -41,12 +42,16 @@ if (process.env.PROXIMA_DEPLOYMENT_TARGETS_FILE?.trim()) {
     const haproxyAdminSocket = value.haproxy_admin_socket ? path.resolve(projectDir, String(value.haproxy_admin_socket)) : null;
     const haproxyBackend = String(value.haproxy_backend || "proxima_engine_nodes");
     const haproxyServerName = String(value.haproxy_server_name || "");
+    const haproxyServerStateFile = value.haproxy_server_state_file
+      ? path.resolve(projectDir, String(value.haproxy_server_state_file))
+      : null;
     if (Boolean(haproxyAdminSocket) !== Boolean(haproxyServerName)
+      || Boolean(haproxyAdminSocket) !== Boolean(haproxyServerStateFile)
       || !/^[A-Za-z0-9_.-]+$/.test(haproxyBackend)
       || (haproxyServerName && !/^[A-Za-z0-9_.-]+$/.test(haproxyServerName))) {
-      throw new Error(`Target ${nodeId} must configure a valid HAProxy admin socket and server name together.`);
+      throw new Error(`Target ${nodeId} must configure a valid HAProxy admin socket, server name and persistent server-state file together.`);
     }
-    targets.set(nodeId, { projectDir, composeFile: composePath, stateDir, stateFile: path.join(stateDir, "completed.json"), allowedVersions, haproxyAdminSocket, haproxyBackend, haproxyServerName });
+    targets.set(nodeId, { projectDir, composeFile: composePath, stateDir, stateFile: path.join(stateDir, "completed.json"), allowedVersions, haproxyAdminSocket, haproxyBackend, haproxyServerName, haproxyServerStateFile });
   }
 } else {
   const nodeId = process.env.PROXIMA_NODE_ID;
@@ -64,12 +69,16 @@ if (process.env.PROXIMA_DEPLOYMENT_TARGETS_FILE?.trim()) {
     : null;
   const haproxyBackend = process.env.PROXIMA_HAPROXY_BACKEND?.trim() || "proxima_engine_nodes";
   const haproxyServerName = process.env.PROXIMA_HAPROXY_SERVER_NAME?.trim() || "";
+  const haproxyServerStateFile = process.env.PROXIMA_HAPROXY_SERVER_STATE_FILE?.trim()
+    ? path.resolve(process.env.PROXIMA_HAPROXY_SERVER_STATE_FILE.trim())
+    : null;
   if (Boolean(haproxyAdminSocket) !== Boolean(haproxyServerName)
+    || Boolean(haproxyAdminSocket) !== Boolean(haproxyServerStateFile)
     || !/^[A-Za-z0-9_.-]+$/.test(haproxyBackend)
     || (haproxyServerName && !/^[A-Za-z0-9_.-]+$/.test(haproxyServerName))) {
-    throw new Error("Configure PROXIMA_HAPROXY_ADMIN_SOCKET and PROXIMA_HAPROXY_SERVER_NAME together with valid names.");
+    throw new Error("Configure PROXIMA_HAPROXY_ADMIN_SOCKET, PROXIMA_HAPROXY_SERVER_NAME and PROXIMA_HAPROXY_SERVER_STATE_FILE together with valid names.");
   }
-  targets.set(nodeId, { projectDir, composeFile, stateDir, stateFile: path.join(stateDir, "completed.json"), allowedVersions, haproxyAdminSocket, haproxyBackend, haproxyServerName });
+  targets.set(nodeId, { projectDir, composeFile, stateDir, stateFile: path.join(stateDir, "completed.json"), allowedVersions, haproxyAdminSocket, haproxyBackend, haproxyServerName, haproxyServerStateFile });
 }
 if (targets.size === 0) throw new Error("At least one deployment target must be configured.");
 const drainTimeoutMs = Number(process.env.PROXIMA_DRAIN_TIMEOUT_MS || 300000);
@@ -179,6 +188,21 @@ function parseCsvLine(line) {
   return fields;
 }
 
+async function persistHaproxyServerState(target) {
+  const persist = async () => {
+    const state = await haproxyCommand(target, "show servers state");
+    if (!state.startsWith("1\\n") || !state.includes(target.haproxyServerName)) {
+      throw new Error("HAProxy server-state snapshot is missing its version header or target server.");
+    }
+    await mkdir(path.dirname(target.haproxyServerStateFile), { recursive: true, mode: 0o700 });
+    const temporary = `${target.haproxyServerStateFile}.tmp`;
+    await writeFile(temporary, `${state}\\n`, { mode: 0o600 });
+    await rename(temporary, target.haproxyServerStateFile);
+  };
+  haproxyStateWriteQueue = haproxyStateWriteQueue.then(persist, persist);
+  return haproxyStateWriteQueue;
+}
+
 async function setHaproxyServerState(target, state) {
   if (!["ready", "drain"].includes(state)) throw new Error("Unsupported HAProxy server state.");
   const response = await haproxyCommand(
@@ -188,6 +212,7 @@ async function setHaproxyServerState(target, state) {
   if (!/\bDone\./i.test(response)) {
     throw new Error(`HAProxy did not confirm the ${state} transition: ${response.slice(0, 500)}`);
   }
+  await persistHaproxyServerState(target);
 }
 
 async function readHaproxyCurrentSessions(target) {
@@ -354,15 +379,11 @@ async function executeDeployment(event, deliveryId) {
     try {
       if (desiredState === "draining") {
         const drainEvidence = await drainHaproxyServer(target);
-        docker(target, ["stop", "engine"], version);
-        const runningServices = docker(target, ["ps", "--status", "running", "--services"], version)
-          .split(/\r?\n/).filter(Boolean);
-        if (runningServices.includes("engine")) throw new Error("Engine container is still running after the graceful drain.");
         await reportResult(deploymentId, {
           status: "healthy",
-          observed_state: "stopped",
+          observed_state: "draining",
           version,
-          evidence: { ...baseEvidence, health_check: true, check: "haproxy-drain-and-container-stopped", drain: drainEvidence },
+          evidence: { ...baseEvidence, health_check: true, check: "haproxy-drain", drain: drainEvidence },
         });
         await saveState(stateFile, {
           ...state,
@@ -371,7 +392,7 @@ async function executeDeployment(event, deliveryId) {
             [deploymentId]: { version, desired_state: "draining", status: "healthy", completed_at: new Date().toISOString() },
           },
         });
-        return { accepted: true, draining: true, stopped: true, active_sessions: 0 };
+        return { accepted: true, draining: true, active_sessions: 0 };
       }
 
       docker(target, ["pull", "engine"], version);
