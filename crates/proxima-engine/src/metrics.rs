@@ -313,6 +313,16 @@ pub async fn serve_listener(listener: TcpListener) -> io::Result<()> {
 mod tests {
     use super::*;
     #[test]
+    fn readiness_fails_closed_until_configuration_reconciles() {
+        let metrics = EngineMetrics::default();
+        assert!(metrics.config_ready());
+        metrics.set_config_ready(false);
+        assert!(!metrics.config_ready());
+        metrics.set_config_ready(true);
+        assert!(metrics.config_ready());
+    }
+
+    #[test]
     fn metrics_exposition_is_prometheus_compatible_and_tracks_sessions() {
         let metrics = EngineMetrics::default();
         metrics.connection_accepted();
