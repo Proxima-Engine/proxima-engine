@@ -23,7 +23,11 @@ services:
     ports:
       - "127.0.0.1:16432:6432"
     volumes:
-      - ./pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro
+      - ./${PROXIMA_PGBOUNCER_CONFIG:-pgbouncer.ini}:/etc/pgbouncer/pgbouncer.ini:ro
+    ulimits:
+      nofile:
+        soft: 200000
+        hard: 200000
       - ./pgbouncer-userlist.txt:/etc/pgbouncer/userlist.txt:ro
     depends_on:
       postgres:
@@ -44,6 +48,10 @@ services:
       PROXIMA_DASHBOARD_ENABLED: "true"
       PROXIMA_DASHBOARD_LISTEN_ADDR: 0.0.0.0:9080
       PROXIMA_METRICS_LISTEN_ADDR: 0.0.0.0:9090
+    ulimits:
+      nofile:
+        soft: 200000
+        hard: 200000
     ports:
       - "127.0.0.1:6432:6432"
       - "127.0.0.1:9080:9080"
