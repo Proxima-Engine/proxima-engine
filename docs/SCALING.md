@@ -16,9 +16,9 @@ A 50,000-tenant test does not imply 50,000 simultaneous sessions. Record each qu
 
 ## Per-process admission and capacity
 
-`PROXIMA_MAX_CONNECTIONS` is a per-Engine-process admission limit, not a tenant limit and not a fleet-wide limit. The default is 4,096. Set it explicitly for each deployment after measuring CPU, memory, file descriptors, network capacity, TLS cost, provider runtime cost and expected session lifetime.
+`PROXIMA_MAX_CONNECTIONS` is a per-Engine-process admission limit, not a tenant limit and not a fleet-wide limit. The default PostgreSQL listener admission limit is 4,096. Set it explicitly for each deployment after measuring CPU, memory, file descriptors, network capacity, TLS cost, provider runtime cost and expected session lifetime.
 
-The Engine currently uses fail-fast admission when all connection permits are occupied: excess connections are rejected and counted rather than accumulating in an unbounded in-process queue. This protects the process from unbounded socket/task growth. Clients should use bounded retry with jitter and an application deadline; do not retry in a tight loop.
+The PostgreSQL wire listener currently uses fail-fast admission when all connection permits are occupied: excess connections are rejected and counted rather than accumulating in an unbounded in-process queue. This protects the process from unbounded socket/task growth. Clients should use bounded retry with jitter and an application deadline; do not retry in a tight loop.
 
 For a target of 50,000 simultaneous client sessions, a 4,096-session node budget requires at least 13 nodes for raw arithmetic capacity (12 nodes provide only 49,152). Use additional node headroom so the fleet can still carry the target after a node is drained or lost. This is a planning example, not a performance claim: actual per-node capacity must be benchmarked on the customer's hardware.
 
@@ -26,7 +26,7 @@ For a target of 50,000 simultaneous client sessions, a 4,096-session node budget
 
 The development PgBouncer profile uses transaction pooling and separate tenant-role pool identities. Its per-user pool size must stay small because the number of possible user/database pools grows with tenant count.
 
-The development configuration now:
+The default local development configuration now:
 - accepts up to 4,096 client sockets per PgBouncer process;
 - limits each configured PgBouncer database alias to 64 upstream server connections;
 - limits one tenant user to four upstream server connections;
@@ -36,7 +36,7 @@ The database-wide limit is scoped to a PgBouncer database alias, not to an arbit
 
 Do not raise `default_pool_size` in proportion to tenant count. With tenant-specific PostgreSQL roles, a pool size of two across tens of thousands of active tenant identities can still create a very large theoretical server-connection demand. Keep the per-alias cap authoritative and observe `SHOW POOLS`, `SHOW DATABASES`, `SHOW USERS`, waiting clients, active/idle server connections and query wait time.
 
-PgBouncer's `max_client_conn` is per process. Its file-descriptor demand can exceed that value because server sockets are additional. Raise container/OS file-descriptor limits deliberately and verify them from inside the running container. A 50,000-client setting is not evidence that the host can sustain 50,000 live sockets.
+PgBouncer's `max_client_conn` is per process. Its file-descriptor demand can exceed that value because server sockets are additional. Raise container/OS file-descriptor limits deliberately and verify them from inside the running container. A 50,000-client setting is not evidence that the host can sustain 50,000 live sockets. The optional `.env.scale.example` selects `pgbouncer.scale.ini`; copy it to `.env` only when intentionally running the high-concurrency profile. The Compose profile raises the container nofile limit to 200,000, but Docker Desktop host limits and available memory/CPU still apply. The high-concurrency profile is not the default laptop profile.
 
 ## Fleet topology and node identity
 
