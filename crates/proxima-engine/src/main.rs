@@ -636,7 +636,7 @@ fn validate_tenant_bindings(record: &serde_json::Value) -> Result<(), &'static s
             .get("status")
             .and_then(serde_json::Value::as_str)
             .ok_or("tenant binding has no lifecycle status")?;
-        let allowed_status = matches!(status, "pending" | "provisioning" | "active");
+        let allowed_status = matches!(status, "pending" | "provisioning" | "active" | "revoked");
         if !allowed_status {
             return Err("tenant binding lifecycle status is not deployable");
         }
@@ -2808,6 +2808,18 @@ fn breaker_config_enabled() -> bool {
 #[cfg(test)]
 mod tenant_database_binding_validation_tests {
     use super::validate_tenant_bindings;
+
+    #[test]
+    fn accepts_revoked_tenant_binding_lifecycle_status() {
+        let record = serde_json::json!({
+            "tenant_bindings": [{
+                "tenant_id": "tenant-revoked",
+                "namespace": "tenant_revoked",
+                "status": "revoked"
+            }]
+        });
+        assert!(validate_tenant_bindings(&record).is_ok());
+    }
 
     #[test]
     fn accepts_more_than_ten_thousand_tenant_bindings() {
