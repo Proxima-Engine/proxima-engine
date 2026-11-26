@@ -1,0 +1,16 @@
+services:
+  engine:
+    environment:
+      # Expose health/metrics only on the private container network so HAProxy
+      # can check /healthz. Do not publish port 9090 to the host or internet.
+      PROXIMA_METRICS_LISTEN_ADDR: 0.0.0.0:9090
+    networks:
+      default: {}
+      proxima-ingress:
+        aliases:
+          - ${PROXIMA_HAPROXY_SERVER_NAME:?Set a unique stable PROXIMA_HAPROXY_SERVER_NAME per node}
+
+networks:
+  proxima-ingress:
+    external: true
+    name: ${PROXIMA_ENGINE_NETWORK:-proxima-engine-network}
