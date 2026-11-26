@@ -1,6 +1,6 @@
 # HAProxy TCP ingress for Proxima Engine
 
-This is a Layer-4 TCP ingress template for PostgreSQL-wire Engine nodes. It distributes new TCP sessions across stable, node-specific DNS names using least-connections. The backend listener uses TCP port 6432; health checks issue an HTTP request to each node's `/healthz` endpoint on port 9090. Add one backend server line for each enrolled Engine node; there is no hard-coded node count in the product.
+This is a Layer-4 TCP ingress template for PostgreSQL-wire Engine nodes. It distributes new TCP sessions across stable, node-specific DNS names using least-connections. The backend listener uses TCP port 6432; health checks issue an HTTP request to each node's `/readyz` endpoint on port 9090. Add one backend server line for each enrolled Engine node; there is no hard-coded node count in the product.
 
 ## Deployment contract
 
@@ -12,7 +12,7 @@ This is a Layer-4 TCP ingress template for PostgreSQL-wire Engine nodes. It dist
 - Give every Engine replica its own node ID, one-time enrollment token, persistent identity file and state volume. Never share node identity or identity storage between replicas.
 - Configure the Engine's upstream target and tenant-signing material consistently through the customer's secret-management and deployment system.
 - Keep backend server names stable and unique. Map each Cloud node ID to its corresponding HAProxy server name in the customer deployment executor's `targets.json`. Create both host directories before starting HAProxy (for example `sudo install -d -m 0770 /run/haproxy /var/lib/haproxy`) and bind-mount them into HAProxy and the executor. The executor uses `/run/haproxy/admin.sock` and `/var/lib/haproxy/server-state`. Restrict socket ownership and group membership to the deployment executor and HAProxy operator.
-- The `/healthz` check verifies Engine health, but it is not a complete provider-readiness check. The orchestrator must separately evaluate provider connectivity and capability before adding a node to service.
+- The `/readyz` check verifies Engine health, but it is not a complete provider-readiness check. The orchestrator must separately evaluate provider connectivity and capability before adding a node to service.
 - The reference deployment executor can drain a node when its target has `haproxy_admin_socket`, `haproxy_backend`, `haproxy_server_name` and `haproxy_server_state_file` configured. It moves that exact server to `drain`, persists the HAProxy server state across reloads, and waits for its current-session count to reach zero. The Engine remains running and continues its signed Cloud heartbeat while excluded from new traffic. A timeout keeps the node drained and leaves the Engine running.
 - To return a healthy node to service, the executor's `running` action passes the Engine health check and changes its HAProxy server state back to `ready`, then persists that state.
 - Set host/container file-descriptor and HAProxy `maxconn` limits from measured capacity. The sample `maxconn 100000` is a configurable ingress ceiling, not a performance claim.
