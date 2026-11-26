@@ -619,9 +619,6 @@ fn validate_tenant_bindings(record: &serde_json::Value) -> Result<(), &'static s
         .get("tenant_bindings")
         .and_then(serde_json::Value::as_array)
         .ok_or("tenant database bindings are missing or invalid")?;
-    if bindings.len() > 10_000 {
-        return Err("tenant database binding count exceeds the supported limit");
-    }
     let mut tenant_ids = std::collections::HashSet::new();
     let mut namespaces = std::collections::HashSet::new();
     for binding in bindings {
@@ -639,7 +636,7 @@ fn validate_tenant_bindings(record: &serde_json::Value) -> Result<(), &'static s
             .get("status")
             .and_then(serde_json::Value::as_str)
             .ok_or("tenant binding has no lifecycle status")?;
-        let allowed_status = matches!(status, "pending" | "provisioning" | "active");
+        let allowed_status = matches!(status, "pending" | "provisioning" | "active" | "revoked");
         if !allowed_status {
             return Err("tenant binding lifecycle status is not deployable");
         }
@@ -1400,6 +1397,7 @@ async fn pull_and_stage_database_config_once(
         verifier.set_allowed_tenants(Some(assigned_tenants));
     }
 
+    let mut all_assignments_ready = true;
     for record in records {
         let assignment_id = record
             .get("assignment_id")
@@ -1434,6 +1432,9 @@ async fn pull_and_stage_database_config_once(
             ),
             _ => ("staged", false, None),
         };
+        if status != "applied" {
+            all_assignments_ready = false;
+        }
         let endpoint = gateway_endpoints.get(assignment_id);
         let runtime_endpoint = endpoint.map(|(host, _)| host.as_str());
         let runtime_port = endpoint.map(|(_, port)| *port);
@@ -1483,6 +1484,9 @@ async fn pull_and_stage_database_config_once(
                     .strip_suffix("/api/v1/nodes/heartbeat")
                     .ok_or("node heartbeat URL is not canonical")?;
                 for evidence in evidence_items {
+                    if !matches!(evidence.status.as_str(), "active" | "revoked") {
+                        all_assignments_ready = false;
+                    }
                     let active = evidence.status == "active";
                     let details = serde_json::json!({
                         "provider_key":evidence.provider_key,
@@ -1509,13 +1513,15 @@ async fn pull_and_stage_database_config_once(
                     )
                     .await
                     {
+                        all_assignments_ready = false;
                         tracing::error!(provider=%evidence.provider_key, binding_id=%evidence.binding_id, %error, "tenant provider evidence delivery failed; Cloud binding remains pending for retry");
                     }
                 }
             }
         }
     }
-    info!(assignments=records.len(),path=%output_path.display(),"authenticated database configuration reconciled on node");
+    metrics::global().set_config_ready(all_assignments_ready);
+    info!(assignments=records.len(),config_ready=all_assignments_ready,path=%output_path.display(),"authenticated database configuration reconciled on node");
     Ok(())
 }
 
@@ -1889,6 +1895,7 @@ async fn wait_for_kubernetes_gateway_status(
 }
 
 fn spawn_node_database_config_worker(verifier: Option<TenantTokenVerifier>) {
+    metrics::global().set_config_ready(false);
     tokio::spawn(async move {
         // Keep supervisors alive for the worker lifetime. Recreating them on every
         // poll would lose Child handles and repeatedly spawn gateways on occupied ports.
@@ -1912,6 +1919,7 @@ fn spawn_node_database_config_worker(verifier: Option<TenantTokenVerifier>) {
             {
                 Ok(()) => {}
                 Err(error) => {
+                    metrics::global().set_config_ready(false);
                     tracing::warn!(%error,"database configuration pull/stage cycle failed; current gateway configuration is unchanged")
                 }
             }
@@ -2800,6 +2808,31 @@ fn breaker_config_enabled() -> bool {
 #[cfg(test)]
 mod tenant_database_binding_validation_tests {
     use super::validate_tenant_bindings;
+
+    #[test]
+    fn accepts_revoked_tenant_binding_lifecycle_status() {
+        let record = serde_json::json!({
+            "tenant_bindings": [{
+                "tenant_id": "tenant-revoked",
+                "namespace": "tenant_revoked",
+                "status": "revoked"
+            }]
+        });
+        assert!(validate_tenant_bindings(&record).is_ok());
+    }
+
+    #[test]
+    fn accepts_more_than_ten_thousand_tenant_bindings() {
+        let bindings = (0..10_001)
+            .map(|index| serde_json::json!({
+                "tenant_id": format!("tenant-{index}"),
+                "namespace": format!("tenant_{index}"),
+                "status": "active"
+            }))
+            .collect::<Vec<_>>();
+        let record = serde_json::json!({"tenant_bindings": bindings});
+        assert!(validate_tenant_bindings(&record).is_ok());
+    }
 
     #[test]
     fn accepts_distinct_tenant_namespaces() {

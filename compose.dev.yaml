@@ -23,8 +23,12 @@ services:
     ports:
       - "127.0.0.1:16432:6432"
     volumes:
-      - ./pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro
+      - ./${PROXIMA_PGBOUNCER_CONFIG:-pgbouncer.ini}:/etc/pgbouncer/pgbouncer.ini:ro
       - ./pgbouncer-userlist.txt:/etc/pgbouncer/userlist.txt:ro
+    ulimits:
+      nofile:
+        soft: 200000
+        hard: 200000
     depends_on:
       postgres:
         condition: service_healthy
@@ -40,10 +44,18 @@ services:
       PROXIMA_LISTEN_ADDR: 0.0.0.0:6432
       PROXIMA_UPSTREAM_ADDR: pgbouncer:6432
       PROXIMA_TENANT_SIGNING_KEY: ${PROXIMA_TENANT_SIGNING_KEY:-}
-      PROXIMA_MAX_CONNECTIONS: ${PROXIMA_MAX_CONNECTIONS:-128}
+      PROXIMA_MAX_CONNECTIONS: ${PROXIMA_MAX_CONNECTIONS:-4096}
+      PROXIMA_MYSQL_MAX_CONNECTIONS: ${PROXIMA_MYSQL_MAX_CONNECTIONS:-128}
+      PROXIMA_MONGODB_MAX_CONNECTIONS: ${PROXIMA_MONGODB_MAX_CONNECTIONS:-256}
+      PROXIMA_REDIS_MAX_CONNECTIONS: ${PROXIMA_REDIS_MAX_CONNECTIONS:-128}
+      PROXIMA_SQLSERVER_TDS_MAX_CONNECTIONS: ${PROXIMA_SQLSERVER_TDS_MAX_CONNECTIONS:-128}
       PROXIMA_DASHBOARD_ENABLED: "true"
       PROXIMA_DASHBOARD_LISTEN_ADDR: 0.0.0.0:9080
       PROXIMA_METRICS_LISTEN_ADDR: 0.0.0.0:9090
+    ulimits:
+      nofile:
+        soft: 200000
+        hard: 200000
     ports:
       - "127.0.0.1:6432:6432"
       - "127.0.0.1:9080:9080"

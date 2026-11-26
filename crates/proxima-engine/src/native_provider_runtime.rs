@@ -339,12 +339,6 @@ impl NativeProviderRuntime {
             .get("tenant_bindings")
             .and_then(Value::as_array)
             .ok_or_else(|| invalid("native provider tenant_bindings are missing"))?;
-        if bindings.len() > 10_000 || users.len() > 10_000 {
-            return Err(
-                invalid("native provider binding count exceeds the supported limit").into(),
-            );
-        }
-
         let mut binding_by_tenant = HashMap::new();
         for binding in bindings {
             let tenant_id = required(binding, "tenant_id")?.to_owned();

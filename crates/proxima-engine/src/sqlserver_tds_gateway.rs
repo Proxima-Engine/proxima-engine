@@ -103,10 +103,8 @@ impl SqlServerTdsConfig {
                 "SQL Server upstream host and TLS server name are required",
             ));
         }
-        if self.tenants.is_empty() || self.tenants.len() > 10_000 {
-            return Err(invalid(
-                "SQL Server tenant registry must contain 1..=10000 bindings",
-            ));
+        if self.tenants.is_empty() {
+            return Err(invalid("SQL Server tenant registry must contain at least one binding"));
         }
         let mut users = std::collections::HashSet::new();
         let mut databases = std::collections::HashSet::new();
@@ -143,8 +141,8 @@ fn parse_max_connections(value: Option<&str>) -> io::Result<usize> {
         .unwrap_or("128")
         .parse::<usize>()
         .map_err(invalid)?;
-    if max_connections == 0 || max_connections > 65_536 {
-        return Err(invalid("PROXIMA_SQLSERVER_TDS_MAX_CONNECTIONS must be between 1 and 65536"));
+    if max_connections == 0 {
+        return Err(invalid("PROXIMA_SQLSERVER_TDS_MAX_CONNECTIONS must be greater than zero"));
     }
     Ok(max_connections)
 }
@@ -678,7 +676,7 @@ mod tests {
     fn sqlserver_connection_limit_defaults_and_rejects_unsafe_values() {
         assert_eq!(parse_max_connections(None).unwrap(), DEFAULT_MAX_CONNECTIONS);
         assert!(parse_max_connections(Some("0")).is_err());
-        assert!(parse_max_connections(Some("65537")).is_err());
+        assert_eq!(parse_max_connections(Some("100000")).unwrap(), 100000);
         assert!(parse_max_connections(Some("not-a-number")).is_err());
         assert_eq!(parse_max_connections(Some("64")).unwrap(), 64);
     }
@@ -709,6 +707,31 @@ mod tests {
         assert_eq!(user, "agata_acme_app");
         assert_eq!(db, "AGATA_ACME");
     }
+    #[test]
+    fn sqlserver_registry_accepts_more_than_ten_thousand_tenants() {
+        let tenants = (0..10_001)
+            .map(|index| TdsTenantBinding {
+                tenant_id: format!("tenant-{index}"),
+                username: format!("agata_tenant_{index}"),
+                database: format!("AGATA_{index}"),
+            })
+            .collect();
+        let config = SqlServerTdsConfig {
+            schema_version: 1,
+            provider_key: "sqlserver".into(),
+            listen_addr: "127.0.0.1:14330".into(),
+            upstream_host: "db.example".into(),
+            upstream_port: 1433,
+            upstream_server_name: "db.example".into(),
+            upstream_ca_pem: "ca".into(),
+            client_cert_pem: "cert".into(),
+            client_key_pem: "key".into(),
+            allow_non_loopback: false,
+            tenants,
+        };
+        assert!(config.validate().is_ok());
+    }
+
     #[test]
     fn rejects_duplicate_or_unsafe_principals() {
         let mut c = SqlServerTdsConfig {

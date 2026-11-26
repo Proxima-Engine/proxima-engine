@@ -126,7 +126,7 @@ impl Config {
         }
 
         let max_connections = env::var("PROXIMA_MAX_CONNECTIONS")
-            .unwrap_or_else(|_| "1024".to_string())
+            .unwrap_or_else(|_| "4096".to_string())
             .parse::<usize>()
             .map_err(|error| {
                 io::Error::new(
@@ -286,7 +286,7 @@ mod tests {
         assert_eq!(config.tenant_signing_key_previous, None);
         assert_eq!(config.tenant_role_prefix, "proxima_tenant_");
         assert_eq!(config.upstream_connect_timeout, Duration::from_secs(10));
-        assert_eq!(config.max_connections, 1024);
+        assert_eq!(config.max_connections, 4096);
         assert_eq!(config.tls_cert_file, None);
         assert!(!config.require_client_tls);
         assert_eq!(config.upstream_tls_mode, UpstreamTlsMode::Disable);

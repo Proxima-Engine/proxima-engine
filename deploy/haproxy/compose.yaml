@@ -1,0 +1,21 @@
+services:
+  proxima-ingress:
+    image: haproxy:3.2-alpine
+    restart: unless-stopped
+    ports:
+      - "${PROXIMA_INGRESS_BIND:-127.0.0.1}:6432:6432"
+    volumes:
+      - ./engine-tcp.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+      - ${PROXIMA_HAPROXY_SOCKET_DIR:-/run/haproxy}:/var/run/haproxy
+      - ${PROXIMA_HAPROXY_STATE_DIR:-/var/lib/haproxy}:/var/lib/haproxy
+    ulimits:
+      nofile:
+        soft: 200000
+        hard: 200000
+    networks:
+      - proxima-engine
+
+networks:
+  proxima-engine:
+    external: true
+    name: ${PROXIMA_ENGINE_NETWORK:-proxima-engine-network}

@@ -31,6 +31,7 @@ pub struct EngineMetrics {
     query_latency_le_100ms: AtomicU64,
     query_latency_le_500ms: AtomicU64,
     query_latency_le_1s: AtomicU64,
+    config_not_ready: std::sync::atomic::AtomicBool,
 }
 
 struct QueryStart {
@@ -90,6 +91,12 @@ pub fn global() -> Arc<EngineMetrics> {
 impl EngineMetrics {
     pub fn connection_accepted(&self) {
         self.accepted_connections.fetch_add(1, Ordering::Relaxed);
+    }
+    pub fn set_config_ready(&self, ready: bool) {
+        self.config_not_ready.store(!ready, Ordering::Relaxed);
+    }
+    pub fn config_ready(&self) -> bool {
+        !self.config_not_ready.load(Ordering::Relaxed)
     }
     pub fn connection_rejected(&self) {
         self.rejected_connections.fetch_add(1, Ordering::Relaxed);
@@ -281,6 +288,12 @@ pub async fn serve_listener(listener: TcpListener) -> io::Result<()> {
                 )
             } else if path == "/health" || path == "/healthz" {
                 ("200 OK", "text/plain; charset=utf-8", "ok\n".to_string())
+            } else if path == "/readyz" {
+                if global().config_ready() {
+                    ("200 OK", "text/plain; charset=utf-8", "ready\n".to_string())
+                } else {
+                    ("503 Service Unavailable", "text/plain; charset=utf-8", "configuration not ready\n".to_string())
+                }
             } else {
                 (
                     "404 Not Found",
@@ -299,6 +312,16 @@ pub async fn serve_listener(listener: TcpListener) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn readiness_fails_closed_until_configuration_reconciles() {
+        let metrics = EngineMetrics::default();
+        assert!(metrics.config_ready());
+        metrics.set_config_ready(false);
+        assert!(!metrics.config_ready());
+        metrics.set_config_ready(true);
+        assert!(metrics.config_ready());
+    }
+
     #[test]
     fn metrics_exposition_is_prometheus_compatible_and_tracks_sessions() {
         let metrics = EngineMetrics::default();

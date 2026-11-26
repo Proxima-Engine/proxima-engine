@@ -673,19 +673,29 @@ impl MongoCursorRegistry {
 }
 
 const SESSION_IDLE_TTL: std::time::Duration = std::time::Duration::from_secs(30 * 60);
-const MAX_SESSION_BINDINGS: usize = 100_000;
-
 struct SessionBinding {
     tenant_id: String,
     last_seen: std::time::Instant,
 }
 
-#[derive(Default)]
 pub struct MongoSessionRegistry {
     sessions: Mutex<HashMap<Vec<u8>, SessionBinding>>,
+    max_sessions: usize,
+}
+
+impl Default for MongoSessionRegistry {
+    fn default() -> Self {
+        Self::with_max_sessions(usize::MAX)
+    }
 }
 
 impl MongoSessionRegistry {
+    pub fn with_max_sessions(max_sessions: usize) -> Self {
+        Self {
+            sessions: Mutex::new(HashMap::new()),
+            max_sessions: max_sessions.max(1),
+        }
+    }
     fn key(lsid: &Document) -> Result<Vec<u8>, MongoPolicyError> {
         bson::to_vec(lsid)
             .map_err(|_| MongoPolicyError::InvalidCommand("lsid could not be serialized".into()))
@@ -714,7 +724,7 @@ impl MongoSessionRegistry {
                 Ok(())
             }
             None => {
-                if sessions.len() >= MAX_SESSION_BINDINGS {
+                if sessions.len() >= self.max_sessions {
                     return Err(MongoPolicyError::RegistryUnavailable);
                 }
                 sessions.insert(

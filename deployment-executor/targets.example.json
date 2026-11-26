@@ -3,12 +3,20 @@
     "project_dir": "/opt/proxima/node-a",
     "compose_file": "compose.customer.yaml",
     "state_dir": "/var/lib/agata-deployment-executor/node-a",
-    "allowed_versions": ["0.1.0", "0.1.1"]
+    "allowed_versions": ["0.1.0", "0.1.1"],
+    "haproxy_admin_socket": "/run/haproxy/admin.sock",
+    "haproxy_backend": "proxima_engine_nodes",
+    "haproxy_server_name": "engine-node-01",
+    "haproxy_server_state_file": "/var/lib/haproxy/server-state"
   },
   "00000000-0000-4000-8000-000000000002": {
     "project_dir": "/opt/proxima/node-b",
     "compose_file": "compose.customer.yaml",
     "state_dir": "/var/lib/agata-deployment-executor/node-b",
-    "allowed_versions": ["0.1.0"]
+    "allowed_versions": ["0.1.0"],
+    "haproxy_admin_socket": "/run/haproxy/admin.sock",
+    "haproxy_backend": "proxima_engine_nodes",
+    "haproxy_server_name": "engine-node-02",
+    "haproxy_server_state_file": "/var/lib/haproxy/server-state"
   }
 }

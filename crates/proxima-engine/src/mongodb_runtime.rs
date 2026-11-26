@@ -357,6 +357,20 @@ impl MongoRuntime {
                         .unwrap_or(256)
                         .to_string(),
                 ),
+                (
+                    "PROXIMA_MONGODB_MAX_SESSION_BINDINGS".into(),
+                    runtime
+                        .get("max_session_bindings")
+                        .and_then(Value::as_u64)
+                        .unwrap_or_else(|| {
+                            runtime
+                                .get("max_connections")
+                                .and_then(Value::as_u64)
+                                .unwrap_or(256)
+                                .saturating_mul(16)
+                        })
+                        .to_string(),
+                ),
                 ("RUST_LOG".into(), "proxima_engine=info".into()),
             ],
             readiness_addr: listen,
