@@ -103,10 +103,8 @@ impl SqlServerTdsConfig {
                 "SQL Server upstream host and TLS server name are required",
             ));
         }
-        if self.tenants.is_empty() || self.tenants.len() > 10_000 {
-            return Err(invalid(
-                "SQL Server tenant registry must contain 1..=10000 bindings",
-            ));
+        if self.tenants.is_empty() {
+            return Err(invalid("SQL Server tenant registry must contain at least one binding"));
         }
         let mut users = std::collections::HashSet::new();
         let mut databases = std::collections::HashSet::new();
