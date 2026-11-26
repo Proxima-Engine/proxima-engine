@@ -708,6 +708,31 @@ mod tests {
         assert_eq!(db, "AGATA_ACME");
     }
     #[test]
+    fn sqlserver_registry_accepts_more_than_ten_thousand_tenants() {
+        let tenants = (0..10_001)
+            .map(|index| TdsTenantBinding {
+                tenant_id: format!("tenant-{index}"),
+                username: format!("agata_tenant_{index}"),
+                database: format!("AGATA_{index}"),
+            })
+            .collect();
+        let config = SqlServerTdsConfig {
+            schema_version: 1,
+            provider_key: "sqlserver".into(),
+            listen_addr: "127.0.0.1:14330".into(),
+            upstream_host: "db.example".into(),
+            upstream_port: 1433,
+            upstream_server_name: "db.example".into(),
+            upstream_ca_pem: "ca".into(),
+            client_cert_pem: "cert".into(),
+            client_key_pem: "key".into(),
+            allow_non_loopback: false,
+            tenants,
+        };
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
     fn rejects_duplicate_or_unsafe_principals() {
         let mut c = SqlServerTdsConfig {
             schema_version: 1,
