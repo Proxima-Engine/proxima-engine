@@ -1,6 +1,6 @@
 # HAProxy TCP ingress for Proxima Engine
 
-This is a Layer-4 TCP ingress template for PostgreSQL-wire Engine nodes. It distributes new TCP sessions across stable, node-specific DNS names using least-connections and TCP health checks. Add one backend server line for each enrolled Engine node; there is no hard-coded node count in the product.
+This is a Layer-4 TCP ingress template for PostgreSQL-wire Engine nodes. It distributes new TCP sessions across stable, node-specific DNS names using least-connections. The backend listener uses TCP port 6432; health checks issue an HTTP request to each node's `/healthz` endpoint on port 9090. Add one backend server line for each enrolled Engine node; there is no hard-coded node count in the product.
 
 ## Deployment contract
 
@@ -9,7 +9,7 @@ This is a Layer-4 TCP ingress template for PostgreSQL-wire Engine nodes. It dist
 - Give every Engine replica its own node ID, one-time enrollment token, persistent identity file and state volume. Never share node identity or identity storage between replicas.
 - Configure the Engine's upstream target and tenant-signing material consistently through the customer's secret-management and deployment system.
 - Keep backend server names stable and unique. Map each Cloud node ID to its corresponding HAProxy server name in the customer deployment executor's `targets.json`.
-- The TCP health check verifies that the Engine listener accepts TCP. It is not a complete provider-readiness check. The orchestrator must separately evaluate the Engine health/readiness endpoint and provider connectivity before adding a node to service.
+- The `/healthz` check verifies Engine health, but it is not a complete provider-readiness check. The orchestrator must separately evaluate provider connectivity and capability before adding a node to service.
 - The reference deployment executor can drain a node when its target has `haproxy_admin_socket`, `haproxy_backend` and `haproxy_server_name` configured. It moves that exact server to `drain`, waits for its current-session count to reach zero, and leaves the Engine running in the drained state. A timeout keeps the node drained and does not stop the Engine.
 - To return a healthy node to service, the executor's `running` action passes the Engine health check and changes its HAProxy server state back to `ready`.
 - Set host/container file-descriptor and HAProxy `maxconn` limits from measured capacity. The sample `maxconn 100000` is a configurable ingress ceiling, not a performance claim.
