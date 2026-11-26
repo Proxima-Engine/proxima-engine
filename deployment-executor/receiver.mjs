@@ -81,6 +81,12 @@ if (process.env.PROXIMA_DEPLOYMENT_TARGETS_FILE?.trim()) {
   targets.set(nodeId, { projectDir, composeFile, stateDir, stateFile: path.join(stateDir, "completed.json"), allowedVersions, haproxyAdminSocket, haproxyBackend, haproxyServerName, haproxyServerStateFile });
 }
 if (targets.size === 0) throw new Error("At least one deployment target must be configured.");
+const ingressTargets = [...targets.values()].filter((target) => target.haproxyAdminSocket);
+const adminSockets = new Set(ingressTargets.map((target) => target.haproxyAdminSocket));
+const serverStateFiles = new Set(ingressTargets.map((target) => target.haproxyServerStateFile));
+if (adminSockets.size > 1 || serverStateFiles.size > 1) {
+  throw new Error("A single deployment executor target map must use one shared HAProxy admin socket and server-state file.");
+}
 const drainTimeoutMs = Number(process.env.PROXIMA_DRAIN_TIMEOUT_MS || 300000);
 const drainPollMs = Number(process.env.PROXIMA_DRAIN_POLL_MS || 1000);
 if (!Number.isInteger(drainTimeoutMs) || drainTimeoutMs < 1000 || drainTimeoutMs > 1800000) {
