@@ -12,7 +12,7 @@ The Engine reads settings from its process environment. Defaults and validation 
 | `PROXIMA_TENANT_SIGNING_KEY_FILE` | Unset | Path to a mounted secret file containing the tenant HMAC key; takes precedence over the direct environment variable |
 | `PROXIMA_TENANT_ROLE_PREFIX` | `proxima_tenant_` | Prefix for tenant PostgreSQL roles; ASCII letters, digits, and underscores only |
 | `PROXIMA_UPSTREAM_CONNECT_TIMEOUT_MS` | `10000` | Upstream connect timeout; must be positive |
-| `PROXIMA_MAX_CONNECTIONS` | `4096` | Per-Engine-process simultaneous client connection admission limit; must be positive |
+| `PROXIMA_MAX_CONNECTIONS` | `4096` | Per-Engine-process simultaneous client connection admission limit; any positive integer is accepted, subject to host and upstream capacity |
 | `PROXIMA_TLS_CERT_FILE` | Unset | Incoming client TLS certificate (PEM) |
 | `PROXIMA_TLS_KEY_FILE` | Unset | Incoming client TLS private key (PEM); must be set with the certificate |
 | `PROXIMA_TLS_REQUIRE_CLIENT` | `false` | Reject plaintext PostgreSQL clients when true; requires the certificate/key pair |
